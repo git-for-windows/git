@@ -406,7 +406,7 @@ int mingw_fstat(int fd, struct stat *buf);
 #ifdef lstat
 #undef lstat
 #endif
-#define lstat mingw_lstat
+extern int (*lstat)(const char *file_name, struct stat *buf);
 
 
 int mingw_utimensat(int fd, const char *path, const struct timespec times[2], int flag);
