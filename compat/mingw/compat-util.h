@@ -3,6 +3,8 @@
 
 #include "posix.h"
 
+extern int core_fscache;
+
 struct config_context;
 int mingw_core_config(const char *var, const char *value,
 		      const struct config_context *ctx, void *cb);
