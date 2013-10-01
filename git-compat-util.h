@@ -158,9 +158,11 @@ static inline int is_xplatform_dir_sep(int c)
 /* pull in Windows compatibility stuff */
 #include "compat/win32/path-utils.h"
 #include "compat/mingw.h"
+#include "compat/win32/fscache.h"
 #elif defined(_MSC_VER)
 #include "compat/win32/path-utils.h"
 #include "compat/msvc.h"
+#include "compat/win32/fscache.h"
 #endif
 
 /* used on Mac OS X */
@@ -1103,6 +1105,9 @@ static inline int is_missing_file_error(int errno_)
  */
 #ifndef enable_fscache
 #define enable_fscache(x) /* noop */
+#endif
+#ifndef flush_fscache
+#define flush_fscache() /* noop */
 #endif
 
 int cmd_main(int, const char **);
