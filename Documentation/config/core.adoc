@@ -774,6 +774,15 @@ core.gvfs::
 		Bit value 4
 		Normally git write-tree ensures that the objects referenced by the
 		directory exist in the object database. This option disables this check.
+	GVFS_NO_DELETE_OUTSIDE_SPARSECHECKOUT::
+		Bit value 8
+		When marking entries to remove from the index and the working
+		directory this option will take into account what the
+		skip-worktree bit was set to so that if the entry has the
+		skip-worktree bit set it will not be removed from the working
+		directory.  This will allow virtualized working directories to
+		detect the change to HEAD and use the new commit tree to show
+		the files that are in the working directory.
 --
 
 core.sparseCheckout::

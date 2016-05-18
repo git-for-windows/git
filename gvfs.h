@@ -13,6 +13,7 @@ struct repository;
  */
 #define GVFS_SKIP_SHA_ON_INDEX                      (1 << 0)
 #define GVFS_MISSING_OK                             (1 << 2)
+#define GVFS_NO_DELETE_OUTSIDE_SPARSECHECKOUT       (1 << 3)
 
 int gvfs_config_is_set(struct repository *r, int mask);
 
