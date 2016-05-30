@@ -783,6 +783,15 @@ core.gvfs::
 		directory.  This will allow virtualized working directories to
 		detect the change to HEAD and use the new commit tree to show
 		the files that are in the working directory.
+	GVFS_FETCH_SKIP_REACHABILITY_AND_UPLOADPACK::
+		Bit value 16
+		While performing a fetch with a virtual file system we know
+		that there will be missing objects and we don't want to download
+		them just because of the reachability of the commits.  We also
+		don't want to download a pack file with commits, trees, and blobs
+		since these will be downloaded on demand.  This flag will skip the
+		checks on the reachability of objects during a fetch as well as
+		the upload pack so that extraneous objects don't get downloaded.
 --
 
 core.sparseCheckout::
