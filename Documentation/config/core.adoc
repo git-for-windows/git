@@ -792,6 +792,15 @@ core.gvfs::
 		since these will be downloaded on demand.  This flag will skip the
 		checks on the reachability of objects during a fetch as well as
 		the upload pack so that extraneous objects don't get downloaded.
+	GVFS_BLOCK_FILTERS_AND_EOL_CONVERSIONS::
+		Bit value 64
+		With a virtual file system we only know the file size before any
+		CRLF or smudge/clean filters processing is done on the client.
+		To prevent file corruption due to truncation or expansion with
+		garbage at the end, these filters must not run when the file
+		is first accessed and brought down to the client. Git.exe can't
+		currently tell the first access vs subsequent accesses so this
+		flag just blocks them from occurring at all.
 --
 
 core.sparseCheckout::
