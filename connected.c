@@ -1,6 +1,7 @@
 #define USE_THE_REPOSITORY_VARIABLE
 
 #include "git-compat-util.h"
+#include "environment.h"
 #include "gettext.h"
 #include "gvfs.h"
 #include "hex.h"
@@ -51,6 +52,8 @@ int check_connected(oid_iterate_fn fn, void *cb_data,
 	 * upload pack.
 	 */
 	if (gvfs_config_is_set(the_repository, GVFS_FETCH_SKIP_REACHABILITY_AND_UPLOADPACK))
+		return 0;
+	if (gvfs_virtualize_objects(the_repository))
 		return 0;
 
 	if (!opt)
