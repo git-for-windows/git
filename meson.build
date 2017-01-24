@@ -352,6 +352,7 @@ libgit_sources = [
   'gpg-interface.c',
   'graph.c',
   'grep.c',
+  'gvfs.c',
   'hash-lookup.c',
   'hash.c',
   'hashmap.c',

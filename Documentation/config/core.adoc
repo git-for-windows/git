@@ -761,6 +761,9 @@ core.multiPackIndex::
 	single index. See linkgit:git-multi-pack-index[1] for more
 	information. Defaults to true.
 
+core.gvfs::
+	Enable the features needed for GVFS.
+
 core.sparseCheckout::
 	Enable "sparse checkout" feature. See linkgit:git-sparse-checkout[1]
 	for more information.
