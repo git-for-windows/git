@@ -770,6 +770,10 @@ core.gvfs::
 	GVFS_SKIP_SHA_ON_INDEX::
 		Bit value 1
 		Disables the calculation of the sha when writing the index
+	GVFS_MISSING_OK::
+		Bit value 4
+		Normally git write-tree ensures that the objects referenced by the
+		directory exist in the object database. This option disables this check.
 --
 
 core.sparseCheckout::
