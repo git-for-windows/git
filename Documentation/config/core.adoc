@@ -762,7 +762,15 @@ core.multiPackIndex::
 	information. Defaults to true.
 
 core.gvfs::
-	Enable the features needed for GVFS.
+	Enable the features needed for GVFS.  This value can be set to true
+	to indicate all features should be turned on or the bit values listed
+	below can be used to turn on specific features.
++
+--
+	GVFS_SKIP_SHA_ON_INDEX::
+		Bit value 1
+		Disables the calculation of the sha when writing the index
+--
 
 core.sparseCheckout::
 	Enable "sparse checkout" feature. See linkgit:git-sparse-checkout[1]
