@@ -937,6 +937,7 @@ integration_tests = [
   't7612-merge-verify-signatures.sh',
   't7614-merge-signoff.sh',
   't7615-diff-algo-with-mergy-operations.sh',
+  't7616-merge-sparse-checkout.sh',
   't7700-repack.sh',
   't7701-repack-unpack-unreachable.sh',
   't7702-repack-cyclic-alternate.sh',
