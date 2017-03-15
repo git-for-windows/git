@@ -15,6 +15,7 @@
 #include "environment.h"
 #include "fsck.h"
 #include "gettext.h"
+#include "gvfs.h"
 #include "hex.h"
 #include "loose.h"
 #include "object-file-convert.h"
@@ -95,8 +96,17 @@ static int check_and_freshen_source(struct odb_source *source,
 				    int freshen)
 {
 	static struct strbuf path = STRBUF_INIT;
+	int ret, tried_hook = 0;
+
 	odb_loose_path(source, &path, oid);
-	return check_and_freshen_file(path.buf, freshen);
+retry:
+	ret = check_and_freshen_file(path.buf, freshen);
+	if (!ret && gvfs_virtualize_objects(source->odb->repo) && !tried_hook) {
+		tried_hook = 1;
+		if (!read_object_process(source->odb->repo, oid))
+			goto retry;
+	}
+	return ret;
 }
 
 int has_loose_object(struct odb_source *source,

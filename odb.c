@@ -16,13 +16,16 @@
 #include "odb.h"
 #include "packfile.h"
 #include "path.h"
+#include "pkt-line.h"
 #include "promisor-remote.h"
 #include "quote.h"
 #include "replace-object.h"
 #include "run-command.h"
 #include "setup.h"
+#include "sigchain.h"
 #include "strbuf.h"
 #include "strvec.h"
+#include "sub-process.h"
 #include "submodule.h"
 #include "trace2.h"
 #include "trace.h"
@@ -610,6 +613,119 @@ int odb_has_alternates(struct object_database *odb)
 	return !!odb->sources->next;
 }
 
+#define CAP_GET    (1u<<0)
+
+static int subprocess_map_initialized;
+static struct hashmap subprocess_map;
+
+struct read_object_process {
+	struct subprocess_entry subprocess;
+	unsigned int supported_capabilities;
+};
+
+static int start_read_object_fn(struct subprocess_entry *subprocess)
+{
+	struct read_object_process *entry = (struct read_object_process *)subprocess;
+	static int versions[] = {1, 0};
+	static struct subprocess_capability capabilities[] = {
+		{ "get", CAP_GET },
+		{ NULL, 0 }
+	};
+
+	return subprocess_handshake(subprocess, "git-read-object", versions,
+				    NULL, capabilities,
+				    &entry->supported_capabilities);
+}
+
+int read_object_process(struct repository *r, const struct object_id *oid)
+{
+	int err;
+	struct read_object_process *entry;
+	struct child_process *process;
+	struct strbuf status = STRBUF_INIT;
+	const char *cmd = find_hook(r, "read-object");
+	uint64_t start;
+
+	if (!cmd)
+		die(_("could not find the `read-object` hook"));
+
+	start = getnanotime();
+
+	if (!subprocess_map_initialized) {
+		subprocess_map_initialized = 1;
+		hashmap_init(&subprocess_map, (hashmap_cmp_fn)cmd2process_cmp,
+			     NULL, 0);
+		entry = NULL;
+	} else {
+		entry = (struct read_object_process *) subprocess_find_entry(&subprocess_map, cmd);
+	}
+
+	if (!entry) {
+		entry = xmalloc(sizeof(*entry));
+		entry->supported_capabilities = 0;
+
+		if (subprocess_start(&subprocess_map, &entry->subprocess, cmd,
+				     start_read_object_fn)) {
+			free(entry);
+			return -1;
+		}
+	}
+	process = &entry->subprocess.process;
+
+	if (!(CAP_GET & entry->supported_capabilities))
+		return -1;
+
+	sigchain_push(SIGPIPE, SIG_IGN);
+
+	err = packet_write_fmt_gently(process->in, "command=get\n");
+	if (err)
+		goto done;
+
+	err = packet_write_fmt_gently(process->in, "sha1=%s\n", oid_to_hex(oid));
+	if (err)
+		goto done;
+
+	err = packet_flush_gently(process->in);
+	if (err)
+		goto done;
+
+	err = subprocess_read_status(process->out, &status);
+	err = err ? err : strcmp(status.buf, "success");
+
+done:
+	sigchain_pop(SIGPIPE);
+
+	if (err || errno == EPIPE) {
+		err = err ? err : errno;
+		if (!strcmp(status.buf, "error")) {
+			/* The process signaled a problem with the file. */
+		}
+		else if (!strcmp(status.buf, "abort")) {
+			/*
+			 * The process signaled a permanent problem. Don't try to read
+			 * objects with the same command for the lifetime of the current
+			 * Git process.
+			 */
+			entry->supported_capabilities &= ~CAP_GET;
+		}
+		else {
+			/*
+			 * Something went wrong with the read-object process.
+			 * Force shutdown and restart if needed.
+			 */
+			error("external process '%s' failed", cmd);
+			subprocess_stop(&subprocess_map,
+					(struct subprocess_entry *)entry);
+			free(entry);
+		}
+	}
+
+	trace_performance_since(start, "read_object_process");
+
+	strbuf_release(&status);
+	return err;
+}
+
 int obj_read_use_lock = 0;
 pthread_mutex_t obj_read_mutex;
 
@@ -629,20 +745,6 @@ void disable_obj_read_lock(void)
 
 	obj_read_use_lock = 0;
 	pthread_mutex_destroy(&obj_read_mutex);
-}
-
-static int run_read_object_hook(struct repository *r, const struct object_id *oid)
-{
-	struct run_hooks_opt opt = RUN_HOOKS_OPT_INIT;
-	int ret;
-	uint64_t start;
-
-	start = getnanotime();
-	strvec_push(&opt.args, oid_to_hex(oid));
-	ret = run_hooks_opt(r, "read-object", &opt);
-	trace_performance_since(start, "run_read_object_hook");
-
-	return ret;
 }
 
 int fetch_if_missing = 1;
@@ -718,7 +820,7 @@ retry:
 				break;
 			if (gvfs_virtualize_objects(odb->repo) && !tried_hook) {
 				tried_hook = 1;
-				if (!run_read_object_hook(odb->repo, oid))
+				if (!read_object_process(odb->repo, oid))
 					goto retry;
 			}
 		}

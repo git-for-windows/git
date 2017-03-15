@@ -489,4 +489,6 @@ static inline int odb_write_object(struct object_database *odb,
 	return odb_write_object_ext(odb, buf, len, type, oid, NULL, 0);
 }
 
+int read_object_process(struct repository *r, const struct object_id *oid);
+
 #endif /* ODB_H */
