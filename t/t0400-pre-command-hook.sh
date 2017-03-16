@@ -31,4 +31,27 @@ test_expect_success 'with failing hook' '
 	test_path_is_missing "$(cat .git/pre-command.out)"
 '
 
+test_expect_success 'in a subdirectory' '
+	echo touch i-was-here | write_script .git/hooks/pre-command &&
+	mkdir sub &&
+	(
+		cd sub &&
+		git version
+	) &&
+	test_path_is_file sub/i-was-here
+'
+
+test_expect_success 'in a subdirectory, using an alias' '
+	git reset --hard &&
+	echo "echo \"\$@; \$(pwd)\" >>log" |
+	write_script .git/hooks/pre-command &&
+	mkdir -p sub &&
+	(
+		cd sub &&
+		git -c alias.v="version" v
+	) &&
+	test_path_is_missing log &&
+	test_line_count = 2 sub/log
+'
+
 test_done
