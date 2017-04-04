@@ -50,9 +50,15 @@ then
 			test -d "${GIT_DIR:-.git}" ||
 			test -f "$SOURCE_DIR"/.git;
 		} &&
-		VN=$(git -C "$SOURCE_DIR" describe --dirty --match="v[0-9]*" 2>/dev/null) &&
+		VN=$(git -C "$SOURCE_DIR" describe --dirty --match="v[0-9]*vfs*" 2>/dev/null) &&
 		case "$VN" in
 		*$LF*) (exit 1) ;;
+		v[0-9]*)
+			if test "${VN%%.vfs.*}" != "${DEF_VER%%.vfs.*}"
+			then
+				echo "Found version $VN, which is not based on $DEF_VER" >&2
+				exit 1
+			fi ;;
 		esac
 	then
 		VN=$(echo "$VN" | sed -e 's/-/./g');
