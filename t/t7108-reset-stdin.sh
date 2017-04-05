@@ -29,4 +29,13 @@ test_expect_success '--stdin requires --mixed' '
 	git reset --mixed --stdin <list
 '
 
+
+test_expect_success '--stdin trims carriage returns' '
+	test_commit endline &&
+	git rm endline.t &&
+	printf "endline.t\r\n" >list &&
+	git reset --stdin <list &&
+	test endline.t = "$(git ls-files endline.t)"
+'
+
 test_done
