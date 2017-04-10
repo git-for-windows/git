@@ -13,7 +13,8 @@ test_expect_success 'with no hook' '
 test_expect_success 'with succeeding hook' '
 	mkdir -p .git/hooks &&
 	write_script .git/hooks/pre-command <<-EOF &&
-	echo "\$*" >\$(git rev-parse --git-dir)/pre-command.out
+	echo "\$*" | sed "s/ --git-pid=[0-9]*//" \
+		>\$(git rev-parse --git-dir)/pre-command.out
 	EOF
 	echo "second" >> file &&
 	git add file &&

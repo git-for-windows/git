@@ -488,6 +488,7 @@ static int run_pre_command_hook(struct repository *r, const char **argv)
 
 	/* call the hook proc */
 	strvec_pushv(&sargv, argv);
+	strvec_pushf(&sargv, "--git-pid=%"PRIuMAX, (uintmax_t)getpid());
 	strvec_pushv(&opt.args, sargv.v);
 	ret = run_hooks_opt(r, "pre-command", &opt);
 
