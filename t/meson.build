@@ -919,6 +919,8 @@ integration_tests = [
   't7519-status-fsmonitor.sh',
   't7520-ignored-hook-warning.sh',
   't7521-ignored-mode.sh',
+  't7522-serialized-status.sh',
+  't7523-status-complete-untracked.sh',
   't7524-commit-summary.sh',
   't7525-status-rename.sh',
   't7526-commit-pathspec-file.sh',

@@ -540,6 +540,8 @@ libgit_sources = [
   'write-or-die.c',
   'ws.c',
   'wt-status.c',
+  'wt-status-deserialize.c',
+  'wt-status-serialize.c',
   'xdiff-interface.c',
   'xdiff/xdiffi.c',
   'xdiff/xemit.c',

@@ -792,6 +792,9 @@ static void wt_status_collect_untracked(struct wt_status *s)
 	if (s->show_untracked_files != SHOW_ALL_UNTRACKED_FILES)
 		dir.flags |=
 			DIR_SHOW_OTHER_DIRECTORIES | DIR_HIDE_EMPTY_DIRECTORIES;
+	if (s->show_untracked_files == SHOW_COMPLETE_UNTRACKED_FILES)
+		dir.flags |= DIR_KEEP_UNTRACKED_CONTENTS;
+
 	if (s->show_ignored_mode) {
 		dir.flags |= DIR_SHOW_IGNORED_TOO;
 
@@ -2619,6 +2622,9 @@ void wt_status_print(struct wt_status *s)
 	case STATUS_FORMAT_NONE:
 	case STATUS_FORMAT_LONG:
 		wt_longstatus_print(s);
+		break;
+	case STATUS_FORMAT_SERIALIZE_V1:
+		wt_status_serialize_v1(s);
 		break;
 	}
 

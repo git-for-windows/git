@@ -166,6 +166,70 @@ static int opt_parse_porcelain(const struct option *opt, const char *arg, int un
 	return 0;
 }
 
+static int do_serialize = 0;
+static int do_implicit_deserialize = 0;
+static int do_explicit_deserialize = 0;
+static char *deserialize_path = NULL;
+
+/*
+ * --serialize | --serialize=1 | --serialize=v1
+ *
+ * Request that we serialize our output rather than printing in
+ * any of the established formats.  Optionally specify serialization
+ * version.
+ */
+static int opt_parse_serialize(const struct option *opt, const char *arg, int unset)
+{
+	enum wt_status_format *value = (enum wt_status_format *)opt->value;
+	if (unset || !arg)
+		*value = STATUS_FORMAT_SERIALIZE_V1;
+	else if (!strcmp(arg, "v1") || !strcmp(arg, "1"))
+		*value = STATUS_FORMAT_SERIALIZE_V1;
+	else
+		die("unsupported serialize version '%s'", arg);
+
+	if (do_explicit_deserialize)
+		die("cannot mix --serialize and --deserialize");
+	do_implicit_deserialize = 0;
+
+	do_serialize = 1;
+	return 0;
+}
+
+/*
+ * --deserialize | --deserialize=<path> |
+ * --no-deserialize
+ *
+ * Request that we deserialize status data from some existing resource
+ * rather than performing a status scan.
+ *
+ * The input source can come from stdin or a path given here -- or be
+ * inherited from the config settings.
+ */
+static int opt_parse_deserialize(const struct option *opt UNUSED, const char *arg, int unset)
+{
+	if (unset) {
+		do_implicit_deserialize = 0;
+		do_explicit_deserialize = 0;
+	} else {
+		if (do_serialize)
+			die("cannot mix --serialize and --deserialize");
+		if (arg) {
+			/* override config or stdin */
+			free(deserialize_path);
+			deserialize_path = xstrdup(arg);
+		}
+		if (deserialize_path && *deserialize_path
+		    && (access(deserialize_path, R_OK) != 0))
+			die("cannot find serialization file '%s'",
+			    deserialize_path);
+
+		do_explicit_deserialize = 1;
+	}
+
+	return 0;
+}
+
 static int opt_parse_m(const struct option *opt, const char *arg, int unset)
 {
 	struct strbuf *buf = opt->value;
@@ -1208,6 +1272,8 @@ static enum untracked_status_type parse_untracked_setting_name(const char *u)
 		return SHOW_NORMAL_UNTRACKED_FILES;
 	else if (!strcmp(u, "all"))
 		return SHOW_ALL_UNTRACKED_FILES;
+	else if (!strcmp(u,"complete"))
+		return SHOW_COMPLETE_UNTRACKED_FILES;
 	else
 		return SHOW_UNTRACKED_FILES_ERROR;
 }
@@ -1503,6 +1569,19 @@ static int git_status_config(const char *k, const char *v,
 		s->relative_paths = git_config_bool(k, v);
 		return 0;
 	}
+	if (!strcmp(k, "status.deserializepath")) {
+		/*
+		 * Automatically assume deserialization if this is
+		 * set in the config and the file exists.  Do not
+		 * complain if the file does not exist, because we
+		 * silently fall back to normal mode.
+		 */
+		if (v && *v && access(v, R_OK) == 0) {
+			do_implicit_deserialize = 1;
+			deserialize_path = xstrdup(v);
+		}
+		return 0;
+	}
 	if (!strcmp(k, "status.showuntrackedfiles")) {
 		enum untracked_status_type u;
 
@@ -1542,7 +1621,8 @@ struct repository *repo UNUSED)
 	static const char *rename_score_arg = (const char *)-1;
 	static struct wt_status s;
 	unsigned int progress_flag = 0;
-	int fd;
+	int try_deserialize;
+	int fd = -1;
 	struct object_id oid;
 	static struct option builtin_status_options[] = {
 		OPT__VERBOSE(&verbose, N_("be verbose")),
@@ -1557,6 +1637,12 @@ struct repository *repo UNUSED)
 		OPT_CALLBACK_F(0, "porcelain", &status_format,
 		  N_("version"), N_("machine-readable output"),
 		  PARSE_OPT_OPTARG, opt_parse_porcelain),
+		OPT_CALLBACK_F(0, "serialize", &status_format,
+		  N_("version"), N_("serialize raw status data to stdout"),
+		  PARSE_OPT_OPTARG | PARSE_OPT_NONEG, opt_parse_serialize),
+		OPT_CALLBACK_F(0, "deserialize", NULL,
+		  N_("path"), N_("deserialize raw status data from file"),
+		  PARSE_OPT_OPTARG, opt_parse_deserialize),
 		OPT_SET_INT(0, "long", &status_format,
 			    N_("show status in long format (default)"),
 			    STATUS_FORMAT_LONG),
@@ -1618,9 +1704,25 @@ struct repository *repo UNUSED)
 	    s.show_untracked_files == SHOW_NO_UNTRACKED_FILES)
 		die(_("Unsupported combination of ignored and untracked-files arguments"));
 
+	if (s.show_untracked_files == SHOW_COMPLETE_UNTRACKED_FILES &&
+	    s.show_ignored_mode == SHOW_NO_IGNORED)
+		die(_("Complete Untracked only supported with ignored files"));
+
 	parse_pathspec(&s.pathspec, 0,
 		       PATHSPEC_PREFER_FULL,
 		       prefix, argv);
+
+	/*
+	 * If we want to try to deserialize status data from a cache file,
+	 * we need to re-order the initialization code.  The problem is that
+	 * this makes for a very nasty diff and causes merge conflicts as we
+	 * carry it forward.  And it easy to mess up the merge, so we
+	 * duplicate some code here to hopefully reduce conflicts.
+	 */
+	try_deserialize = (!do_serialize &&
+			   (do_implicit_deserialize || do_explicit_deserialize));
+	if (try_deserialize)
+		goto skip_init;
 
 	enable_fscache(0);
 	if (status_format != STATUS_FORMAT_PORCELAIN &&
@@ -1636,6 +1738,7 @@ struct repository *repo UNUSED)
 	else
 		fd = -1;
 
+skip_init:
 	s.is_initial = repo_get_oid(the_repository, s.reference, &oid) ? 1 : 0;
 	if (!s.is_initial)
 		oidcpy(&s.oid_commit, &oid);
@@ -1650,6 +1753,24 @@ struct repository *repo UNUSED)
 			s.detect_rename = DIFF_DETECT_RENAME;
 		if (rename_score_arg)
 			s.rename_score = parse_rename_score(&rename_score_arg);
+	}
+
+	if (try_deserialize) {
+		if (s.relative_paths)
+			s.prefix = prefix;
+
+		if (wt_status_deserialize(&s, deserialize_path) == DESERIALIZE_OK)
+			return 0;
+
+		/* deserialize failed, so force the initialization we skipped above. */
+		enable_fscache(1);
+		repo_read_index_preload(the_repository, &s.pathspec, 0);
+		refresh_index(the_repository->index, REFRESH_QUIET|REFRESH_UNMERGED, &s.pathspec, NULL, NULL);
+
+		if (use_optional_locks())
+			fd = repo_hold_locked_index(the_repository, &index_lock, 0);
+		else
+			fd = -1;
 	}
 
 	wt_status_collect(&s);

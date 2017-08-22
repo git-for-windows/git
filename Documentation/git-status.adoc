@@ -151,6 +151,19 @@ ignored, then the directory is not shown, but all contents are shown.
 	threshold.
 	See also linkgit:git-diff[1] `--find-renames`.
 
+--serialize[=<version>]::
+	(EXPERIMENTAL) Serialize raw status results to stdout in a
+	format suitable for use by `--deserialize`.  Valid values for
+	`<version>` are "1" and "v1".
+
+--deserialize[=<path>]::
+	(EXPERIMENTAL) Deserialize raw status results from a file or
+	stdin rather than scanning the worktree.  If `<path>` is omitted
+	and `status.deserializePath` is unset, input is read from stdin.
+--no-deserialize::
+	(EXPERIMENTAL) Disable implicit deserialization of status results
+	from the value of `status.deserializePath`.
+
 <pathspec>...::
 	See the 'pathspec' entry in linkgit:gitglossary[7].
 
@@ -422,6 +435,26 @@ byte.
 Without the `-z` option, pathnames with "unusual" characters are
 quoted as explained for the configuration variable `core.quotePath`
 (see linkgit:git-config[1]).
+
+
+SERIALIZATION and DESERIALIZATION (EXPERIMENTAL)
+------------------------------------------------
+
+The `--serialize` option allows git to cache the result of a
+possibly time-consuming status scan to a binary file.  A local
+service/daemon watching file system events could use this to
+periodically pre-compute a fresh status result.
+
+Interactive users could then use `--deserialize` to simply
+(and immediately) print the last-known-good result without
+waiting for the status scan.
+
+The binary serialization file format includes some worktree state
+information allowing `--deserialize` to reject the cached data
+and force a normal status scan if, for example, the commit, branch,
+or status modes/options change.  The format cannot, however, indicate
+when the cached data is otherwise stale -- that coordination belongs
+to the task driving the serializations.
 
 
 CONFIGURATION

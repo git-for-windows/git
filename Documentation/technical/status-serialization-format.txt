@@ -1,0 +1,107 @@
+Git status serialization format
+===============================
+
+Git status serialization enables git to dump the results of a status scan
+to a binary file.  This file can then be loaded by later status invocations
+to print the cached status results.
+
+The file contains the essential fields from:
+() the index
+() the "struct wt_status" for the overall results
+() the contents of "struct wt_status_change_data" for tracked changed files
+() the list of untracked and ignored files
+
+Version 1 Format:
+=================
+
+The V1 file begins with a required header section followed by optional
+sections for each type of item (changed, untracked, ignored).  Individual
+item sections are only present if necessary.  Each item section begins
+with an item-type header with the number of items in the section.
+
+Each "line" in the format is encoded using pkt-line with a final LF.
+Flush packets are used to terminate sections.
+
+-----------------
+PKT-LINE("version" SP "1")
+<v1-header-section>
+[<v1-changed-item-section>]
+[<v1-untracked-item-section>]
+[<v1-ignored-item-section>]
+-----------------
+
+
+V1 Header
+---------
+
+The v1-header-section fields are taken directly from "struct wt_status".
+Each field is printed on a separate pkt-line.  Lines for NULL string
+values are omitted.  All integers are printed with "%d".  OIDs are
+printed in hex.
+
+v1-header-section    = <v1-index-headers>
+		       <v1-wt-status-headers>
+		       PKT-LINE(<flush>)
+
+v1-index-headers     = PKT-LINE("index_mtime" SP <sec> SP <nsec> LF)
+
+v1-wt-status-headers = PKT-LINE("is_initial" SP <integer> LF)
+		       [ PKT-LINE("branch" SP <branch-name> LF) ]
+		       [ PKT-LINE("reference" SP <reference-name> LF) ]
+		       PKT-LINE("show_ignored_files" SP <integer> LF)
+		       PKT-LINE("show_untracked_files" SP <integer> LF)
+		       PKT-LINE("show_ignored_directory" SP <integer> LF)
+		       [ PKT-LINE("ignore_submodule_arg" SP <string> LF) ]
+		       PKT-LINE("detect_rename" SP <integer> LF)
+		       PKT-LINE("rename_score" SP <integer> LF)
+		       PKT-LINE("rename_limit" SP <integer> LF)
+		       PKT-LINE("detect_break" SP <integer> LF)
+		       PKT-LINE("sha1_commit" SP <oid> LF)
+		       PKT-LINE("committable" SP <integer> LF)
+		       PKT-LINE("workdir_dirty" SP <integer> LF)
+
+
+V1 Changed Items
+----------------
+
+The v1-changed-item-section lists all of the changed items with one
+item per pkt-line.  Each pkt-line contains:  a binary block of data
+from "struct wt_status_serialize_data_fixed" in a fixed header where
+integers are in network byte order and OIDs are in raw (non-hex) form.
+This is followed by one or two raw pathnames (not c-quoted) with NUL
+terminators (both NULs are always present even if there is no rename).
+
+v1-changed-item-section = PKT-LINE("changed" SP <count> LF)
+			  [ PKT-LINE(<changed_item> LF) ]+
+			  PKT-LINE(<flush>)
+
+changed_item = <byte[4] worktree_status>
+	       <byte[4] index_status>
+	       <byte[4] stagemask>
+	       <byte[4] score>
+	       <byte[4] mode_head>
+	       <byte[4] mode_index>
+	       <byte[4] mode_worktree>
+	       <byte[4] dirty_submodule>
+	       <byte[4] new_submodule_commits>
+	       <byte[20] oid_head>
+	       <byte[20] oid_index>
+	       <byte[*] path>
+	       NUL
+	       [ <byte[*] src_path> ]
+	       NUL
+
+
+V1 Untracked and Ignored Items
+------------------------------
+
+These sections are simple lists of pathnames.  They ARE NOT
+c-quoted.
+
+v1-untracked-item-section = PKT-LINE("untracked" SP <count> LF)
+			    [ PKT-LINE(<pathname> LF) ]+
+			    PKT-LINE(<flush>)
+
+v1-ignored-item-section = PKT-LINE("ignored" SP <count> LF)
+			  [ PKT-LINE(<pathname> LF) ]+
+			  PKT-LINE(<flush>)
