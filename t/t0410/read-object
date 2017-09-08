@@ -108,6 +108,10 @@ while (1) {
 		system ('git --git-dir="' . $DIR . '" cat-file blob ' . $sha1 . ' | git -c core.virtualizeobjects=false hash-object -w --stdin >/dev/null 2>&1');
 		packet_txt_write(($?) ? "status=error" : "status=success");
 		packet_flush();
+
+		open my $log, '>>.git/read-object-hook.log';
+		print $log "Read object $sha1, exit code $?\n";
+		close $log;
 	} else {
 		die "bad command '$command'";
 	}

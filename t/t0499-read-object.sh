@@ -26,5 +26,12 @@ test_expect_success 'invalid blobs generate errors' '
 	 test_must_fail git cat-file blob "invalid")
 '
 
+test_expect_success 'read-object-hook is bypassed when writing objects' '
+	(cd guest-repo &&
+	 echo hello >hello.txt &&
+	 git add hello.txt &&
+	 hash="$(git rev-parse --verify :hello.txt)" &&
+	 ! grep "$hash" .git/read-object-hook.log)
+'
 
 test_done
