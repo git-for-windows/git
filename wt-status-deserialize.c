@@ -524,6 +524,7 @@ static int wt_deserialize_fd(const struct wt_status *cmd_s, struct wt_status *de
 	/* show_branch */
 	/* show_stash */
 	/* hints */
+	/* ahead_behind_flags */
 	if (cmd_s->detect_rename != des_s->detect_rename) {
 		trace_printf_key(&trace_deserialize, "reject: detect_rename");
 		return DESERIALIZE_ERR;
@@ -562,6 +563,7 @@ static int wt_deserialize_fd(const struct wt_status *cmd_s, struct wt_status *de
 	des_s->show_branch = cmd_s->show_branch;
 	des_s->show_stash = cmd_s->show_stash;
 	/* hints */
+	des_s->ahead_behind_flags = cmd_s->ahead_behind_flags;
 	des_s->status_format = cmd_s->status_format;
 	des_s->fp = cmd_s->fp;
 	if (cmd_s->prefix && *cmd_s->prefix)
@@ -569,7 +571,6 @@ static int wt_deserialize_fd(const struct wt_status *cmd_s, struct wt_status *de
 
 	return DESERIALIZE_OK;
 }
-
 
 /*
  * Read raw serialized status data from the given file

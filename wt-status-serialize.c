@@ -52,6 +52,7 @@ static void wt_serialize_v1_header(struct wt_status *s, int fd)
 	/* show_branch */
 	/* show_stash */
 	packet_write_fmt(fd, "hints %d\n", s->hints);
+	/* ahead_behind_flags */
 	packet_write_fmt(fd, "detect_rename %d\n", s->detect_rename);
 	packet_write_fmt(fd, "rename_score %d\n", s->rename_score);
 	packet_write_fmt(fd, "rename_limit %d\n", s->rename_limit);
