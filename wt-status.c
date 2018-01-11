@@ -1612,6 +1612,8 @@ static void show_sparse_checkout_in_use(struct wt_status *s,
 {
 	if (s->state.sparse_checkout_percentage == SPARSE_CHECKOUT_DISABLED)
 		return;
+	if (core_virtualfilesystem)
+		return;
 
 	if (s->state.sparse_checkout_percentage == SPARSE_CHECKOUT_SPARSE_INDEX)
 		status_printf_ln(s, color, _("You are in a sparse checkout."));

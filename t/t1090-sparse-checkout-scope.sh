@@ -107,9 +107,9 @@ test_expect_success 'in partial clone, sparse checkout only fetches needed blobs
 '
 
 test_expect_success 'checkout does not delete items outside the sparse checkout file' '
-	# The "sparse.expectfilesoutsideofpatterns" config will prevent the
+	# The "core.virtualfilesystem" config will prevent the
 	# SKIP_WORKTREE flag from being dropped on files present on-disk.
-	test_config sparse.expectfilesoutsideofpatterns true &&
+	test_config core.virtualfilesystem true &&
 
 	test_config core.gvfs 8 &&
 	git checkout -b outside &&

@@ -2479,6 +2479,32 @@ int repo_config_get_max_percent_split_change(struct repository *r)
 	return -1; /* default value */
 }
 
+int repo_config_get_virtualfilesystem(struct repository *r)
+{
+	/* Run only once. */
+	static int virtual_filesystem_result = -1;
+	extern char *core_virtualfilesystem;
+	extern int core_apply_sparse_checkout;
+	if (virtual_filesystem_result >= 0)
+		return virtual_filesystem_result;
+
+	if (repo_config_get_pathname(r, "core.virtualfilesystem", &core_virtualfilesystem))
+		core_virtualfilesystem = xstrdup_or_null(getenv("GIT_VIRTUALFILESYSTEM_TEST"));
+
+	if (core_virtualfilesystem && !*core_virtualfilesystem)
+		FREE_AND_NULL(core_virtualfilesystem);
+
+	/* virtual file system relies on the sparse checkout logic so force it on */
+	if (core_virtualfilesystem) {
+		core_apply_sparse_checkout = 1;
+		virtual_filesystem_result = 1;
+		return 1;
+	}
+
+	virtual_filesystem_result = 0;
+	return 0;
+}
+
 int repo_config_get_index_threads(struct repository *r, int *dest)
 {
 	int is_bool, val;
