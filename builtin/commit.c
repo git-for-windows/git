@@ -167,26 +167,34 @@ static int opt_parse_porcelain(const struct option *opt, const char *arg, int un
 }
 
 static int do_serialize = 0;
+static char *serialize_path = NULL;
+
 static int do_implicit_deserialize = 0;
 static int do_explicit_deserialize = 0;
 static char *deserialize_path = NULL;
 
 /*
- * --serialize | --serialize=1 | --serialize=v1
+ * --serialize | --serialize=<path>
  *
- * Request that we serialize our output rather than printing in
- * any of the established formats.  Optionally specify serialization
- * version.
+ * Request that we serialize status output rather than or in addition to
+ * printing in any of the established formats.
+ *
+ * Without a path, we write binary serialization data to stdout (and omit
+ * the normal status output).
+ *
+ * With a path, we write binary serialization data to the <path> and then
+ * write normal status output.
  */
 static int opt_parse_serialize(const struct option *opt, const char *arg, int unset)
 {
 	enum wt_status_format *value = (enum wt_status_format *)opt->value;
 	if (unset || !arg)
 		*value = STATUS_FORMAT_SERIALIZE_V1;
-	else if (!strcmp(arg, "v1") || !strcmp(arg, "1"))
-		*value = STATUS_FORMAT_SERIALIZE_V1;
-	else
-		die("unsupported serialize version '%s'", arg);
+
+	if (arg) {
+		free(serialize_path);
+		serialize_path = xstrdup(arg);
+	}
 
 	if (do_explicit_deserialize)
 		die("cannot mix --serialize and --deserialize");
@@ -1638,7 +1646,7 @@ struct repository *repo UNUSED)
 		  N_("version"), N_("machine-readable output"),
 		  PARSE_OPT_OPTARG, opt_parse_porcelain),
 		OPT_CALLBACK_F(0, "serialize", &status_format,
-		  N_("version"), N_("serialize raw status data to stdout"),
+		  N_("path"), N_("serialize raw status data to path or stdout"),
 		  PARSE_OPT_OPTARG | PARSE_OPT_NONEG, opt_parse_serialize),
 		OPT_CALLBACK_F(0, "deserialize", NULL,
 		  N_("path"), N_("deserialize raw status data from file"),
@@ -1780,6 +1788,16 @@ skip_init:
 
 	if (s.relative_paths)
 		s.prefix = prefix;
+
+	if (serialize_path) {
+		int fd_serialize = xopen(serialize_path,
+					 O_WRONLY | O_CREAT | O_TRUNC, 0666);
+		if (fd_serialize < 0)
+			die_errno(_("could not serialize to '%s'"),
+				  serialize_path);
+		wt_status_serialize_v1(fd_serialize, &s);
+		close(fd_serialize);
+	}
 
 	wt_status_print(&s);
 	wt_status_collect_free_buffers(&s);

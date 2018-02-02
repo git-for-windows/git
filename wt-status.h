@@ -224,7 +224,7 @@ struct wt_status_serialize_data
  * Serialize computed status scan results using "version 1" format
  * to the given file.
  */
-void wt_status_serialize_v1(struct wt_status *s);
+void wt_status_serialize_v1(int fd, struct wt_status *s);
 
 /*
  * Deserialize existing status results from the given file and

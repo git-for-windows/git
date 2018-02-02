@@ -169,7 +169,7 @@ static inline void wt_serialize_v1_ignored(struct wt_status *s UNUSED, int fd,
 }
 
 /*
- * Serialize the list of changes to stdout.  The goal of this
+ * Serialize the list of changes to the given file.  The goal of this
  * is to just serialize the key fields in wt_status so that a
  * later command can rebuilt it and do the printing.
  *
@@ -178,9 +178,8 @@ static inline void wt_serialize_v1_ignored(struct wt_status *s UNUSED, int fd,
  * is relatively quick for the status consumer to compute
  * as necessary.
  */
-void wt_status_serialize_v1(struct wt_status *s)
+void wt_status_serialize_v1(int fd, struct wt_status *s)
 {
-	int fd = 1; /* we always write to stdout */
 	struct string_list_item *iter;
 	size_t k;
 

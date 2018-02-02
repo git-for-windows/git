@@ -2624,7 +2624,7 @@ void wt_status_print(struct wt_status *s)
 		wt_longstatus_print(s);
 		break;
 	case STATUS_FORMAT_SERIALIZE_V1:
-		wt_status_serialize_v1(s);
+		wt_status_serialize_v1(1, s);
 		break;
 	}
 

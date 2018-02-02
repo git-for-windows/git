@@ -151,10 +151,12 @@ ignored, then the directory is not shown, but all contents are shown.
 	threshold.
 	See also linkgit:git-diff[1] `--find-renames`.
 
---serialize[=<version>]::
-	(EXPERIMENTAL) Serialize raw status results to stdout in a
-	format suitable for use by `--deserialize`.  Valid values for
-	`<version>` are "1" and "v1".
+--serialize[=<path>]::
+	(EXPERIMENTAL) Serialize raw status results to a file or stdout
+	in a format suitable for use by `--deserialize`.  If a path is
+	given, serialize data will be written to that path *and* normal
+	status output will be written to stdout.  If path is omitted,
+	only binary serialization data will be written to stdout.
 
 --deserialize[=<path>]::
 	(EXPERIMENTAL) Deserialize raw status results from a file or
