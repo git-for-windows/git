@@ -181,7 +181,8 @@ static int wt_deserialize_v1_header(struct wt_status *s, int fd)
 /*
  * Build a string-list of (count) <changed-item> lines from the input.
  */
-static int wt_deserialize_v1_changed_items(struct wt_status *s, int fd, int count UNUSED)
+static int wt_deserialize_v1_changed_items(const struct wt_status *cmd_s,
+					   struct wt_status *s, int fd, int count UNUSED)
 {
 	struct wt_status_serialize_data *sd;
 	char *p;
@@ -239,6 +240,29 @@ static int wt_deserialize_v1_changed_items(struct wt_status *s, int fd, int coun
 			oid_to_hex(&d->oid_index),
 			item->string,
 			(d->rename_source ? d->rename_source : ""));
+
+		if (d->stagemask &&
+		    cmd_s->status_format == STATUS_FORMAT_PORCELAIN_V2) {
+			/*
+			 * We have an unresolved conflict and the user wants
+			 * to see porcelain V2 output.  The cached status data
+			 * does not contain enough information for V2 (because
+			 * the main status computation does not capture it).
+			 * We only get a single change record for the file with
+			 * a single SHA -- we don't get the stage [123] mode
+			 * and SHA data.  The V2 detail-line print code looks
+			 * up this information directly from the index.  The
+			 * whole point of this serialization cache is to avoid
+			 * reading the index, so the V2 print code gets zeros.
+			 * So we reject the status cache and let the fallback
+			 * code run.
+			 */
+			trace_printf_key(
+				&trace_deserialize,
+				"reject: V2 format and umerged file: %s",
+				item->string);
+			return DESERIALIZE_ERR;
+		}
 	}
 
 	return DESERIALIZE_OK;
@@ -391,7 +415,7 @@ static int wt_deserialize_v1(const struct wt_status *cmd_s, struct wt_status *s,
 	while ((line = my_packet_read_line(fd, &line_len))) {
 		if (skip_prefix(line, "changed ", &arg)) {
 			nr_changed = (int)strtol(arg, NULL, 10);
-			if (wt_deserialize_v1_changed_items(s, fd, nr_changed)
+			if (wt_deserialize_v1_changed_items(cmd_s, s, fd, nr_changed)
 			    == DESERIALIZE_ERR)
 				return DESERIALIZE_ERR;
 			continue;
