@@ -686,6 +686,8 @@ int repo_config_get_index_threads(struct repository *r, int *dest);
 int repo_config_get_split_index(struct repository *r);
 int repo_config_get_max_percent_split_change(struct repository *r);
 
+int repo_config_get_virtualfilesystem(struct repository *r);
+
 /* This dies if the configured or default date is in the future */
 int repo_config_get_expiry(struct repository *r, const char *key, char **output);
 

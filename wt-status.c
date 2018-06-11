@@ -1612,6 +1612,8 @@ static void show_sparse_checkout_in_use(struct wt_status *s,
 {
 	if (s->state.sparse_checkout_percentage == SPARSE_CHECKOUT_DISABLED)
 		return;
+	if (core_virtualfilesystem)
+		return;
 
 	if (s->state.sparse_checkout_percentage == SPARSE_CHECKOUT_SPARSE_INDEX)
 		status_printf_ln(s, color, _("You are in a sparse checkout."));
@@ -2568,6 +2570,36 @@ void wt_status_print(struct wt_status *s)
 	trace2_data_intmax("status", s->repo, "count/untracked",
 			   s->untracked.nr);
 	trace2_data_intmax("status", s->repo, "count/ignored", s->ignored.nr);
+
+	switch (s->state.sparse_checkout_percentage) {
+	case SPARSE_CHECKOUT_DISABLED:
+		break;
+	case SPARSE_CHECKOUT_SPARSE_INDEX:
+		/*
+		 * Log just the observed size of the sparse-index.
+		 *
+		 * When sparse-index is enabled we can have
+		 * sparse-directory entries in addition to individual
+		 * sparse-file entries, so we don't know the complete
+		 * size of the index.  And we do not want to force
+		 * expand it just to emit some telemetry data.  So we
+		 * cannot report a percentage for the space savings.
+		 *
+		 * It is possible that if the telemetry data is
+		 * aggregated, someone will have a good estimate for
+		 * the size of a fully populated index and can compute
+		 * a percentage after the fact.
+		 */
+		trace2_data_intmax("status", s->repo,
+				   "sparse-index/size",
+				   s->repo->index->cache_nr);
+		break;
+	default:
+		trace2_data_intmax("status", s->repo,
+				   "sparse-checkout/percentage",
+				   s->state.sparse_checkout_percentage);
+		break;
+	}
 
 	trace2_region_enter("status", "print", s->repo);
 

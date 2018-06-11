@@ -185,7 +185,7 @@ int run_hooks_opt(struct repository *r, const char *hook_name,
 		.hook_name = hook_name,
 		.options = options,
 	};
-	const char *const hook_path = find_hook(r, hook_name);
+	const char *hook_path = find_hook(r, hook_name);
 	int ret = 0;
 	const struct run_process_parallel_opts opts = {
 		.tr2_category = "hook",
@@ -200,6 +200,18 @@ int run_hooks_opt(struct repository *r, const char *hook_name,
 
 		.data = &cb_data,
 	};
+
+	/*
+	 * Backwards compatibility hack in VFS for Git: when originally
+	 * introduced (and used!), it was called `post-indexchanged`, but this
+	 * name was changed during the review on the Git mailing list.
+	 *
+	 * Therefore, when the `post-index-change` hook is not found, let's
+	 * look for a hook with the old name (which would be found in case of
+	 * already-existing checkouts).
+	 */
+	if (!hook_path && !strcmp(hook_name, "post-index-change"))
+		hook_path = find_hook(r, "post-indexchanged");
 
 	if (!options)
 		BUG("a struct run_hooks_opt must be provided to run_hooks");

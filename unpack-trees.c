@@ -4,6 +4,7 @@
 #include "git-compat-util.h"
 #include "advice.h"
 #include "gvfs.h"
+#include "virtualfilesystem.h"
 #include "strvec.h"
 #include "repository.h"
 #include "parse.h"
@@ -1707,6 +1708,14 @@ static int clear_ce_flags_1(struct index_state *istate,
 			continue;
 		}
 
+		/* if it's not in the virtual file system, exit early */
+		if (core_virtualfilesystem) {
+			if (is_included_in_virtualfilesystem(ce->name, ce->ce_namelen) > 0)
+				ce->ce_flags &= ~clear_mask;
+			cache++;
+			continue;
+		}
+
 		if (prefix->len && strncmp(ce->name, prefix->buf, prefix->len))
 			break;
 
@@ -1934,7 +1943,10 @@ int unpack_trees(unsigned len, struct tree_desc *t, struct unpack_trees_options 
 	if (!o->skip_sparse_checkout) {
 		memset(&pl, 0, sizeof(pl));
 		free_pattern_list = 1;
-		populate_from_existing_patterns(o, &pl);
+		if (core_virtualfilesystem)
+			o->internal.pl = &pl;
+		else
+			populate_from_existing_patterns(o, &pl);
 	}
 
 	index_state_init(&o->internal.result, o->src_index->repo);

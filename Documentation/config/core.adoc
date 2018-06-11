@@ -111,6 +111,14 @@ Version 2 uses an opaque string so that the monitor can return
 something that can be used to determine what files have changed
 without race conditions.
 
+core.virtualFilesystem::
+	If set, the value of this variable is used as a command which
+	will identify all files and directories that are present in
+	the working directory.  Git will only track and update files
+	listed in the virtual file system.  Using the virtual file system
+	will supersede the sparse-checkout settings which will be ignored.
+	See the "virtual file system" section of linkgit:githooks[5].
+
 core.trustctime::
 	If false, the ctime differences between the index and the
 	working tree are ignored; useful when the inode change time

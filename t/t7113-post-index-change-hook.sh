@@ -15,6 +15,36 @@ test_expect_success 'setup' '
 	git commit -m "initial"
 '
 
+test_expect_success 'post-indexchanged' '
+	mkdir -p .git/hooks &&
+	test_when_finished "rm -f .git/hooks/post-indexchanged marker" &&
+	write_script .git/hooks/post-indexchanged <<-\EOF &&
+	: >marker
+	EOF
+
+	: make sure -changed is called if -change does not exist &&
+	test_when_finished "echo testing >dir1/file2.txt && git status" &&
+	echo changed >dir1/file2.txt &&
+	: force index to be dirty &&
+	test-tool chmtime -60 .git/index &&
+	git status &&
+	test_path_is_file marker &&
+
+	test_when_finished "rm -f .git/hooks/post-index-change marker2" &&
+	write_script .git/hooks/post-index-change <<-\EOF &&
+	: >marker2
+	EOF
+
+	: make sure -changed is not called if -change exists &&
+	rm -f marker marker2 &&
+	echo testing >dir1/file2.txt &&
+	: force index to be dirty &&
+	test-tool chmtime -60 .git/index &&
+	git status &&
+	test_path_is_missing marker &&
+	test_path_is_file marker2
+'
+
 test_expect_success 'test status, add, commit, others trigger hook without flags set' '
 	test_hook post-index-change <<-\EOF &&
 		if test "$1" -eq 1; then

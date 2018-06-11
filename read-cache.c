@@ -8,6 +8,7 @@
 #define DISABLE_SIGN_COMPARE_WARNINGS
 
 #include "git-compat-util.h"
+#include "virtualfilesystem.h"
 #include "config.h"
 #include "date.h"
 #include "diff.h"
@@ -1952,6 +1953,7 @@ static void post_read_index_from(struct index_state *istate)
 	tweak_untracked_cache(istate);
 	tweak_split_index(istate);
 	tweak_fsmonitor(istate);
+	apply_virtualfilesystem(istate);
 }
 
 static size_t estimate_cache_size_from_compressed(unsigned int entries)
