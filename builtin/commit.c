@@ -1801,6 +1801,7 @@ int cmd_commit(int argc,
 
 #ifndef WITH_BREAKING_CHANGES
 	warn_on_auto_comment_char = true;
+	repo_config_clear(the_repository);
 #endif /* !WITH_BREAKING_CHANGES */
 	prepare_repo_settings(the_repository);
 	the_repository->settings.command_requires_full_index = 0;

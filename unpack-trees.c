@@ -574,7 +574,9 @@ static int apply_sparse_checkout(struct index_state *istate,
 			ce->ce_flags &= ~CE_SKIP_WORKTREE;
 			return -1;
 		}
-		ce->ce_flags |= CE_WT_REMOVE;
+		if (!gvfs_config_is_set(istate->repo, GVFS_NO_DELETE_OUTSIDE_SPARSECHECKOUT))
+			ce->ce_flags |= CE_WT_REMOVE;
+
 		ce->ce_flags &= ~CE_UPDATE;
 	}
 	if (was_skip_worktree && !ce_skip_worktree(ce)) {

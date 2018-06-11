@@ -1,6 +1,7 @@
 #define USE_THE_REPOSITORY_VARIABLE
 
 #include "builtin.h"
+#include "gvfs.h"
 #include "config.h"
 #include "environment.h"
 #include "exec-cmd.h"
@@ -17,6 +18,8 @@
 #include "shallow.h"
 #include "trace.h"
 #include "trace2.h"
+#include "dir.h"
+#include "hook.h"
 
 #define RUN_SETUP		(1<<0)
 #define RUN_SETUP_GENTLY	(1<<1)
@@ -29,6 +32,7 @@
 #define DELAY_PAGER_CONFIG	(1<<4)
 #define NO_PARSEOPT		(1<<5) /* parse-options is not used */
 #define DEPRECATED		(1<<6)
+#define BLOCK_ON_GVFS_REPO	(1<<7) /* command not allowed in GVFS repos */
 
 struct cmd_struct {
 	const char *cmd;
@@ -463,6 +467,68 @@ static int handle_alias(struct strvec *args, struct string_list *expanded_aliase
 	return ret;
 }
 
+/* Runs pre/post-command hook */
+static struct strvec sargv = STRVEC_INIT;
+static int run_post_hook = 0;
+static int exit_code = -1;
+
+static int run_pre_command_hook(struct repository *r, const char **argv)
+{
+	char *lock;
+	int ret = 0;
+	struct run_hooks_opt opt = RUN_HOOKS_OPT_INIT;
+
+	/*
+	 * Ensure the global pre/post command hook is only called for
+	 * the outer command and not when git is called recursively
+	 * or spawns multiple commands (like with the alias command)
+	 */
+	lock = getenv("COMMAND_HOOK_LOCK");
+	if (lock && !strcmp(lock, "true"))
+		return 0;
+	setenv("COMMAND_HOOK_LOCK", "true", 1);
+
+	/* call the hook proc */
+	strvec_pushv(&sargv, argv);
+	strvec_pushf(&sargv, "--git-pid=%"PRIuMAX, (uintmax_t)getpid());
+	strvec_pushv(&opt.args, sargv.v);
+	ret = run_hooks_opt(r, "pre-command", &opt);
+
+	if (!ret)
+		run_post_hook = 1;
+	return ret;
+}
+
+static int run_post_command_hook(struct repository *r)
+{
+	char *lock;
+	int ret = 0;
+	struct run_hooks_opt opt = RUN_HOOKS_OPT_INIT;
+
+	/*
+	 * Only run post_command if pre_command succeeded in this process
+	 */
+	if (!run_post_hook)
+		return 0;
+	lock = getenv("COMMAND_HOOK_LOCK");
+	if (!lock || strcmp(lock, "true"))
+		return 0;
+
+	strvec_pushv(&opt.args, sargv.v);
+	strvec_pushf(&opt.args, "--exit_code=%u", exit_code);
+	ret = run_hooks_opt(r, "post-command", &opt);
+
+	run_post_hook = 0;
+	strvec_clear(&sargv);
+	setenv("COMMAND_HOOK_LOCK", "false", 1);
+	return ret;
+}
+
+static void post_command_hook_atexit(void)
+{
+	run_post_command_hook(the_repository);
+}
+
 static int run_builtin(struct cmd_struct *p, int argc, const char **argv, struct repository *repo)
 {
 	int status, help;
@@ -499,15 +565,23 @@ static int run_builtin(struct cmd_struct *p, int argc, const char **argv, struct
 	if (!help && p->option & NEED_WORK_TREE)
 		setup_work_tree();
 
+	if (!help && p->option & BLOCK_ON_GVFS_REPO && gvfs_config_is_set(repo, GVFS_BLOCK_COMMANDS))
+		die("'git %s' is not supported on a GVFS repo", p->cmd);
+
+	if (run_pre_command_hook(the_repository, argv))
+		die("pre-command hook aborted command");
+
 	trace_argv_printf(argv, "trace: built-in: git");
 	trace2_cmd_name(p->cmd);
 
 	validate_cache_entries(repo->index);
-	status = p->fn(argc, argv, prefix, no_repo ? NULL : repo);
+	exit_code = status = p->fn(argc, argv, prefix, no_repo ? NULL : repo);
 	validate_cache_entries(repo->index);
 
 	if (status)
 		return status;
+
+	run_post_command_hook(the_repository);
 
 	/* Somebody closed stdout? */
 	if (fstat(fileno(stdout), &st))
@@ -578,7 +652,7 @@ static struct cmd_struct commands[] = {
 	{ "for-each-ref", cmd_for_each_ref, RUN_SETUP },
 	{ "for-each-repo", cmd_for_each_repo, RUN_SETUP_GENTLY },
 	{ "format-patch", cmd_format_patch, RUN_SETUP },
-	{ "fsck", cmd_fsck, RUN_SETUP },
+	{ "fsck", cmd_fsck, RUN_SETUP | BLOCK_ON_GVFS_REPO},
 	{ "fsck-objects", cmd_fsck, RUN_SETUP },
 	{ "fsmonitor--daemon", cmd_fsmonitor__daemon, RUN_SETUP },
 	{ "gc", cmd_gc, RUN_SETUP },
@@ -622,7 +696,7 @@ static struct cmd_struct commands[] = {
 	{ "pack-refs", cmd_pack_refs, RUN_SETUP },
 	{ "patch-id", cmd_patch_id, RUN_SETUP_GENTLY | NO_PARSEOPT },
 	{ "pickaxe", cmd_blame, RUN_SETUP },
-	{ "prune", cmd_prune, RUN_SETUP },
+	{ "prune", cmd_prune, RUN_SETUP | BLOCK_ON_GVFS_REPO},
 	{ "prune-packed", cmd_prune_packed, RUN_SETUP },
 	{ "pull", cmd_pull, RUN_SETUP | NEED_WORK_TREE },
 	{ "push", cmd_push, RUN_SETUP },
@@ -635,7 +709,7 @@ static struct cmd_struct commands[] = {
 	{ "remote", cmd_remote, RUN_SETUP },
 	{ "remote-ext", cmd_remote_ext, NO_PARSEOPT },
 	{ "remote-fd", cmd_remote_fd, NO_PARSEOPT },
-	{ "repack", cmd_repack, RUN_SETUP },
+	{ "repack", cmd_repack, RUN_SETUP | BLOCK_ON_GVFS_REPO },
 	{ "replace", cmd_replace, RUN_SETUP },
 	{ "replay", cmd_replay, RUN_SETUP },
 	{ "repo", cmd_repo, RUN_SETUP },
@@ -657,7 +731,7 @@ static struct cmd_struct commands[] = {
 	{ "stash", cmd_stash, RUN_SETUP | NEED_WORK_TREE },
 	{ "status", cmd_status, RUN_SETUP | NEED_WORK_TREE },
 	{ "stripspace", cmd_stripspace },
-	{ "submodule--helper", cmd_submodule__helper, RUN_SETUP },
+	{ "submodule--helper", cmd_submodule__helper, RUN_SETUP | BLOCK_ON_GVFS_REPO },
 	{ "survey", cmd_survey, RUN_SETUP },
 	{ "switch", cmd_switch, RUN_SETUP | NEED_WORK_TREE },
 	{ "symbolic-ref", cmd_symbolic_ref, RUN_SETUP },
@@ -678,7 +752,7 @@ static struct cmd_struct commands[] = {
 #ifndef WITH_BREAKING_CHANGES
 	{ "whatchanged", cmd_whatchanged, RUN_SETUP | DEPRECATED },
 #endif
-	{ "worktree", cmd_worktree, RUN_SETUP },
+	{ "worktree", cmd_worktree, RUN_SETUP | BLOCK_ON_GVFS_REPO },
 	{ "write-tree", cmd_write_tree, RUN_SETUP },
 };
 
@@ -808,13 +882,16 @@ static void execv_dashed_external(const char **argv)
 	 */
 	trace_argv_printf(cmd.args.v, "trace: exec:");
 
+	if (run_pre_command_hook(the_repository, cmd.args.v))
+		die("pre-command hook aborted command");
+
 	/*
 	 * If we fail because the command is not found, it is
 	 * OK to return. Otherwise, we just pass along the status code,
 	 * or our usual generic code if we were not even able to exec
 	 * the program.
 	 */
-	status = run_command(&cmd);
+	exit_code = status = run_command(&cmd);
 
 	/*
 	 * If the child process ran and we are now going to exit, emit a
@@ -825,6 +902,8 @@ static void execv_dashed_external(const char **argv)
 		exit(status);
 	else if (errno != ENOENT)
 		exit(128);
+
+	run_post_command_hook(the_repository);
 }
 
 static int is_deprecated_command(const char *cmd)
@@ -930,6 +1009,7 @@ int cmd_main(int argc, const char **argv)
 	}
 
 	trace_command_performance(argv);
+	atexit(post_command_hook_atexit);
 
 	/*
 	 * "git-xxxx" is the same as "git xxxx", but we obviously:
@@ -957,10 +1037,14 @@ int cmd_main(int argc, const char **argv)
 	if (!argc) {
 		/* The user didn't specify a command; give them help */
 		commit_pager_choice();
+		if (run_pre_command_hook(the_repository, argv))
+			die("pre-command hook aborted command");
 		printf(_("usage: %s\n\n"), git_usage_string);
 		list_common_cmds_help();
 		printf("\n%s\n", _(git_more_info_string));
-		exit(1);
+		exit_code = 1;
+		run_post_command_hook(the_repository);
+		exit(exit_code);
 	}
 
 	if (!strcmp("--version", argv[0]) || !strcmp("-v", argv[0]))

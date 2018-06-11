@@ -1022,6 +1022,9 @@ void *odb_read_object(struct object_database *odb,
 	unsigned flags = OBJECT_INFO_DIE_IF_CORRUPT | OBJECT_INFO_LOOKUP_REPLACE;
 	void *data;
 
+	if (gvfs_config_is_set(odb->repo, GVFS_MISSING_OK))
+		flags &= ~OBJECT_INFO_DIE_IF_CORRUPT;
+
 	oi.typep = type;
 	oi.sizep = size;
 	oi.contentp = &data;

@@ -8,6 +8,7 @@
 #define DISABLE_SIGN_COMPARE_WARNINGS
 
 #include "builtin.h"
+#include "gvfs.h"
 #include "config.h"
 #include "environment.h"
 #include "gettext.h"
@@ -914,7 +915,7 @@ static enum parse_opt_result reupdate_callback(
 int cmd_update_index(int argc,
 		     const char **argv,
 		     const char *prefix,
-		     struct repository *repo UNUSED)
+		     struct repository *repo)
 {
 	int newfd, entries, has_errors = 0, nul_term_line = 0;
 	enum uc_mode untracked_cache = UC_UNSPECIFIED;
@@ -1178,7 +1179,13 @@ int cmd_update_index(int argc,
 	argc = parse_options_end(&ctx);
 
 	getline_fn = nul_term_line ? strbuf_getline_nul : strbuf_getline_lf;
+	if (mark_skip_worktree_only && gvfs_config_is_set(repo, GVFS_BLOCK_COMMANDS))
+		die(_("modifying the skip worktree bit is not supported on a GVFS repo"));
+
 	if (preferred_index_format) {
+		if (preferred_index_format != 4 && gvfs_config_is_set(repo, GVFS_BLOCK_COMMANDS))
+			die(_("changing the index version is not supported on a GVFS repo"));
+
 		if (preferred_index_format < 0) {
 			printf(_("%d\n"), the_repository->index->version);
 		} else if (preferred_index_format < INDEX_FORMAT_LB ||
@@ -1224,6 +1231,9 @@ int cmd_update_index(int argc,
 	odb_transaction_commit(transaction);
 
 	if (split_index > 0) {
+		if (gvfs_config_is_set(repo, GVFS_BLOCK_COMMANDS))
+			die(_("split index is not supported on a GVFS repo"));
+
 		if (repo_config_get_split_index(the_repository) == 0)
 			warning(_("core.splitIndex is set to false; "
 				  "remove or change it, if you really want to "

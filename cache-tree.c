@@ -437,7 +437,29 @@ static int update_one(struct cache_tree *it,
 			continue;
 
 		strbuf_grow(&buffer, entlen + 100);
-		strbuf_addf(&buffer, "%o %.*s%c", mode, entlen, path + baselen, '\0');
+
+		switch (mode) {
+		case 0100644:
+			strbuf_add(&buffer, "100644 ", 7);
+			break;
+		case 0100664:
+			strbuf_add(&buffer, "100664 ", 7);
+			break;
+		case 0100755:
+			strbuf_add(&buffer, "100755 ", 7);
+			break;
+		case 0120000:
+			strbuf_add(&buffer, "120000 ", 7);
+			break;
+		case 0160000:
+			strbuf_add(&buffer, "160000 ", 7);
+			break;
+		default:
+			strbuf_addf(&buffer, "%o ", mode);
+			break;
+		}
+		strbuf_add(&buffer, path + baselen, entlen);
+		strbuf_addch(&buffer, '\0');
 		strbuf_add(&buffer, oid->hash, the_hash_algo->rawsz);
 
 #if DEBUG_CACHE_TREE
