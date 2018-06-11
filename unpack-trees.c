@@ -3,6 +3,7 @@
 
 #include "git-compat-util.h"
 #include "advice.h"
+#include "gvfs.h"
 #include "strvec.h"
 #include "repository.h"
 #include "parse.h"
@@ -2688,6 +2689,27 @@ static int deleted_entry(const struct cache_entry *ce,
 
 	if (!(old->ce_flags & CE_CONFLICTED) && verify_uptodate(old, o))
 		return -1;
+
+	/*
+	 * When marking entries to remove from the index and the working
+	 * directory this option will take into account what the
+	 * skip-worktree bit was set to so that if the entry has the
+	 * skip-worktree bit set it will not be removed from the working
+	 * directory.  This will allow virtualized working directories to
+	 * detect the change to HEAD and use the new commit tree to show
+	 * the files that are in the working directory.
+	 *
+	 * old is the cache_entry that will have the skip-worktree bit set
+	 * which will need to be preserved when the CE_REMOVE entry is added
+	 */
+	if (gvfs_config_is_set(the_repository, GVFS_NO_DELETE_OUTSIDE_SPARSECHECKOUT) &&
+		old &&
+		old->ce_flags & CE_SKIP_WORKTREE) {
+		add_entry(o, old, CE_REMOVE, 0);
+		invalidate_ce_path(old, o);
+		return 1;
+	}
+
 	add_entry(o, ce, CE_REMOVE, 0);
 	invalidate_ce_path(ce, o);
 	return 1;

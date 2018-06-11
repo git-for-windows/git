@@ -343,6 +343,18 @@ checkout_files () {
 	"
 }
 
+test_expect_success 'crlf conversions blocked when under GVFS' '
+	git checkout -b gvfs &&
+	test_commit initial &&
+	rm initial.t &&
+	test_config core.gvfs 64 &&
+	test_config core.autocrlf true &&
+	test_must_fail git read-tree --reset -u HEAD &&
+
+	git config core.autocrlf false &&
+	git read-tree --reset -u HEAD
+'
+
 # Test control characters
 # NUL SOH CR EOF==^Z
 test_expect_success 'ls-files --eol -o Text/Binary' '

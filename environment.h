@@ -215,5 +215,6 @@ extern int auto_comment_line_char;
 extern bool warn_on_auto_comment_char;
 #endif /* !WITH_BREAKING_CHANGES */
 
+extern int core_virtualize_objects;
 # endif /* USE_THE_REPOSITORY_VARIABLE */
 #endif /* ENVIRONMENT_H */

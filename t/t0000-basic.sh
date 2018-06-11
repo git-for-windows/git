@@ -1109,6 +1109,11 @@ test_expect_success 'writing this tree with --missing-ok' '
 	git write-tree --missing-ok
 '
 
+test_expect_success 'writing this tree with missing ok config value' '
+	git config core.gvfs 4 &&
+	git write-tree
+'
+
 
 ################################################################
 test_expect_success 'git read-tree followed by write-tree should be idempotent' '

@@ -15,6 +15,7 @@
 #include "environment.h"
 #include "fsck.h"
 #include "gettext.h"
+#include "gvfs.h"
 #include "hex.h"
 #include "loose.h"
 #include "object-file-convert.h"
@@ -92,17 +93,27 @@ int check_and_freshen_file(const char *fn, int freshen)
 
 static int check_and_freshen_source(struct odb_source *source,
 				    const struct object_id *oid,
-				    int freshen)
+				    int freshen, int skip_virtualized_objects)
 {
 	static struct strbuf path = STRBUF_INIT;
+	int ret, tried_hook = 0;
+
 	odb_loose_path(source, &path, oid);
-	return check_and_freshen_file(path.buf, freshen);
+retry:
+	ret = check_and_freshen_file(path.buf, freshen);
+	if (!ret && gvfs_virtualize_objects(source->odb->repo) &&
+	    !skip_virtualized_objects && !tried_hook) {
+		tried_hook = 1;
+		if (!read_object_process(source->odb->repo, oid))
+			goto retry;
+	}
+	return ret;
 }
 
 int has_loose_object(struct odb_source *source,
 		     const struct object_id *oid)
 {
-	return check_and_freshen_source(source, oid, 0);
+	return check_and_freshen_source(source, oid, 0, 0);
 }
 
 int format_object_header(char *str, size_t size, enum object_type type,
@@ -987,11 +998,12 @@ static int write_loose_object(struct odb_source *source,
 }
 
 static int freshen_loose_object(struct object_database *odb,
-				const struct object_id *oid)
+				const struct object_id *oid,
+				int skip_virtualized_objects)
 {
 	odb_prepare_alternates(odb);
 	for (struct odb_source *source = odb->sources; source; source = source->next)
-		if (check_and_freshen_source(source, oid, 1))
+		if (check_and_freshen_source(source, oid, 1, skip_virtualized_objects))
 			return 1;
 	return 0;
 }
@@ -1092,7 +1104,7 @@ int stream_loose_object(struct odb_source *source,
 	close_loose_object(source, fd, tmp_file.buf);
 
 	if (freshen_packed_object(source->odb, oid) ||
-	    freshen_loose_object(source->odb, oid)) {
+	    freshen_loose_object(source->odb, oid, 1)) {
 		unlink_or_warn(tmp_file.buf);
 		goto cleanup;
 	}
@@ -1156,7 +1168,7 @@ int write_object_file(struct odb_source *source,
 	 */
 	write_object_file_prepare(algo, buf, len, type, oid, hdr, &hdrlen);
 	if (freshen_packed_object(source->odb, oid) ||
-	    freshen_loose_object(source->odb, oid))
+	    freshen_loose_object(source->odb, oid, 1))
 		return 0;
 	if (write_loose_object(source, oid, hdr, hdrlen, buf, len, 0, flags))
 		return -1;

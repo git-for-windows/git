@@ -10,6 +10,7 @@
 #include "abspath.h"
 #include "advice.h"
 #include "date.h"
+#include "gvfs.h"
 #include "branch.h"
 #include "config.h"
 #include "dir.h"

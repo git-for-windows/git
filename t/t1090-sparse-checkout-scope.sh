@@ -106,6 +106,26 @@ test_expect_success 'in partial clone, sparse checkout only fetches needed blobs
 	test_cmp expect actual
 '
 
+test_expect_success 'checkout does not delete items outside the sparse checkout file' '
+	# The "sparse.expectfilesoutsideofpatterns" config will prevent the
+	# SKIP_WORKTREE flag from being dropped on files present on-disk.
+	test_config sparse.expectfilesoutsideofpatterns true &&
+
+	test_config core.gvfs 8 &&
+	git checkout -b outside &&
+	echo "new file1" >d &&
+	git add --sparse d &&
+	git commit -m "branch initial" &&
+	echo "new file1" >e &&
+	git add --sparse e &&
+	git commit -m "skipped worktree" &&
+	git update-index --skip-worktree e &&
+	echo "/d" >.git/info/sparse-checkout &&
+	git checkout HEAD^ &&
+	test_path_is_file d &&
+	test_path_is_file e
+'
+
 test_expect_success MINGW 'no unnecessary opendir() with fscache' '
 	git clone . fscache-test &&
 	(
