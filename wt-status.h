@@ -4,6 +4,7 @@
 #include "string-list.h"
 #include "color.h"
 #include "pathspec.h"
+#include "pkt-line.h"
 #include "remote.h"
 
 struct repository;
@@ -26,7 +27,8 @@ enum untracked_status_type {
 	SHOW_UNTRACKED_FILES_ERROR = -1,
 	SHOW_NO_UNTRACKED_FILES = 0,
 	SHOW_NORMAL_UNTRACKED_FILES,
-	SHOW_ALL_UNTRACKED_FILES
+	SHOW_ALL_UNTRACKED_FILES,
+	SHOW_COMPLETE_UNTRACKED_FILES,
 };
 
 enum show_ignored_type {
@@ -74,6 +76,7 @@ enum wt_status_format {
 	STATUS_FORMAT_SHORT,
 	STATUS_FORMAT_PORCELAIN,
 	STATUS_FORMAT_PORCELAIN_V2,
+	STATUS_FORMAT_SERIALIZE_V1,
 
 	STATUS_FORMAT_UNSPECIFIED
 };
@@ -184,5 +187,71 @@ int require_clean_work_tree(struct repository *repo,
 			    const char *hint,
 			    int ignore_submodules,
 			    int gently);
+
+#define DESERIALIZE_OK  0
+#define DESERIALIZE_ERR 1
+
+struct wt_status_serialize_data_fixed
+{
+	uint32_t worktree_status;
+	uint32_t index_status;
+	uint32_t stagemask;
+	uint32_t rename_status;
+	uint32_t rename_score;
+	uint32_t mode_head;
+	uint32_t mode_index;
+	uint32_t mode_worktree;
+	uint32_t dirty_submodule;
+	uint32_t new_submodule_commits;
+	struct object_id oid_head;
+	struct object_id oid_index;
+};
+
+/*
+ * Consume the maximum amount of data possible in a
+ * packet-line record.  This is overkill because we
+ * have at most 2 relative pathnames, but means we
+ * don't need to allocate a variable length structure.
+ */
+struct wt_status_serialize_data
+{
+	struct wt_status_serialize_data_fixed fixed;
+	char variant[LARGE_PACKET_DATA_MAX
+		     - sizeof(struct wt_status_serialize_data_fixed)];
+};
+
+enum wt_status_deserialize_wait
+{
+	DESERIALIZE_WAIT__UNSET = -3,
+	DESERIALIZE_WAIT__FAIL = -2, /* return error, do not fallback */
+	DESERIALIZE_WAIT__BLOCK = -1, /* unlimited timeout */
+	DESERIALIZE_WAIT__NO = 0, /* immediately fallback */
+	/* any positive value is a timeout in tenths of a second */
+};
+
+/*
+ * Serialize computed status scan results using "version 1" format
+ * to the given file.
+ */
+void wt_status_serialize_v1(int fd, struct wt_status *s);
+
+/*
+ * Deserialize existing status results from the given file and
+ * populate a (new) "struct wt_status".  Use the contents of "cmd_s"
+ * (computed from the command line arguments) to verify that the
+ * cached data is compatible and overlay various display-related
+ * fields.
+ */
+int wt_status_deserialize(const struct wt_status *cmd_s,
+			  const char *path,
+			  enum wt_status_deserialize_wait dw);
+
+/*
+ * A helper routine for serialize and deserialize to compute
+ * metadata for the user-global and repo-local excludes files.
+ */
+void wt_serialize_compute_exclude_header(struct strbuf *sb,
+					 const char *key,
+					 const char *path);
 
 #endif /* STATUS_H */
