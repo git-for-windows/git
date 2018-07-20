@@ -236,4 +236,12 @@ void wt_status_serialize_v1(int fd, struct wt_status *s);
 int wt_status_deserialize(const struct wt_status *cmd_s,
 			  const char *path);
 
+/*
+ * A helper routine for serialize and deserialize to compute
+ * metadata for the user-global and repo-local excludes files.
+ */
+void wt_serialize_compute_exclude_header(struct strbuf *sb,
+					 const char *key,
+					 const char *path);
+
 #endif /* STATUS_H */

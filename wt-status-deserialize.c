@@ -8,6 +8,7 @@
 #include "trace.h"
 #include "statinfo.h"
 #include "hex.h"
+#include "path.h"
 
 static struct trace_key trace_deserialize = TRACE_KEY_INIT(DESERIALIZE);
 
@@ -70,12 +71,69 @@ static int my_validate_index(const char *path, const struct cache_time *mtime_re
 	return DESERIALIZE_OK;
 }
 
+/*
+ * Use the given key and exclude pathname to compute a serialization header
+ * reflecting the current contents on disk.  See if that matches the value
+ * computed for this key when the cache was written.  Reject the cache if
+ * anything has changed.
+ */
+static int my_validate_excludes(const char *path, const char *key, const char *line)
+{
+	struct strbuf sb = STRBUF_INIT;
+	int r;
+
+	wt_serialize_compute_exclude_header(&sb, key, path);
+
+	r = (strcmp(line, sb.buf) ? DESERIALIZE_ERR : DESERIALIZE_OK);
+
+	if (r == DESERIALIZE_ERR)
+		trace_printf_key(&trace_deserialize,
+				 "%s changed [cached '%s'][observed '%s']",
+				 key, line, sb.buf);
+
+	strbuf_release(&sb);
+	return r;
+}
+
+static int my_parse_core_excludes(const char *line)
+{
+	/*
+	 * In dir.c:setup_standard_excludes() they use either the value of
+	 * the "core.excludefile" variable (stored in the global "excludes_file"
+	 * variable) -or- the default value "$XDG_HOME/git/ignore".  This is done
+	 * during wt_status_collect_untracked() which we are hoping to not call.
+	 *
+	 * Fake the setup here.
+	 */
+
+	if (excludes_file) {
+		return my_validate_excludes(excludes_file, "core_excludes", line);
+	} else {
+		char *path = xdg_config_home("ignore");
+		int r = my_validate_excludes(path, "core_excludes", line);
+		free(path);
+		return r;
+	}
+}
+
+static int my_parse_repo_excludes(const char *line)
+{
+	char *path = repo_git_path(the_repository, "info/exclude");
+	int r = my_validate_excludes(path, "repo_excludes", line);
+	free(path);
+
+	return r;
+}
+
 static int wt_deserialize_v1_header(struct wt_status *s, int fd)
 {
 	struct cache_time index_mtime;
 	int line_len, nr_fields;
 	const char *line;
 	const char *arg;
+	int have_required_index_mtime = 0;
+	int have_required_core_excludes = 0;
+	int have_required_repo_excludes = 0;
 
 	/*
 	 * parse header lines up to the first flush packet.
@@ -91,6 +149,20 @@ static int wt_deserialize_v1_header(struct wt_status *s, int fd)
 					     nr_fields, line);
 				return DESERIALIZE_ERR;
 			}
+			have_required_index_mtime = 1;
+			continue;
+		}
+
+		if (skip_prefix(line, "core_excludes ", &arg)) {
+			if (my_parse_core_excludes(line) != DESERIALIZE_OK)
+				return DESERIALIZE_ERR;
+			have_required_core_excludes = 1;
+			continue;
+		}
+		if (skip_prefix(line, "repo_excludes ", &arg)) {
+			if (my_parse_repo_excludes(line) != DESERIALIZE_OK)
+				return DESERIALIZE_ERR;
+			have_required_repo_excludes = 1;
 			continue;
 		}
 
@@ -172,6 +244,19 @@ static int wt_deserialize_v1_header(struct wt_status *s, int fd)
 		/* prefix */
 
 		trace_printf_key(&trace_deserialize, "unexpected line '%s'", line);
+		return DESERIALIZE_ERR;
+	}
+
+	if (!have_required_index_mtime) {
+		trace_printf_key(&trace_deserialize, "missing '%s'", "index_mtime");
+		return DESERIALIZE_ERR;
+	}
+	if (!have_required_core_excludes) {
+		trace_printf_key(&trace_deserialize, "missing '%s'", "core_excludes");
+		return DESERIALIZE_ERR;
+	}
+	if (!have_required_repo_excludes) {
+		trace_printf_key(&trace_deserialize, "missing '%s'", "repo_excludes");
 		return DESERIALIZE_ERR;
 	}
 
