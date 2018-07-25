@@ -220,6 +220,15 @@ struct wt_status_serialize_data
 		     - sizeof(struct wt_status_serialize_data_fixed)];
 };
 
+enum wt_status_deserialize_wait
+{
+	DESERIALIZE_WAIT__UNSET = -3,
+	DESERIALIZE_WAIT__FAIL = -2, /* return error, do not fallback */
+	DESERIALIZE_WAIT__BLOCK = -1, /* unlimited timeout */
+	DESERIALIZE_WAIT__NO = 0, /* immediately fallback */
+	/* any positive value is a timeout in tenths of a second */
+};
+
 /*
  * Serialize computed status scan results using "version 1" format
  * to the given file.
@@ -234,7 +243,8 @@ void wt_status_serialize_v1(int fd, struct wt_status *s);
  * fields.
  */
 int wt_status_deserialize(const struct wt_status *cmd_s,
-			  const char *path);
+			  const char *path,
+			  enum wt_status_deserialize_wait dw);
 
 /*
  * A helper routine for serialize and deserialize to compute

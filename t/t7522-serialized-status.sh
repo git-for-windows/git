@@ -199,6 +199,58 @@ test_expect_success 'verify new --serialize=path mode' '
 	test_cmp expect output.2
 '
 
+test_expect_success 'try deserialize-wait feature' '
+	test_when_finished "rm -f serialized_status.dat dirt expect.* output.* trace.*" &&
+
+	git status --serialize=serialized_status.dat >output.1 &&
+
+	# make status cache stale by updating the mtime on the index.  confirm that
+	# deserialize fails when requested.
+	sleep 1 &&
+	touch .git/index &&
+	test_must_fail git status --deserialize=serialized_status.dat --deserialize-wait=fail &&
+	test_must_fail git -c status.deserializeWait=fail status --deserialize=serialized_status.dat &&
+
+	cat >expect.1 <<-\EOF &&
+	? expect.1
+	? output.1
+	? serialized_status.dat
+	? untracked/
+	? untracked_1.txt
+	EOF
+
+	# refresh the status cache.
+	git status --porcelain=v2 --serialize=serialized_status.dat >output.1 &&
+	test_cmp expect.1 output.1 &&
+
+	# create some dirt. confirm deserialize used the existing status cache.
+	echo x >dirt &&
+	git status --porcelain=v2 --deserialize=serialized_status.dat >output.2 &&
+	test_cmp output.1 output.2 &&
+
+	# make the cache stale and try the timeout feature and wait upto
+	# 2 tenths of a second.  confirm deserialize timed out and rejected
+	# the status cache and did a normal scan.
+
+	cat >expect.2 <<-\EOF &&
+	? dirt
+	? expect.1
+	? expect.2
+	? output.1
+	? output.2
+	? serialized_status.dat
+	? trace.2
+	? untracked/
+	? untracked_1.txt
+	EOF
+
+	sleep 1 &&
+	touch .git/index &&
+	GIT_TRACE_DESERIALIZE=1 git status --porcelain=v2 --deserialize=serialized_status.dat --deserialize-wait=2 >output.2 2>trace.2 &&
+	test_cmp expect.2 output.2 &&
+	grep "wait polled=2 result=1" trace.2 >trace.2g
+'
+
 test_expect_success 'merge conflicts' '
 
 	# create a merge conflict.

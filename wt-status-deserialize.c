@@ -62,7 +62,8 @@ static int my_validate_index(const char *path, const struct cache_time *mtime_re
 	mtime_observed_on_disk.nsec = ST_MTIME_NSEC(st);
 	if ((mtime_observed_on_disk.sec != mtime_reported->sec) ||
 	    (mtime_observed_on_disk.nsec != mtime_reported->nsec)) {
-		trace_printf_key(&trace_deserialize, "index mtime changed [des %d.%d][obs %d.%d]",
+		trace_printf_key(&trace_deserialize,
+				 "index mtime changed [des %d %d][obs %d %d]",
 			     mtime_reported->sec, mtime_reported->nsec,
 			     mtime_observed_on_disk.sec, mtime_observed_on_disk.nsec);
 		return DESERIALIZE_ERR;
@@ -552,6 +553,8 @@ static inline int my_strcmp_null(const char *a, const char *b)
 
 static int wt_deserialize_fd(const struct wt_status *cmd_s, struct wt_status *des_s, int fd)
 {
+	memset(des_s, 0, sizeof(*des_s));
+
 	/*
 	 * Check the path spec on the current command
 	 */
@@ -681,8 +684,101 @@ static int wt_deserialize_fd(const struct wt_status *cmd_s, struct wt_status *de
 	return DESERIALIZE_OK;
 }
 
+static struct cache_time deserialize_prev_mtime = { 0, 0 };
+
+static int try_deserialize_read_from_file_1(const struct wt_status *cmd_s,
+					    const char *path,
+					    struct wt_status *des_s)
+{
+	struct stat st;
+	int result;
+	int fd;
+
+	/*
+	 * If we are spinning waiting for the status cache to become
+	 * valid, skip re-reading it if the mtime has not changed
+	 * since the last time we read it.
+	 */
+	if (lstat(path, &st)) {
+		trace_printf_key(&trace_deserialize,
+				 "could not lstat '%s'", path);
+		return DESERIALIZE_ERR;
+	}
+	if ((uint32_t)st.st_mtime == deserialize_prev_mtime.sec &&
+	    ST_MTIME_NSEC(st) == deserialize_prev_mtime.nsec) {
+		trace_printf_key(&trace_deserialize,
+				 "mtime has not changed '%s'", path);
+		return DESERIALIZE_ERR;
+	}
+
+	fd = xopen(path, O_RDONLY);
+	if (fd == -1) {
+		trace_printf_key(&trace_deserialize,
+				 "could not read '%s'", path);
+		return DESERIALIZE_ERR;
+	}
+
+	deserialize_prev_mtime.sec = st.st_mtime;
+	deserialize_prev_mtime.nsec = ST_MTIME_NSEC(st);
+
+	trace_printf_key(&trace_deserialize,
+			 "reading serialization file (%d %d) '%s'",
+			 deserialize_prev_mtime.sec,
+			 deserialize_prev_mtime.nsec,
+			 path);
+
+	result = wt_deserialize_fd(cmd_s, des_s, fd);
+	close(fd);
+
+	return result;
+}
+
+static int try_deserialize_read_from_file(const struct wt_status *cmd_s,
+					  const char *path,
+					  enum wt_status_deserialize_wait dw,
+					  struct wt_status *des_s)
+{
+	int k, limit;
+	int result = DESERIALIZE_ERR;
+
+	/*
+	 * For "fail" or "no", try exactly once to read the status cache.
+	 * Return an error if the file is stale.
+	 */
+	if (dw == DESERIALIZE_WAIT__FAIL || dw == DESERIALIZE_WAIT__NO)
+		return try_deserialize_read_from_file_1(cmd_s, path, des_s);
+
+	/*
+	 * Wait for the status cache file to refresh.  Wait duration can
+	 * be in tenths of a second or unlimited.  Poll every 100ms.
+	 */
+	if (dw == DESERIALIZE_WAIT__BLOCK) {
+		/*
+		 * Convert "unlimited" to 1 day.
+		 */
+		limit = 10 * 60 * 60 * 24;
+	} else {
+		/* spin for dw tenths of a second */
+		limit = dw;
+	}
+	for (k = 0; k < limit; k++) {
+		result = try_deserialize_read_from_file_1(
+			cmd_s, path, des_s);
+
+		if (result == DESERIALIZE_OK)
+			break;
+
+		sleep_millisec(100);
+	}
+
+	trace_printf_key(&trace_deserialize,
+			 "wait polled=%d result=%d '%s'",
+			 k, result, path);
+	return result;
+}
+
 /*
- * Read raw serialized status data from the given file
+ * Read raw serialized status data from the given file (or STDIN).
  *
  * Verify that the args specified in the current command
  * are compatible with the deserialized data (such as "-uno").
@@ -690,25 +786,26 @@ static int wt_deserialize_fd(const struct wt_status *cmd_s, struct wt_status *de
  * Copy display-related fields from the current command
  * into the deserialized data (so that the user can request
  * long or short as they please).
+ *
+ * Print status report using cached data.
  */
 int wt_status_deserialize(const struct wt_status *cmd_s,
-			  const char *path)
+			  const char *path,
+			  enum wt_status_deserialize_wait dw)
 {
 	struct wt_status des_s;
 	int result;
 	struct string_list_item *change;
 
 	if (path && *path && strcmp(path, "0")) {
-		int fd = xopen(path, O_RDONLY);
-		if (fd == -1) {
-			trace_printf_key(&trace_deserialize, "could not read '%s'", path);
-			return DESERIALIZE_ERR;
-		}
-		trace_printf_key(&trace_deserialize, "reading serialization file '%s'", path);
-		result = wt_deserialize_fd(cmd_s, &des_s, fd);
-		close(fd);
+		result = try_deserialize_read_from_file(cmd_s, path, dw, &des_s);
 	} else {
 		trace_printf_key(&trace_deserialize, "reading stdin");
+
+		/*
+		 * Read status cache data from stdin.  Ignore the deserialize-wait
+		 * term, since we cannot read stdin multiple times.
+		 */
 		result = wt_deserialize_fd(cmd_s, &des_s, 0);
 	}
 
