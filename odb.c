@@ -29,6 +29,7 @@
 #include "submodule.h"
 #include "trace2.h"
 #include "trace.h"
+#include "trace2.h"
 #include "write-or-die.h"
 
 KHASH_INIT(odb_path_map, const char * /* key: odb_path */,
@@ -651,6 +652,8 @@ int read_object_process(struct repository *r, const struct object_id *oid)
 
 	start = getnanotime();
 
+	trace2_region_enter("subprocess", "read_object",r);
+
 	if (!subprocess_map_initialized) {
 		subprocess_map_initialized = 1;
 		hashmap_init(&subprocess_map, (hashmap_cmp_fn)cmd2process_cmp,
@@ -667,13 +670,16 @@ int read_object_process(struct repository *r, const struct object_id *oid)
 		if (subprocess_start(&subprocess_map, &entry->subprocess, cmd,
 				     start_read_object_fn)) {
 			free(entry);
-			return -1;
+			err = -1;
+			goto leave_region;
 		}
 	}
 	process = &entry->subprocess.process;
 
-	if (!(CAP_GET & entry->supported_capabilities))
-		return -1;
+	if (!(CAP_GET & entry->supported_capabilities)) {
+		err = -1;
+		goto leave_region;
+	}
 
 	sigchain_push(SIGPIPE, SIG_IGN);
 
@@ -721,6 +727,10 @@ done:
 	}
 
 	trace_performance_since(start, "read_object_process");
+
+leave_region:
+	trace2_region_leave_printf("subprocess", "read_object", r,
+				   "result %d", err);
 
 	strbuf_release(&status);
 	return err;
