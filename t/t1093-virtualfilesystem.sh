@@ -222,6 +222,8 @@ test_expect_success 'verify folder entries include all files' '
 	cat > expected <<-\EOF &&
 		?? dir1/a
 		?? dir1/b
+		?? dir1/dir2/a
+		?? dir1/dir2/b
 		?? dir1/untracked.txt
 	EOF
 	test_cmp expected actual

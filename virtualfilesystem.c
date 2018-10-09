@@ -236,6 +236,10 @@ int is_excluded_from_virtualfilesystem(const char *pathname, int pathlen, int dt
 	}
 
 	if (dtype == DT_DIR) {
+		int ret = is_included_in_virtualfilesystem(pathname, pathlen);
+		if (ret > 0)
+			return 0;
+
 		if (!parent_directory_hashmap.tablesize && virtual_filesystem_data.len)
 			initialize_parent_directory_hashmap(&parent_directory_hashmap, &virtual_filesystem_data);
 		if (!parent_directory_hashmap.tablesize)
