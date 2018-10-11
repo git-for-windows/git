@@ -12,6 +12,7 @@
 #include "object.h"
 #include "oid-array.h"
 #include "prio-queue.h"
+#include "repository.h"
 #include "revision.h"
 #include "string-list.h"
 #include "strmap.h"
@@ -172,6 +173,23 @@ static int add_tree_entries(struct path_walk_context *ctx,
 		if (type == OBJ_TREE)
 			strbuf_addch(&path, '/');
 
+		if (ctx->info->pl) {
+			int dtype;
+			enum pattern_match_result match;
+			match = path_matches_pattern_list(path.buf, path.len,
+							  path.buf + base_len, &dtype,
+							  ctx->info->pl,
+							  ctx->repo->index);
+
+			if (ctx->info->pl->use_cone_patterns &&
+			    match == NOT_MATCHED)
+				continue;
+			else if (!ctx->info->pl->use_cone_patterns &&
+				 type == OBJ_BLOB &&
+				 match != MATCHED)
+				continue;
+		}
+
 		if (!(list = strmap_get(&ctx->paths_to_lists, path.buf))) {
 			CALLOC_ARRAY(list, 1);
 			list->type = type;
@@ -326,8 +344,10 @@ static int setup_pending_objects(struct path_walk_info *info,
 		struct object *obj = pending->item;
 
 		/* Commits will be picked up by revision walk. */
-		if (obj->type == OBJ_COMMIT)
+		if (obj->type == OBJ_COMMIT || obj->flags & SEEN)
 			continue;
+
+		obj->flags |= SEEN;
 
 		/* Navigate annotated tag object chains. */
 		while (obj->type == OBJ_TAG) {
