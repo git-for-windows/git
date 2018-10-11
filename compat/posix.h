@@ -45,7 +45,7 @@
 #define UNUSED
 #endif
 
-#ifdef __MINGW64__
+#if defined(__MINGW32__) || defined(__MINGW64__)
 #define _POSIX_C_SOURCE 1
 #elif defined(__sun__)
  /*
@@ -70,7 +70,9 @@
 #define _ALL_SOURCE 1
 #define _GNU_SOURCE 1
 #define _BSD_SOURCE 1
+#ifndef _DEFAULT_SOURCE
 #define _DEFAULT_SOURCE 1
+#endif
 #define _NETBSD_SOURCE 1
 #define _SGI_SOURCE 1
 
