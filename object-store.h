@@ -272,7 +272,7 @@ void *repo_read_object_file(struct repository *r,
 int oid_object_info(struct repository *r, const struct object_id *, unsigned long *);
 
 void hash_object_file(const struct git_hash_algo *algo, const void *buf,
-		      unsigned long len, enum object_type type,
+		      size_t len, enum object_type type,
 		      struct object_id *oid);
 
 /*
