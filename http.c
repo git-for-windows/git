@@ -129,7 +129,8 @@ enum http_follow_config http_follow_config = HTTP_FOLLOW_INITIAL;
 
 static struct credential cert_auth = CREDENTIAL_INIT;
 static int ssl_cert_password_required;
-static unsigned long http_auth_methods = CURLAUTH_ANY;
+static unsigned long http_auth_any = CURLAUTH_ANY & ~CURLAUTH_NTLM;
+static unsigned long http_auth_methods;
 static int http_auth_methods_restricted;
 /* Modes for which empty_auth cannot actually help us. */
 static unsigned long empty_auth_useless =
@@ -148,13 +149,21 @@ static char *cached_accept_language;
 
 static char *http_ssl_backend;
 
-static int http_schannel_check_revoke = 1;
+static long http_schannel_check_revoke_mode =
+#ifdef CURLSSLOPT_REVOKE_BEST_EFFORT
+	CURLSSLOPT_REVOKE_BEST_EFFORT;
+#else
+	CURLSSLOPT_NO_REVOKE;
+#endif
+
 /*
  * With the backend being set to `schannel`, setting sslCAinfo would override
  * the Certificate Store in cURL v7.60.0 and later, which is not what we want
  * by default.
  */
 static int http_schannel_use_ssl_cainfo;
+
+static int http_auto_client_cert;
 
 static int always_auth_proactively(void)
 {
@@ -422,13 +431,39 @@ static int http_options(const char *var, const char *value,
 		return 0;
 	}
 
+	if (!strcmp("http.allowntlmauth", var)) {
+		if (git_config_bool(var, value)) {
+			http_auth_any |= CURLAUTH_NTLM;
+		} else {
+			http_auth_any &= ~CURLAUTH_NTLM;
+		}
+		return 0;
+	}
+
 	if (!strcmp("http.schannelcheckrevoke", var)) {
-		http_schannel_check_revoke = git_config_bool(var, value);
+		if (value && !strcmp(value, "best-effort")) {
+			http_schannel_check_revoke_mode =
+#ifdef CURLSSLOPT_REVOKE_BEST_EFFORT
+				CURLSSLOPT_REVOKE_BEST_EFFORT;
+#else
+				CURLSSLOPT_NO_REVOKE;
+			warning(_("%s=%s unsupported by current cURL"),
+				var, value);
+#endif
+		} else
+			http_schannel_check_revoke_mode =
+				(git_config_bool(var, value) ?
+				 0 : CURLSSLOPT_NO_REVOKE);
 		return 0;
 	}
 
 	if (!strcmp("http.schannelusesslcainfo", var)) {
 		http_schannel_use_ssl_cainfo = git_config_bool(var, value);
+		return 0;
+	}
+
+	if (!strcmp("http.sslautoclientcert", var)) {
+		http_auto_client_cert = git_config_bool(var, value);
 		return 0;
 	}
 
@@ -628,6 +663,11 @@ static void init_curl_http_auth(CURL *result)
 
 	credential_fill(the_repository, &http_auth, 1);
 
+	if (http_auth.ntlm_allow && !(http_auth_methods & CURLAUTH_NTLM)) {
+		http_auth_methods |= CURLAUTH_NTLM;
+		curl_easy_setopt(result, CURLOPT_HTTPAUTH, http_auth_methods);
+	}
+
 	if (http_auth.password) {
 		if (always_auth_proactively()) {
 			/*
@@ -687,11 +727,11 @@ static void init_curl_proxy_auth(CURL *result)
 		if (i == ARRAY_SIZE(proxy_authmethods)) {
 			warning("unsupported proxy authentication method %s: using anyauth",
 					http_proxy_authmethod);
-			curl_easy_setopt(result, CURLOPT_PROXYAUTH, CURLAUTH_ANY);
+			curl_easy_setopt(result, CURLOPT_PROXYAUTH, http_auth_any);
 		}
 	}
 	else
-		curl_easy_setopt(result, CURLOPT_PROXYAUTH, CURLAUTH_ANY);
+		curl_easy_setopt(result, CURLOPT_PROXYAUTH, http_auth_any);
 }
 
 static int has_cert_password(void)
@@ -1038,7 +1078,7 @@ static CURL *get_curl_handle(void)
     }
 
 	curl_easy_setopt(result, CURLOPT_NETRC, CURL_NETRC_OPTIONAL);
-	curl_easy_setopt(result, CURLOPT_HTTPAUTH, CURLAUTH_ANY);
+	curl_easy_setopt(result, CURLOPT_HTTPAUTH, http_auth_any);
 
 #ifdef CURLGSSAPI_DELEGATION_FLAG
 	if (curl_deleg) {
@@ -1056,9 +1096,20 @@ static CURL *get_curl_handle(void)
 	}
 #endif
 
-	if (http_ssl_backend && !strcmp("schannel", http_ssl_backend) &&
-	    !http_schannel_check_revoke) {
-		curl_easy_setopt(result, CURLOPT_SSL_OPTIONS, (long)CURLSSLOPT_NO_REVOKE);
+	if (http_ssl_backend && !strcmp("schannel", http_ssl_backend)) {
+		long ssl_options = 0;
+		if (http_schannel_check_revoke_mode) {
+			ssl_options |= http_schannel_check_revoke_mode;
+		}
+
+		if (http_auto_client_cert) {
+#ifdef GIT_CURL_HAVE_CURLSSLOPT_AUTO_CLIENT_CERT
+			ssl_options |= CURLSSLOPT_AUTO_CLIENT_CERT;
+#endif
+		}
+
+		if (ssl_options)
+			curl_easy_setopt(result, CURLOPT_SSL_OPTIONS, ssl_options);
 	}
 
 	if (http_proactive_auth != PROACTIVE_AUTH_NONE)
@@ -1421,6 +1472,8 @@ void http_init(struct remote *remote, const char *url, int proactive_auth)
 	set_long_from_env(&curl_tcp_keepidle, "GIT_TCP_KEEPIDLE");
 	set_long_from_env(&curl_tcp_keepintvl, "GIT_TCP_KEEPINTVL");
 	set_long_from_env(&curl_tcp_keepcnt, "GIT_TCP_KEEPCNT");
+
+	http_auth_methods = http_auth_any;
 
 	curl_default = get_curl_handle();
 }
@@ -1853,6 +1906,8 @@ static int handle_curl_result(struct slot_results *results)
 	} else if (missing_target(results))
 		return HTTP_MISSING_TARGET;
 	else if (results->http_code == 401) {
+		http_auth.ntlm_suppressed = (results->auth_avail & CURLAUTH_NTLM) &&
+					    !(http_auth_any & CURLAUTH_NTLM);
 		if ((http_auth.username && http_auth.password) ||\
 		    (http_auth.authtype && http_auth.credential)) {
 			if (http_auth.multistage) {
@@ -1862,6 +1917,16 @@ static int handle_curl_result(struct slot_results *results)
 			credential_reject(the_repository, &http_auth);
 			if (always_auth_proactively())
 				http_proactive_auth = PROACTIVE_AUTH_NONE;
+			if (http_auth.ntlm_suppressed) {
+				warning(_("Due to its cryptographic weaknesses, "
+					  "NTLM authentication has been\n"
+					  "disabled in Git by default. You can "
+					  "re-enable it for trusted servers\n"
+					  "by running:\n\n"
+					  "git config set "
+					  "http.%s://%s.allowNTLMAuth true"),
+					http_auth.protocol, http_auth.host);
+			}
 			return HTTP_NOAUTH;
 		} else {
 			http_auth_methods &= ~CURLAUTH_GSSNEGOTIATE;
@@ -2303,6 +2368,13 @@ static int http_request_reauth(const char *url,
 		}
 
 		credential_fill(the_repository, &http_auth, 1);
+
+		/*
+		 * Re-enable NTLM auth if the helper allows it and we would
+		 * otherwise suppress authentication via NTLM.
+		 */
+		if (http_auth.ntlm_suppressed && http_auth.ntlm_allow)
+			http_auth_methods |= CURLAUTH_NTLM;
 
 		ret = http_request(url, result, target, options);
 	}
