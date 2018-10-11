@@ -231,6 +231,16 @@ static inline const char *precompose_string_if_needed(const char *in)
 # include <sys/sysinfo.h>
 #endif
 
+#ifdef USE_MIMALLOC
+#include "mimalloc.h"
+#define malloc mi_malloc
+#define calloc mi_calloc
+#define realloc mi_realloc
+#define free mi_free
+#define strdup mi_strdup
+#define strndup mi_strndup
+#endif
+
 #ifndef PATH_SEP
 #define PATH_SEP ':'
 #endif
@@ -292,6 +302,13 @@ static inline int git_offset_1st_component(const char *path)
 
 #ifndef fspathncmp
 #define fspathncmp git_fspathncmp
+#endif
+
+#ifndef warn_about_git_lfs_on_windows7
+static inline void warn_about_git_lfs_on_windows7(int exit_code UNUSED,
+						  const char *argv0 UNUSED)
+{
+}
 #endif
 
 #ifndef is_valid_path
@@ -383,8 +400,16 @@ static inline int git_has_dir_sep(const char *path)
 #define has_dir_sep(path) git_has_dir_sep(path)
 #endif
 
+#ifndef is_mount_point
+#define is_mount_point is_mount_point_via_stat
+#endif
+
 #ifndef query_user_email
 #define query_user_email() NULL
+#endif
+
+#ifndef platform_strbuf_realpath
+#define platform_strbuf_realpath(resolved, path) NULL
 #endif
 
 #ifdef __TANDEM
