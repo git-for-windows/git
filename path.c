@@ -1327,6 +1327,45 @@ char *strip_path_suffix(const char *path, const char *suffix)
 	return offset == -1 ? NULL : xstrndup(path, offset);
 }
 
+int is_mount_point_via_stat(struct strbuf *path)
+{
+	size_t len = path->len;
+	dev_t current_dev;
+	struct stat st;
+
+	if (!strcmp("/", path->buf))
+		return 1;
+
+	strbuf_addstr(path, "/.");
+	if (lstat(path->buf, &st)) {
+		/*
+		 * If we cannot access the current directory, we cannot say
+		 * that it is a bind mount.
+		 */
+		strbuf_setlen(path, len);
+		return 0;
+	}
+	current_dev = st.st_dev;
+
+	/* Now look at the parent directory */
+	strbuf_addch(path, '.');
+	if (lstat(path->buf, &st)) {
+		/*
+		 * If we cannot access the parent directory, we cannot say
+		 * that it is a bind mount.
+		 */
+		strbuf_setlen(path, len);
+		return 0;
+	}
+	strbuf_setlen(path, len);
+
+	/*
+	 * If the device ID differs between current and parent directory,
+	 * then it is a bind mount.
+	 */
+	return current_dev != st.st_dev;
+}
+
 int daemon_avoid_alias(const char *p)
 {
 	int sl, ndot;
@@ -1551,13 +1590,37 @@ char *xdg_config_home_for(const char *subdir, const char *filename)
 	config_home = getenv("XDG_CONFIG_HOME");
 	if (config_home && *config_home)
 		ret = mkpathdup("%s/%s/%s", config_home, subdir, filename);
-	else if ((home = getenv("HOME")))
-		ret = mkpathdup("%s/.config/%s/%s", home, subdir, filename);
-	else
-		return NULL;
+	else {
+		home = getenv("HOME");
+		ret = home && *home ?
+			mkpathdup("%s/.config/%s/%s", home, subdir, filename) :
+			NULL;
+
+#ifdef WIN32
+		{
+			const char *appdata = getenv("APPDATA");
+
+			if (appdata && *appdata) {
+				char *appdata_config =
+					mkpathdup("%s/Git/%s", appdata, filename);
+
+				if (file_exists(appdata_config)) {
+					if (ret && file_exists(ret))
+						warning("'%s' was ignored because '%s' exists.",
+							ret, appdata_config);
+					free(ret);
+					ret = appdata_config;
+				} else {
+					free(appdata_config);
+				}
+			}
+		}
+#endif
+	}
 
 #ifdef GIT_WINDOWS_NATIVE
-	convert_slashes(ret);
+	if (ret)
+		convert_slashes(ret);
 #endif
 	return ret;
 }
