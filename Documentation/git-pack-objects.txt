@@ -16,7 +16,7 @@ SYNOPSIS
 		   [--cruft] [--cruft-expiration=<time>]
 		   [--stdout [--filter=<filter-spec>] | <base-name>]
 		   [--shallow] [--keep-true-parents] [--[no-]sparse]
-		   [--path-walk] < <object-list>
+		   [--path-walk] [--full-name-hash] < <object-list>
 
 
 DESCRIPTION
