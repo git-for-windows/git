@@ -2,6 +2,7 @@
 
 #include "builtin.h"
 #include "commit.h"
+#include "config.h"
 #include "environment.h"
 #include "hash.h"
 #include "hex.h"
@@ -407,6 +408,7 @@ struct ref_stats {
 	size_t branches;
 	size_t remotes;
 	size_t tags;
+	size_t annotated_tags;
 	size_t others;
 };
 
@@ -592,6 +594,8 @@ static void stats_table_setup_structure(struct stats_table *table,
 	stats_table_count_addf(table, ref_total, "  * %s", _("Count"));
 	stats_table_count_addf(table, refs->branches, "    * %s", _("Branches"));
 	stats_table_count_addf(table, refs->tags, "    * %s", _("Tags"));
+	stats_table_count_addf(table, refs->annotated_tags,
+			       "      * %s", _("Annotated"));
 	stats_table_count_addf(table, refs->remotes, "    * %s", _("Remotes"));
 	stats_table_count_addf(table, refs->others, "    * %s", _("Others"));
 
@@ -775,6 +779,8 @@ static void structure_keyvalue_print(struct repo_structure *stats,
 		       stats->refs.branches, value_delim);
 	print_keyvalue("references.tags.count", key_delim,
 		       stats->refs.tags, value_delim);
+	print_keyvalue("references.tags.annotated.count", key_delim,
+		       stats->refs.annotated_tags, value_delim);
 	print_keyvalue("references.remotes.count", key_delim,
 		       stats->refs.remotes, value_delim);
 	print_keyvalue("references.others.count", key_delim,
@@ -827,6 +833,7 @@ static void structure_keyvalue_print(struct repo_structure *stats,
 struct count_references_data {
 	struct ref_stats *stats;
 	struct rev_info *revs;
+	struct repository *repo;
 	struct progress *progress;
 };
 
@@ -845,6 +852,9 @@ static int count_references(const struct reference *ref, void *cb_data)
 		break;
 	case FILTER_REFS_TAGS:
 		stats->tags++;
+		if (odb_read_object_info(data->repo->objects,
+					 ref->oid, NULL) == OBJ_TAG)
+			stats->annotated_tags++;
 		break;
 	case FILTER_REFS_OTHERS:
 		stats->others++;
@@ -873,6 +883,7 @@ static void structure_count_references(struct ref_stats *stats,
 	struct count_references_data data = {
 		.stats = stats,
 		.revs = revs,
+		.repo = repo,
 	};
 
 	if (show_progress)
@@ -921,13 +932,12 @@ static int count_objects(const char *path UNUSED, struct oid_array *oids,
 
 	for (size_t i = 0; i < oids->nr; i++) {
 		struct object_info oi = OBJECT_INFO_INIT;
-		unsigned long inflated;
-		size_t inflated_st = 0;
+		size_t inflated;
 		struct commit *commit;
 		void *content = NULL;
 		off_t disk;
 
-		oi.sizep = &inflated_st;
+		oi.sizep = &inflated;
 		oi.disk_sizep = &disk;
 		if (type == OBJ_TREE)
 			oi.contentp = &content;
@@ -936,7 +946,6 @@ static int count_objects(const char *path UNUSED, struct oid_array *oids,
 						  OBJECT_INFO_SKIP_FETCH_OBJECT |
 						  OBJECT_INFO_QUICK) < 0)
 			continue;
-		inflated = cast_size_t_to_ulong(inflated_st);
 
 		switch (type) {
 		case OBJ_TAG:
@@ -1016,6 +1025,22 @@ static void structure_count_objects(struct object_stats *stats,
 	stop_progress(&data.progress);
 }
 
+static int repo_structure_config_cb(const char *var, const char *value,
+				    const struct config_context *cctx,
+				    void *cb)
+{
+	int *top_nr = cb;
+
+	if (!strcmp(var, "repo.structure.top")) {
+		*top_nr = git_config_int(var, value, cctx->kvi);
+		if (*top_nr < 0)
+			die(_("repo.structure.top must be non-negative"));
+		return 0;
+	}
+
+	return git_default_config(var, value, cctx, NULL);
+}
+
 static int cmd_repo_structure(int argc, const char **argv, const char *prefix,
 			      struct repository *repo)
 {
@@ -1027,6 +1052,7 @@ static int cmd_repo_structure(int argc, const char **argv, const char *prefix,
 	struct repo_structure stats = { 0 };
 	struct rev_info revs;
 	int show_progress = -1;
+	int top_nr = 0;
 	struct option options[] = {
 		OPT_CALLBACK_F(0, "format", &format, N_("format"),
 			       N_("output format"),
@@ -1038,6 +1064,8 @@ static int cmd_repo_structure(int argc, const char **argv, const char *prefix,
 		OPT_BOOL(0, "progress", &show_progress, N_("show progress")),
 		OPT_END()
 	};
+
+	repo_config(repo, repo_structure_config_cb, &top_nr);
 
 	argc = parse_options(argc, argv, prefix, options, repo_structure_usage, 0);
 	if (argc)
