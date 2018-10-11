@@ -365,4 +365,13 @@ test_expect_success 'remove worktree in the middle of a cherry-pick sequence' '
 	git worktree remove --force mid-pick-seq
 '
 
+test_expect_success MINGW 'worktree remove does not traverse mount points' '
+	mkdir target &&
+	>target/dont-remove-me &&
+	git worktree add --detach wt-junction &&
+	cmd //c "mklink /j wt-junction\\mnt target" &&
+	git worktree remove --force wt-junction &&
+	test_path_is_file target/dont-remove-me
+'
+
 test_done
