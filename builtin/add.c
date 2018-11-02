@@ -497,7 +497,7 @@ int cmd_add(int argc,
 		 (!(addremove || take_worktree_changes)
 		  ? ADD_CACHE_IGNORE_REMOVAL : 0));
 
-	enable_fscache(1);
+	enable_fscache(0);
 	if (repo_read_index_preload(repo, &pathspec, 0) < 0)
 		die(_("index file corrupt"));
 
@@ -619,6 +619,6 @@ finish:
 	free(ps_matched);
 	dir_clear(&dir);
 	clear_pathspec(&pathspec);
-	enable_fscache(0);
+	disable_fscache();
 	return exit_status;
 }
