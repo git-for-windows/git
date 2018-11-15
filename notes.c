@@ -859,8 +859,7 @@ int combine_notes_concatenate(struct repository *r,
 	free(new_msg);
 
 	/* create a new blob object from buf */
-	ret = odb_write_object(r->objects, buf,
-			       cast_size_t_to_ulong(buf_len), OBJ_BLOB, cur_oid);
+	ret = odb_write_object(r->objects, buf, buf_len, OBJ_BLOB, cur_oid);
 	free(buf);
 	return ret;
 }
