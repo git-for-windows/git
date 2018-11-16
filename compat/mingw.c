@@ -20,6 +20,7 @@
 #include "../write-or-die.h"
 #include "../repository.h"
 #include "../repository.h"
+#include "win32/fscache.h"
 #include "dir.h"
 #include "gettext.h"
 #define SECURITY_WIN32
@@ -3723,6 +3724,9 @@ int wmain(int argc, const wchar_t **wargv)
 
 	/* initialize critical section for waitpid pinfo_t list */
 	InitializeCriticalSection(&pinfo_cs);
+
+	/* initialize critical section for fscache */
+	InitializeCriticalSection(&fscache_cs);
 
 	/* set up default file mode and file modes for stdin/out/err */
 	_fmode = _O_BINARY;
