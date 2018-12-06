@@ -138,6 +138,7 @@ integration_tests = [
   't0303-credential-external.sh',
   't0400-pre-command-hook.sh',
   't0401-post-command-hook.sh',
+  't0402-block-command-on-gvfs.sh',
   't0410-partial-clone.sh',
   't0411-clone-from-partial.sh',
   't0450-txt-doc-vs-help.sh',
