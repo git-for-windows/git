@@ -9,6 +9,23 @@
 #include "statinfo.h"
 #include "hex.h"
 #include "path.h"
+#include "trace2.h"
+
+static void set_deserialize_reject_reason(const char *reason)
+{
+	trace2_data_string("status", the_repository, "deserialize/reject",
+			   reason);
+}
+
+int wt_status_deserialize_access(const char *path, int mode)
+{
+	int a = access(path, mode);
+
+	if (a != 0)
+		set_deserialize_reject_reason("status-cache/access");
+
+	return a;
+}
 
 static struct trace_key trace_deserialize = TRACE_KEY_INIT(DESERIALIZE);
 
@@ -55,6 +72,7 @@ static int my_validate_index(const char *path, const struct cache_time *mtime_re
 	struct cache_time mtime_observed_on_disk;
 
 	if (lstat(path, &st)) {
+		set_deserialize_reject_reason("index/not-found");
 		trace_printf_key(&trace_deserialize, "could not stat index");
 		return DESERIALIZE_ERR;
 	}
@@ -62,6 +80,7 @@ static int my_validate_index(const char *path, const struct cache_time *mtime_re
 	mtime_observed_on_disk.nsec = ST_MTIME_NSEC(st);
 	if ((mtime_observed_on_disk.sec != mtime_reported->sec) ||
 	    (mtime_observed_on_disk.nsec != mtime_reported->nsec)) {
+		set_deserialize_reject_reason("index/mtime-changed");
 		trace_printf_key(&trace_deserialize,
 				 "index mtime changed [des %d %d][obs %d %d]",
 			     mtime_reported->sec, mtime_reported->nsec,
@@ -87,10 +106,12 @@ static int my_validate_excludes(const char *path, const char *key, const char *l
 
 	r = (strcmp(line, sb.buf) ? DESERIALIZE_ERR : DESERIALIZE_OK);
 
-	if (r == DESERIALIZE_ERR)
+	if (r == DESERIALIZE_ERR) {
+		set_deserialize_reject_reason("excludes/changed");
 		trace_printf_key(&trace_deserialize,
 				 "%s changed [cached '%s'][observed '%s']",
 				 key, line, sb.buf);
+	}
 
 	strbuf_release(&sb);
 	return r;
@@ -146,6 +167,7 @@ static int wt_deserialize_v1_header(struct wt_status *s, int fd)
 					   &index_mtime.sec,
 					   &index_mtime.nsec);
 			if (nr_fields != 2) {
+				set_deserialize_reject_reason("v1-header/invalid-index-mtime");
 				trace_printf_key(&trace_deserialize, "invalid index_mtime (%d) '%s'",
 					     nr_fields, line);
 				return DESERIALIZE_ERR;
@@ -229,6 +251,7 @@ static int wt_deserialize_v1_header(struct wt_status *s, int fd)
 		/* status_format */
 		if (skip_prefix(line, "sha1_commit ", &arg)) {
 			if (get_oid_hex(arg, &s->oid_commit)) {
+				set_deserialize_reject_reason("v1-header/invalid-commit-sha");
 				trace_printf_key(&trace_deserialize, "invalid sha1_commit");
 				return DESERIALIZE_ERR;
 			}
@@ -244,19 +267,23 @@ static int wt_deserialize_v1_header(struct wt_status *s, int fd)
 		}
 		/* prefix */
 
+		set_deserialize_reject_reason("v1-header/unexpected-line");
 		trace_printf_key(&trace_deserialize, "unexpected line '%s'", line);
 		return DESERIALIZE_ERR;
 	}
 
 	if (!have_required_index_mtime) {
+		set_deserialize_reject_reason("v1-header/missing-index-mtime");
 		trace_printf_key(&trace_deserialize, "missing '%s'", "index_mtime");
 		return DESERIALIZE_ERR;
 	}
 	if (!have_required_core_excludes) {
+		set_deserialize_reject_reason("v1-header/missing-core-excludes");
 		trace_printf_key(&trace_deserialize, "missing '%s'", "core_excludes");
 		return DESERIALIZE_ERR;
 	}
 	if (!have_required_repo_excludes) {
+		set_deserialize_reject_reason("v1-header/missing-repo-excludes");
 		trace_printf_key(&trace_deserialize, "missing '%s'", "repo_excludes");
 		return DESERIALIZE_ERR;
 	}
@@ -343,6 +370,7 @@ static int wt_deserialize_v1_changed_items(const struct wt_status *cmd_s,
 			 * So we reject the status cache and let the fallback
 			 * code run.
 			 */
+			set_deserialize_reject_reason("v1-data/unmerged");
 			trace_printf_key(
 				&trace_deserialize,
 				"reject: V2 format and umerged file: %s",
@@ -484,6 +512,7 @@ static int wt_deserialize_v1(const struct wt_status *cmd_s, struct wt_status *s,
 	 * the serialized data
 	*/
 	if (validate_untracked_files_arg(cmd_s->show_untracked_files, &s->show_untracked_files, &untracked_strategy)) {
+		set_deserialize_reject_reason("args/untracked-files");
 		trace_printf_key(&trace_deserialize, "reject: show_untracked_file: command: %d, serialized : %d",
 				cmd_s->show_untracked_files,
 				s->show_untracked_files);
@@ -491,6 +520,7 @@ static int wt_deserialize_v1(const struct wt_status *cmd_s, struct wt_status *s,
 	}
 
 	if (validate_ignored_files_arg(cmd_s->show_ignored_mode, s->show_ignored_mode, &ignored_strategy)) {
+		set_deserialize_reject_reason("args/ignored-mode");
 		trace_printf_key(&trace_deserialize, "reject: show_ignored_mode: command: %d, serialized: %d",
 				cmd_s->show_ignored_mode,
 				s->show_ignored_mode);
@@ -524,6 +554,7 @@ static int wt_deserialize_v1(const struct wt_status *cmd_s, struct wt_status *s,
 				return DESERIALIZE_ERR;
 			continue;
 		}
+		set_deserialize_reject_reason("v1-data/unexpected-line");
 		trace_printf_key(&trace_deserialize, "unexpected line '%s'", line);
 		return DESERIALIZE_ERR;
 	}
@@ -543,6 +574,7 @@ static int wt_deserialize_parse(const struct wt_status *cmd_s, struct wt_status 
 		if (version == 1)
 			return wt_deserialize_v1(cmd_s, s, fd);
 	}
+	set_deserialize_reject_reason("status-cache/unsupported-version");
 	trace_printf_key(&trace_deserialize, "missing/unsupported version");
 	return DESERIALIZE_ERR;
 }
@@ -563,6 +595,7 @@ static int wt_deserialize_fd(const struct wt_status *cmd_s, struct wt_status *de
 	 * Check the path spec on the current command
 	 */
 	if (cmd_s->pathspec.nr > 1) {
+		set_deserialize_reject_reason("args/multiple-pathspecs");
 		trace_printf_key(&trace_deserialize, "reject: multiple pathspecs");
 		return DESERIALIZE_ERR;
 	}
@@ -573,6 +606,7 @@ static int wt_deserialize_fd(const struct wt_status *cmd_s, struct wt_status *de
 	 */
 	if (cmd_s->pathspec.nr == 1 &&
 		my_strcmp_null(cmd_s->pathspec.items[0].match, "")) {
+		set_deserialize_reject_reason("args/root-pathspec");
 		trace_printf_key(&trace_deserialize, "reject: pathspec");
 		return DESERIALIZE_ERR;
 	}
@@ -595,20 +629,24 @@ static int wt_deserialize_fd(const struct wt_status *cmd_s, struct wt_status *de
 	 * or "--ignored" settings).
 	 */
 	if (cmd_s->is_initial != des_s->is_initial) {
+		set_deserialize_reject_reason("args/is-initial-changed");
 		trace_printf_key(&trace_deserialize, "reject: is_initial");
 		return DESERIALIZE_ERR;
 	}
 	if (my_strcmp_null(cmd_s->branch, des_s->branch)) {
+		set_deserialize_reject_reason("args/branch-changed");
 		trace_printf_key(&trace_deserialize, "reject: branch");
 		return DESERIALIZE_ERR;
 	}
 	if (my_strcmp_null(cmd_s->reference, des_s->reference)) {
+		set_deserialize_reject_reason("args/reference-changed");
 		trace_printf_key(&trace_deserialize, "reject: reference");
 		return DESERIALIZE_ERR;
 	}
 	/* verbose */
 	/* amend */
 	if (cmd_s->whence != des_s->whence) {
+		set_deserialize_reject_reason("args/whence-changed");
 		trace_printf_key(&trace_deserialize, "reject: whence");
 		return DESERIALIZE_ERR;
 	}
@@ -642,19 +680,23 @@ static int wt_deserialize_fd(const struct wt_status *cmd_s, struct wt_status *de
 	/* hints */
 	/* ahead_behind_flags */
 	if (cmd_s->detect_rename != des_s->detect_rename) {
+		set_deserialize_reject_reason("args/detect-rename-changed");
 		trace_printf_key(&trace_deserialize, "reject: detect_rename");
 		return DESERIALIZE_ERR;
 	}
 	if (cmd_s->rename_score != des_s->rename_score) {
+		set_deserialize_reject_reason("args/rename-score-changed");
 		trace_printf_key(&trace_deserialize, "reject: rename_score");
 		return DESERIALIZE_ERR;
 	}
 	if (cmd_s->rename_limit != des_s->rename_limit) {
+		set_deserialize_reject_reason("args/rename-limit-changed");
 		trace_printf_key(&trace_deserialize, "reject: rename_limit");
 		return DESERIALIZE_ERR;
 	}
 	/* status_format */
 	if (!oideq(&cmd_s->oid_commit, &des_s->oid_commit)) {
+		set_deserialize_reject_reason("args/commit-changed");
 		trace_printf_key(&trace_deserialize, "reject: sha1_commit");
 		return DESERIALIZE_ERR;
 	}
@@ -742,15 +784,18 @@ static int try_deserialize_read_from_file(const struct wt_status *cmd_s,
 					  enum wt_status_deserialize_wait dw,
 					  struct wt_status *des_s)
 {
-	int k, limit;
+	int k = 0;
+	int limit;
 	int result = DESERIALIZE_ERR;
 
 	/*
 	 * For "fail" or "no", try exactly once to read the status cache.
 	 * Return an error if the file is stale.
 	 */
-	if (dw == DESERIALIZE_WAIT__FAIL || dw == DESERIALIZE_WAIT__NO)
-		return try_deserialize_read_from_file_1(cmd_s, path, des_s);
+	if (dw == DESERIALIZE_WAIT__FAIL || dw == DESERIALIZE_WAIT__NO) {
+		result = try_deserialize_read_from_file_1(cmd_s, path, des_s);
+		goto done;
+	}
 
 	/*
 	 * Wait for the status cache file to refresh.  Wait duration can
@@ -774,6 +819,12 @@ static int try_deserialize_read_from_file(const struct wt_status *cmd_s,
 
 		sleep_millisec(100);
 	}
+
+done:
+	trace2_data_string("status", the_repository, "deserialize/path", path);
+	trace2_data_intmax("status", the_repository, "deserialize/polled", k);
+	trace2_data_string("status", the_repository, "deserialize/result",
+			   ((result == DESERIALIZE_OK) ? "ok" : "reject"));
 
 	trace_printf_key(&trace_deserialize,
 			 "wait polled=%d result=%d '%s'",
@@ -801,6 +852,8 @@ int wt_status_deserialize(const struct wt_status *cmd_s,
 	int result;
 	struct string_list_item *change;
 
+	trace2_region_enter("status", "deserialize", the_repository);
+
 	if (path && *path && strcmp(path, "0")) {
 		result = try_deserialize_read_from_file(cmd_s, path, dw, &des_s);
 	} else {
@@ -811,7 +864,13 @@ int wt_status_deserialize(const struct wt_status *cmd_s,
 		 * term, since we cannot read stdin multiple times.
 		 */
 		result = wt_deserialize_fd(cmd_s, &des_s, 0);
+
+		trace2_data_string("status", the_repository, "deserialize/path", "STDIN");
+		trace2_data_string("status", the_repository, "deserialize/result",
+				   ((result == DESERIALIZE_OK) ? "ok" : "reject"));
 	}
+
+	trace2_region_leave("status", "deserialize", the_repository);
 
 	if (result == DESERIALIZE_OK) {
 		wt_status_get_state(cmd_s->repo, &des_s.state, des_s.branch &&

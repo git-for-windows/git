@@ -17,6 +17,7 @@
 #include "tree-walk.h"
 #include "cache-tree.h"
 #include "unpack-trees.h"
+#include "packfile.h"
 #include "progress.h"
 #include "refs.h"
 #include "attr.h"
@@ -431,8 +432,12 @@ static int check_updates(struct unpack_trees_options *o,
 	struct progress *progress;
 	struct checkout state = CHECKOUT_INIT;
 	int i, pc_workers, pc_threshold;
+	intmax_t sum_unlink = 0;
+	intmax_t sum_prefetch = 0;
+	intmax_t sum_checkout = 0;
 
 	trace_performance_enter();
+	trace2_region_enter("unpack_trees", "check_updates", NULL);
 	state.super_prefix = o->super_prefix;
 	state.force = 1;
 	state.quiet = 1;
@@ -442,8 +447,7 @@ static int check_updates(struct unpack_trees_options *o,
 
 	if (!o->update || o->dry_run) {
 		remove_marked_cache_entries(index, 0);
-		trace_performance_leave("check_updates");
-		return 0;
+		goto done;
 	}
 
 	if (o->clone)
@@ -465,6 +469,7 @@ static int check_updates(struct unpack_trees_options *o,
 		if (ce->ce_flags & CE_WT_REMOVE) {
 			display_progress(progress, ++cnt);
 			unlink_entry(ce, o->super_prefix);
+			sum_unlink++;
 		}
 	}
 
@@ -500,6 +505,7 @@ static int check_updates(struct unpack_trees_options *o,
 
 			if (last_pc_queue_size == pc_queue_size())
 				display_progress(progress, ++cnt);
+			sum_checkout++;
 		}
 	}
 	if (pc_workers > 1)
@@ -512,6 +518,15 @@ static int check_updates(struct unpack_trees_options *o,
 	if (o->clone)
 		report_collided_checkout(index);
 
+	if (sum_unlink > 0)
+		trace2_data_intmax("unpack_trees", NULL, "check_updates/nr_unlink", sum_unlink);
+	if (sum_prefetch > 0)
+		trace2_data_intmax("unpack_trees", NULL, "check_updates/nr_prefetch", sum_prefetch);
+	if (sum_checkout > 0)
+		trace2_data_intmax("unpack_trees", NULL, "check_updates/nr_write", sum_checkout);
+
+done:
+	trace2_region_leave("unpack_trees", "check_updates", NULL);
 	trace_performance_leave("check_updates");
 	return errs != 0;
 }
@@ -1790,7 +1805,7 @@ static int clear_ce_flags(struct index_state *istate,
 					_("Updating index flags"),
 					istate->cache_nr);
 
-	xsnprintf(label, sizeof(label), "clear_ce_flags(0x%08lx,0x%08lx)",
+	xsnprintf(label, sizeof(label), "clear_ce_flags/0x%08lx_0x%08lx",
 		  (unsigned long)select_mask, (unsigned long)clear_mask);
 	trace2_region_enter("unpack_trees", label, the_repository);
 	rval = clear_ce_flags_1(istate,
@@ -1902,6 +1917,7 @@ int unpack_trees(unsigned len, struct tree_desc *t, struct unpack_trees_options 
 	struct pattern_list pl;
 	int free_pattern_list = 0;
 	struct dir_struct dir = DIR_INIT;
+	unsigned long nr_unpack_entry_at_start;
 
 	if (o->reset == UNPACK_RESET_INVALID)
 		BUG("o->reset had a value of 1; should be UNPACK_TREES_*_UNTRACKED");
@@ -1914,6 +1930,9 @@ int unpack_trees(unsigned len, struct tree_desc *t, struct unpack_trees_options 
 		BUG("o->internal.pl is for internal use only");
 	if (o->df_conflict_entry)
 		BUG("o->df_conflict_entry is an output only field");
+
+	trace2_region_enter("unpack_trees", "unpack_trees", NULL);
+	nr_unpack_entry_at_start = get_nr_unpack_entry();
 
 	trace_performance_enter();
 	trace2_region_enter("unpack_trees", "unpack_trees", the_repository);
@@ -2124,6 +2143,9 @@ done:
 	}
 	trace2_region_leave("unpack_trees", "unpack_trees", the_repository);
 	trace_performance_leave("unpack_trees");
+	trace2_data_intmax("unpack_trees", NULL, "unpack_trees/nr_unpack_entries",
+			   (intmax_t)(get_nr_unpack_entry() - nr_unpack_entry_at_start));
+	trace2_region_leave("unpack_trees", "unpack_trees", NULL);
 	return ret;
 
 return_failed:

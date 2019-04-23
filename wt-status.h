@@ -246,6 +246,8 @@ int wt_status_deserialize(const struct wt_status *cmd_s,
 			  const char *path,
 			  enum wt_status_deserialize_wait dw);
 
+int wt_status_deserialize_access(const char *path, int mode);
+
 /*
  * A helper routine for serialize and deserialize to compute
  * metadata for the user-global and repo-local excludes files.

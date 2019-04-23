@@ -388,4 +388,9 @@ int load_idx(const char *path, const unsigned int hashsz, void *idx_map,
  */
 int parse_pack_header_option(const char *in, unsigned char *out, unsigned int *len);
 
+/*
+ * Return the number of objects fetched from a packfile.
+ */
+unsigned long get_nr_unpack_entry(void);
+
 #endif

@@ -1670,6 +1670,13 @@ struct unpack_entry_stack_ent {
 	unsigned long size;
 };
 
+static unsigned long g_nr_unpack_entry;
+
+unsigned long get_nr_unpack_entry(void)
+{
+	return g_nr_unpack_entry;
+}
+
 void *unpack_entry(struct repository *r, struct packed_git *p, off_t obj_offset,
 		   enum object_type *final_type, unsigned long *final_size)
 {
@@ -1682,6 +1689,8 @@ void *unpack_entry(struct repository *r, struct packed_git *p, off_t obj_offset,
 	struct unpack_entry_stack_ent *delta_stack = small_delta_stack;
 	int delta_stack_nr = 0, delta_stack_alloc = UNPACK_ENTRY_STACK_PREALLOC;
 	int base_from_cache = 0;
+
+	g_nr_unpack_entry++;
 
 	prepare_repo_settings(p->repo);
 

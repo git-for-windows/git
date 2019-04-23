@@ -170,6 +170,7 @@ static int opt_parse_porcelain(const struct option *opt, const char *arg, int un
 static int do_serialize = 0;
 static char *serialize_path = NULL;
 
+static int reject_implicit = 0;
 static int do_implicit_deserialize = 0;
 static int do_explicit_deserialize = 0;
 static char *deserialize_path = NULL;
@@ -233,7 +234,7 @@ static int opt_parse_deserialize(const struct option *opt UNUSED, const char *ar
 		}
 		if (!deserialize_path || !*deserialize_path)
 			do_explicit_deserialize = 1; /* read stdin */
-		else if (access(deserialize_path, R_OK) == 0)
+		else if (wt_status_deserialize_access(deserialize_path, R_OK) == 0)
 			do_explicit_deserialize = 1; /* can read from this file */
 		else {
 			/*
@@ -1631,6 +1632,8 @@ static int git_status_config(const char *k, const char *v,
 		if (v && *v && access(v, R_OK) == 0) {
 			do_implicit_deserialize = 1;
 			deserialize_path = xstrdup(v);
+		} else {
+			reject_implicit = 1;
 		}
 		return 0;
 	}
@@ -1801,6 +1804,17 @@ struct repository *repo UNUSED)
 
 	if (try_deserialize)
 		goto skip_init;
+	/*
+	 * If we implicitly received a status cache pathname from the config
+	 * and the file does not exist, we silently reject it and do the normal
+	 * status "collect".  Fake up some trace2 messages to reflect this and
+	 * assist post-processors know this case is different.
+	 */
+	if (!do_serialize && reject_implicit) {
+		trace2_cmd_mode("implicit-deserialize");
+		trace2_data_string("status", the_repository, "deserialize/reject",
+				   "status-cache/access");
+	}
 
 	enable_fscache(0);
 	if (status_format != STATUS_FORMAT_PORCELAIN &&
@@ -1844,6 +1858,7 @@ skip_init:
 		if (s.relative_paths)
 			s.prefix = prefix;
 
+		trace2_cmd_mode("deserialize");
 		result = wt_status_deserialize(&s, deserialize_path, dw);
 		if (result == DESERIALIZE_OK)
 			return 0;
@@ -1861,6 +1876,7 @@ skip_init:
 			fd = -1;
 	}
 
+	trace2_cmd_mode("collect");
 	wt_status_collect(&s);
 
 	if (0 <= fd)
@@ -1875,6 +1891,7 @@ skip_init:
 		if (fd_serialize < 0)
 			die_errno(_("could not serialize to '%s'"),
 				  serialize_path);
+		trace2_cmd_mode("serialize");
 		wt_status_serialize_v1(fd_serialize, &s);
 		close(fd_serialize);
 	}
