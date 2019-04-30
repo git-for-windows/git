@@ -1793,6 +1793,7 @@ static int clear_ce_flags(struct index_state *istate,
 	xsnprintf(label, sizeof(label), "clear_ce_flags(0x%08lx,0x%08lx)",
 		  (unsigned long)select_mask, (unsigned long)clear_mask);
 	trace2_region_enter("unpack_trees", label, the_repository);
+
 	rval = clear_ce_flags_1(istate,
 				istate->cache,
 				istate->cache_nr,
