@@ -345,4 +345,59 @@ test_expect_success 'renames' '
 	test_cmp output.1 output.2
 '
 
+test_expect_success 'hint message when cached with u=complete' '
+	git init -b main hint &&
+	echo xxx >hint/xxx &&
+	git -C hint add xxx &&
+	git -C hint commit -m xxx &&
+
+	cat >expect.clean <<EOF &&
+On branch main
+nothing to commit, working tree clean
+EOF
+
+	cat >expect.use_u <<EOF &&
+On branch main
+nothing to commit (use -u to show untracked files)
+EOF
+
+	# Capture long format output from "no", "normal", and "all"
+	# (without using status cache) and verify it matches expected
+	# output.
+
+	git -C hint status --untracked-files=normal >hint.output_normal &&
+	test_cmp expect.clean hint.output_normal &&
+
+	git -C hint status --untracked-files=all >hint.output_all &&
+	test_cmp expect.clean hint.output_all &&
+
+	git -C hint status --untracked-files=no >hint.output_no &&
+	test_cmp expect.use_u hint.output_no &&
+
+	# Create long format output for "complete" and create status cache.
+
+	git -C hint status --untracked-files=complete --ignored=matching --serialize=../hint.dat >hint.output_complete &&
+	test_cmp expect.clean hint.output_complete &&
+
+	# Capture long format output using the status cache and verify
+	# that the output matches the non-cached version.  There are 2
+	# ways to specify untracked-files, so do them both.
+
+	git -C hint status --deserialize=../hint.dat -unormal >hint.d1_normal &&
+	test_cmp expect.clean hint.d1_normal &&
+	git -C hint -c status.showuntrackedfiles=normal status --deserialize=../hint.dat >hint.d2_normal &&
+	test_cmp expect.clean hint.d2_normal &&
+
+	git -C hint status --deserialize=../hint.dat -uall >hint.d1_all &&
+	test_cmp expect.clean hint.d1_all &&
+	git -C hint -c status.showuntrackedfiles=all status --deserialize=../hint.dat >hint.d2_all &&
+	test_cmp expect.clean hint.d2_all &&
+
+	git -C hint status --deserialize=../hint.dat -uno >hint.d1_no &&
+	test_cmp expect.use_u hint.d1_no &&
+	git -C hint -c status.showuntrackedfiles=no status --deserialize=../hint.dat >hint.d2_no &&
+	test_cmp expect.use_u hint.d2_no
+
+'
+
 test_done

@@ -424,20 +424,24 @@ static int wt_deserialize_v1_ignored_items(struct wt_status *s,
 }
 
 static int validate_untracked_files_arg(enum untracked_status_type cmd,
-					enum untracked_status_type des,
+					enum untracked_status_type *des,
 					enum deserialize_parse_strategy *strategy)
 {
 	*strategy = DESERIALIZE_STRATEGY_AS_IS;
 
-	if (cmd == des) {
+	if (cmd == *des) {
 		*strategy = DESERIALIZE_STRATEGY_AS_IS;
 	} else if (cmd == SHOW_NO_UNTRACKED_FILES) {
 		*strategy = DESERIALIZE_STRATEGY_SKIP;
-	} else if (des == SHOW_COMPLETE_UNTRACKED_FILES) {
-		if (cmd == SHOW_ALL_UNTRACKED_FILES)
+		*des = cmd;
+	} else if (*des == SHOW_COMPLETE_UNTRACKED_FILES) {
+		if (cmd == SHOW_ALL_UNTRACKED_FILES) {
 			*strategy = DESERIALIZE_STRATEGY_ALL;
-		else if (cmd == SHOW_NORMAL_UNTRACKED_FILES)
+			*des = cmd;
+		} else if (cmd == SHOW_NORMAL_UNTRACKED_FILES) {
 			*strategy = DESERIALIZE_STRATEGY_NORMAL;
+			*des = cmd;
+		}
 	} else {
 		return DESERIALIZE_ERR;
 	}
@@ -479,7 +483,7 @@ static int wt_deserialize_v1(const struct wt_status *cmd_s, struct wt_status *s,
 	 * We now have the header parsed. Look at the command args (as passed in), and see how to parse
 	 * the serialized data
 	*/
-	if (validate_untracked_files_arg(cmd_s->show_untracked_files, s->show_untracked_files, &untracked_strategy)) {
+	if (validate_untracked_files_arg(cmd_s->show_untracked_files, &s->show_untracked_files, &untracked_strategy)) {
 		trace_printf_key(&trace_deserialize, "reject: show_untracked_file: command: %d, serialized : %d",
 				cmd_s->show_untracked_files,
 				s->show_untracked_files);
