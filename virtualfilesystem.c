@@ -268,6 +268,8 @@ void apply_virtualfilesystem(struct index_state *istate)
 	if (!repo_config_get_virtualfilesystem(istate->repo))
 		return;
 
+	trace2_region_enter("vfs", "apply", the_repository);
+
 	if (!virtual_filesystem_data.len)
 		get_virtual_filesystem_data(istate->repo, &virtual_filesystem_data);
 
@@ -338,6 +340,8 @@ void apply_virtualfilesystem(struct index_state *istate)
 		trace2_data_intmax("vfs", the_repository, "apply/nr_bulk_skip", nr_bulk_skip);
 		trace2_data_intmax("vfs", the_repository, "apply/nr_explicit_skip", nr_explicit_skip);
 	}
+
+	trace2_region_leave("vfs", "apply", the_repository);
 }
 
 /*
