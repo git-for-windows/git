@@ -17,6 +17,7 @@
 #include "tree-walk.h"
 #include "cache-tree.h"
 #include "unpack-trees.h"
+#include "packfile.h"
 #include "progress.h"
 #include "refs.h"
 #include "attr.h"
@@ -1903,6 +1904,7 @@ int unpack_trees(unsigned len, struct tree_desc *t, struct unpack_trees_options 
 	struct pattern_list pl;
 	int free_pattern_list = 0;
 	struct dir_struct dir = DIR_INIT;
+	unsigned long nr_unpack_entry_at_start;
 
 	if (o->reset == UNPACK_RESET_INVALID)
 		BUG("o->reset had a value of 1; should be UNPACK_TREES_*_UNTRACKED");
@@ -1917,6 +1919,7 @@ int unpack_trees(unsigned len, struct tree_desc *t, struct unpack_trees_options 
 		BUG("o->df_conflict_entry is an output only field");
 
 	trace2_region_enter("exp", "unpack_trees", NULL);
+	nr_unpack_entry_at_start = get_nr_unpack_entry();
 
 	trace_performance_enter();
 	trace2_region_enter("unpack_trees", "unpack_trees", the_repository);
@@ -2127,6 +2130,8 @@ done:
 	}
 	trace2_region_leave("unpack_trees", "unpack_trees", the_repository);
 	trace_performance_leave("unpack_trees");
+	trace2_data_intmax("unpack_trees", NULL, "unpack_trees/nr_unpack_entries",
+			   (intmax_t)(get_nr_unpack_entry() - nr_unpack_entry_at_start));
 	trace2_region_leave("exp", "unpack_trees", NULL);
 	return ret;
 
