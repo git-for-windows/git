@@ -23,7 +23,7 @@
 #include <sspi.h>
 #include "../write-or-die.h"
 #include "../repository.h"
-#include "win32/fscache.h"
+#include "compat/win32/fscache.h"
 
 #define HCAST(type, handle) ((type)(intptr_t)handle)
 
@@ -3016,6 +3016,8 @@ pid_t waitpid(pid_t pid, int *status, int options)
 	errno = EINVAL;
 	return -1;
 }
+
+int (*win32_is_mount_point)(struct strbuf *path) = mingw_is_mount_point;
 
 int mingw_is_mount_point(struct strbuf *path)
 {
