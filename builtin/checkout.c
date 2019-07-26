@@ -1065,12 +1065,12 @@ static void update_refs_for_switch(const struct checkout_opts *opts,
 	    (new_branch_info->path || !strcmp(new_branch_info->name, "HEAD"))) {
 		unsigned long nr_unpack_entry_at_start;
 
-		trace2_region_enter("exp", "report_tracking", the_repository);
+		trace2_region_enter("tracking", "report_tracking", the_repository);
 		nr_unpack_entry_at_start = get_nr_unpack_entry();
 		report_tracking(new_branch_info);
-		trace2_data_intmax("exp", NULL, "report_tracking/nr_unpack_entries",
+		trace2_data_intmax("tracking", NULL, "report_tracking/nr_unpack_entries",
 				   (intmax_t)(get_nr_unpack_entry() - nr_unpack_entry_at_start));
-		trace2_region_leave("exp", "report_tracking", the_repository);
+		trace2_region_leave("tracking", "report_tracking", the_repository);
 	}
 }
 
