@@ -3490,6 +3490,7 @@ int mingw_is_mount_point(struct strbuf *path)
 	if (wlen < 0)
 		die(_("could not get long path for '%s'"), path->buf);
 
+	/* remove trailing slash, if any */
 	if (wlen > 0 && wfilename[wlen - 1] == L'/')
 		wfilename[--wlen] = L'\0';
 

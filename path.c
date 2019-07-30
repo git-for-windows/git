@@ -1338,18 +1338,31 @@ int is_mount_point_via_stat(struct strbuf *path)
 
 	strbuf_addstr(path, "/.");
 	if (lstat(path->buf, &st)) {
+		/*
+		 * If we cannot access the current directory, we cannot say
+		 * that it is a bind mount.
+		 */
 		strbuf_setlen(path, len);
 		return 0;
 	}
 	current_dev = st.st_dev;
 
+	/* Now look at the parent directory */
 	strbuf_addch(path, '.');
 	if (lstat(path->buf, &st)) {
+		/*
+		 * If we cannot access the parent directory, we cannot say
+		 * that it is a bind mount.
+		 */
 		strbuf_setlen(path, len);
 		return 0;
 	}
 	strbuf_setlen(path, len);
 
+	/*
+	 * If the device ID differs between current and parent directory,
+	 * then it is a bind mount.
+	 */
 	return current_dev != st.st_dev;
 }
 
