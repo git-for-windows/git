@@ -449,6 +449,8 @@ include::config/gui.adoc[]
 
 include::config/guitool.adoc[]
 
+include::config/gvfs.adoc[]
+
 include::config/help.adoc[]
 
 include::config/http.adoc[]

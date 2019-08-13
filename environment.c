@@ -34,6 +34,7 @@
 #include "quote.h"
 #include "chdir-notify.h"
 #include "setup.h"
+#include "transport.h"
 #include "ws.h"
 #include "write-or-die.h"
 
@@ -128,6 +129,9 @@ int protect_hfs = PROTECT_HFS_DEFAULT;
 #define PROTECT_NTFS_DEFAULT 1
 #endif
 int protect_ntfs = PROTECT_NTFS_DEFAULT;
+int core_use_gvfs_helper;
+char *gvfs_cache_server_url;
+const char *gvfs_shared_cache_pathname;
 
 /*
  * The character that begins a commented line in user-editable file
@@ -558,6 +562,11 @@ int git_default_core_config(const char *var, const char *value,
 		return 0;
 	}
 
+	if (!strcmp(var, "core.usegvfshelper")) {
+		core_use_gvfs_helper = git_config_bool(var, value);
+		return 0;
+	}
+
 	if (!strcmp(var, "core.sparsecheckout")) {
 		/* virtual file system relies on the sparse checkout logic so force it on */
 		if (core_virtualfilesystem)
@@ -704,6 +713,39 @@ static int git_default_mailmap_config(const char *var, const char *value)
 	return 0;
 }
 
+static int git_default_gvfs_config(const char *var, const char *value)
+{
+	if (!strcmp(var, "gvfs.cache-server")) {
+		char *v2 = NULL;
+
+		if (!git_config_string(&v2, var, value) && v2 && *v2) {
+			free(gvfs_cache_server_url);
+			gvfs_cache_server_url = transport_anonymize_url(v2);
+		}
+		free(v2);
+		return 0;
+	}
+
+	if (!strcmp(var, "gvfs.sharedcache") && value && *value) {
+		struct strbuf buf = STRBUF_INIT;
+		strbuf_addstr(&buf, value);
+		if (strbuf_normalize_path(&buf) < 0) {
+			/*
+			 * Pretend it wasn't set.  This will cause us to
+			 * fallback to ".git/objects" effectively.
+			 */
+			strbuf_release(&buf);
+			return 0;
+		}
+		strbuf_trim_trailing_dir_sep(&buf);
+
+		gvfs_shared_cache_pathname = strbuf_detach(&buf, NULL);
+		return 0;
+	}
+
+	return 0;
+}
+
 static int git_default_attr_config(const char *var, const char *value)
 {
 	if (!strcmp(var, "attr.tree")) {
@@ -770,6 +812,9 @@ int git_default_config(const char *var, const char *value,
 
 	if (starts_with(var, "sparse."))
 		return git_default_sparse_config(var, value);
+
+	if (starts_with(var, "gvfs."))
+		return git_default_gvfs_config(var, value);
 
 	/* Add other config variables here and to Documentation/config.adoc. */
 	return 0;

@@ -27,6 +27,7 @@ check_missing_docs () (
 		git-init-db) continue;;
 		git-remote-*) continue;;
 		git-stage) continue;;
+		git-gvfs-helper) continue;;
 		git-legacy-*) continue;;
 		git-?*--?* ) continue ;;
 		esac
