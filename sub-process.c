@@ -78,7 +78,12 @@ int subprocess_start(struct hashmap *hashmap, struct subprocess_entry *entry, co
 	int err;
 	struct child_process *process;
 
-	entry->cmd = cmd;
+	// BUGBUG most callers to subprocess_start() pass in "cmd" the value
+	// BUGBUG of find_hook() which returns a static buffer (that's only
+	// BUGBUG good until the next call to find_hook()).
+	// BUGFIX Defer assignment until we copy the string in our argv.
+	// entry->cmd = cmd;
+
 	process = &entry->process;
 
 	child_process_init(process);
@@ -89,6 +94,8 @@ int subprocess_start(struct hashmap *hashmap, struct subprocess_entry *entry, co
 	process->clean_on_exit = 1;
 	process->clean_on_exit_handler = subprocess_exit_handler;
 	process->trace2_child_class = "subprocess";
+
+	entry->cmd = process->args.v[0];
 
 	err = start_command(process);
 	if (err) {
