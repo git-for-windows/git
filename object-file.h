@@ -33,6 +33,14 @@ struct odb_source;
 struct oidtree *odb_loose_cache(struct odb_source *source,
 				const struct object_id *oid);
 
+/*
+ * Add a new object to the loose object cache (possibly after the
+ * cache was populated).  This might be used after dynamically
+ * fetching a missing object.
+ */
+void odb_loose_cache_add_new_oid(struct odb_source *source,
+				 const struct object_id *oid);
+
 /* Empty the loose object cache for the specified object directory. */
 void odb_clear_loose_cache(struct odb_source *source);
 
