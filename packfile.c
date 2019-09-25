@@ -792,6 +792,14 @@ void packfile_store_add_pack(struct packfile_store *store,
 	hashmap_add(&store->map, &pack->packmap_ent);
 }
 
+void packfile_store_add_pack_also_to_mru(struct repository *r,
+					 struct packed_git *pack)
+{
+	packfile_store_add_pack(r->objects->packfiles, pack);
+	list_add(&pack->mru,
+		 packfile_store_get_packs_mru(r->objects->packfiles));
+}
+
 struct packed_git *packfile_store_load_pack(struct packfile_store *store,
 					    const char *idx_path, int local)
 {
