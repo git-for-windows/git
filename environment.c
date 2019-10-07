@@ -131,7 +131,7 @@ int protect_hfs = PROTECT_HFS_DEFAULT;
 int protect_ntfs = PROTECT_NTFS_DEFAULT;
 int core_use_gvfs_helper;
 char *gvfs_cache_server_url;
-const char *gvfs_shared_cache_pathname;
+struct strbuf gvfs_shared_cache_pathname = STRBUF_INIT;
 
 /*
  * The character that begins a commented line in user-editable file
@@ -727,19 +727,17 @@ static int git_default_gvfs_config(const char *var, const char *value)
 	}
 
 	if (!strcmp(var, "gvfs.sharedcache") && value && *value) {
-		struct strbuf buf = STRBUF_INIT;
-		strbuf_addstr(&buf, value);
-		if (strbuf_normalize_path(&buf) < 0) {
+		strbuf_setlen(&gvfs_shared_cache_pathname, 0);
+		strbuf_addstr(&gvfs_shared_cache_pathname, value);
+		if (strbuf_normalize_path(&gvfs_shared_cache_pathname) < 0) {
 			/*
 			 * Pretend it wasn't set.  This will cause us to
 			 * fallback to ".git/objects" effectively.
 			 */
-			strbuf_release(&buf);
+			strbuf_release(&gvfs_shared_cache_pathname);
 			return 0;
 		}
-		strbuf_trim_trailing_dir_sep(&buf);
-
-		gvfs_shared_cache_pathname = strbuf_detach(&buf, NULL);
+		strbuf_trim_trailing_dir_sep(&gvfs_shared_cache_pathname);
 		return 0;
 	}
 

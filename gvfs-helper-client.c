@@ -1,5 +1,7 @@
 #define USE_THE_REPOSITORY_VARIABLE
 #include "git-compat-util.h"
+#include "dir.h"
+#include "environment.h"
 #include "gvfs-helper-client.h"
 #include "hex.h"
 #include "object-file.h"
@@ -208,13 +210,32 @@ static int gh_client__get__receive_response(
 	return err;
 }
 
+/*
+ * Select the preferred ODB for fetching missing objects.
+ * This should be the alternate with the same directory
+ * name as set in `gvfs.sharedCache`.
+ *
+ * Fallback to .git/objects if necessary.
+ */
 static void gh_client__choose_odb(void)
 {
+	struct odb_source *odb;
+
 	if (gh_client__chosen_odb)
 		return;
 
 	odb_prepare_alternates(the_repository->objects);
 	gh_client__chosen_odb = the_repository->objects->sources;
+
+	if (!gvfs_shared_cache_pathname.len)
+		return;
+
+	for (odb = the_repository->objects->sources->next; odb; odb = odb->next) {
+		if (!fspathcmp(odb->path, gvfs_shared_cache_pathname.buf)) {
+			gh_client__chosen_odb = odb;
+			return;
+		}
+	}
 }
 
 static int gh_client__get(enum gh_client__created *p_ghc)

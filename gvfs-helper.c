@@ -81,10 +81,11 @@
 //
 //                 Fetch 1 or more objects.  If a cache-server is configured,
 //                 try it first.  Optionally fallback to the main Git server.
+//
 //                 Create 1 or more loose objects and/or packfiles in the
-//                 requested shared-cache directory (given on the command
-//                 line and which is reported at the beginning of the
-//                 response).
+//                 shared-cache ODB.  (The pathname of the selected ODB is
+//                 reported at the beginning of the response; this should
+//                 match the pathname given on the command line).
 //
 //                 git> get
 //                 git> <oid>
@@ -641,26 +642,88 @@ static int option_parse_cache_server_mode(const struct option *opt,
 }
 
 /*
- * Let command line args override "gvfs.sharedcache" config setting.
+ * Let command line args override "gvfs.sharedcache" config setting
+ * and override the value set by git_default_config().
  *
- * It would be nice to move this to parse-options.c as an
- * OPTION_PATHNAME handler.  And maybe have flags for exists()
- * and is_directory().
+ * The command line is parsed *AFTER* the config is loaded, so
+ * prepared_alt_odb() has already been called any default or inherited
+ * shared-cache has already been set.
+ *
+ * We have a chance to override it here.
  */
 static int option_parse_shared_cache_directory(const struct option *opt,
 					       const char *arg, int unset)
 {
+	struct strbuf buf_arg = STRBUF_INIT;
+
 	if (unset) /* should not happen */
 		return error(_("missing value for switch '%s'"),
 			     opt->long_name);
 
-	if (!is_directory(arg))
-		return error(_("value for switch '%s' is not a directory: '%s'"),
-			     opt->long_name, arg);
+	strbuf_addstr(&buf_arg, arg);
+	if (strbuf_normalize_path(&buf_arg) < 0) {
+		/*
+		 * Pretend command line wasn't given.  Use whatever
+		 * settings we already have from the config.
+		 */
+		strbuf_release(&buf_arg);
+		return 0;
+	}
+	strbuf_trim_trailing_dir_sep(&buf_arg);
 
-	gvfs_shared_cache_pathname = arg;
+	if (!strbuf_cmp(&buf_arg, &gvfs_shared_cache_pathname)) {
+		/*
+		 * The command line argument matches what we got from
+		 * the config, so we're already setup correctly. (And
+		 * we have already verified that the directory exists
+		 * on disk.)
+		 */
+		strbuf_release(&buf_arg);
+		return 0;
+	}
 
-	return 0;
+	else if (!gvfs_shared_cache_pathname.len) {
+		/*
+		 * A shared-cache was requested and we did not inherit one.
+		 * Try it, but let alt_odb_usable() secretly disable it if
+		 * it cannot create the directory on disk.
+		 */
+		strbuf_addbuf(&gvfs_shared_cache_pathname, &buf_arg);
+
+		odb_add_to_alternates_memory(the_repository->objects, buf_arg.buf);
+
+		strbuf_release(&buf_arg);
+		return 0;
+	}
+
+	else {
+		/*
+		 * The requested shared-cache is different from the one
+		 * we inherited.  Replace the inherited value with this
+		 * one, but smartly fallback if necessary.
+		 */
+		struct strbuf buf_prev = STRBUF_INIT;
+
+		strbuf_addbuf(&buf_prev, &gvfs_shared_cache_pathname);
+
+		strbuf_setlen(&gvfs_shared_cache_pathname, 0);
+		strbuf_addbuf(&gvfs_shared_cache_pathname, &buf_arg);
+
+		odb_add_to_alternates_memory(the_repository->objects, buf_arg.buf);
+
+		/*
+		 * alt_odb_usable() releases gvfs_shared_cache_pathname
+		 * if it cannot create the directory on disk, so fallback
+		 * to the previous choice when it fails.
+		 */
+		if (!gvfs_shared_cache_pathname.len)
+			strbuf_addbuf(&gvfs_shared_cache_pathname,
+				      &buf_prev);
+
+		strbuf_release(&buf_arg);
+		strbuf_release(&buf_prev);
+		return 0;
+	}
 }
 
 /*
@@ -961,24 +1024,20 @@ static void approve_cache_server_creds(void)
 }
 
 /*
- * Select the ODB directory where we will write objects that we
- * download.  If was given on the command line or define in the
- * config, use the local ODB (in ".git/objects").
+ * Get the pathname to the ODB where we write objects that we download.
  */
 static void select_odb(void)
 {
-	const char *odb_path = NULL;
+	odb_prepare_alternates(the_repository->objects);
 
 	strbuf_init(&gh__global.buf_odb_path, 0);
 
-	if (gvfs_shared_cache_pathname && *gvfs_shared_cache_pathname)
-		odb_path = gvfs_shared_cache_pathname;
-	else {
-		odb_prepare_alternates(the_repository->objects);
-		odb_path = the_repository->objects->sources->path;
-	}
-
-	strbuf_addstr(&gh__global.buf_odb_path, odb_path);
+	if (gvfs_shared_cache_pathname.len)
+		strbuf_addbuf(&gh__global.buf_odb_path,
+			      &gvfs_shared_cache_pathname);
+	else
+		strbuf_addstr(&gh__global.buf_odb_path,
+			      the_repository->objects->sources->path);
 }
 
 /*
