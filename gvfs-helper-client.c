@@ -95,6 +95,9 @@ static void gh_client__update_loose_cache(const char *line)
 	if (!skip_prefix(line, "loose ", &v1_oid))
 		BUG("update_loose_cache: invalid line '%s'", line);
 
+	if (get_oid_hex(v1_oid, &oid))
+		BUG("update_loose_cache: invalid line '%s'", line);
+
 	odb_loose_cache_add_new_oid(gh_client__chosen_odb, &oid);
 }
 
