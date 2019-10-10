@@ -61,6 +61,11 @@
 //
 //                 --depth=<depth>       // defaults to "1"
 //
+//                 --max-retries=<n>     // defaults to "6"
+//
+//                       Number of retries after transient network errors.
+//                       Set to zero to disable such retries.
+//
 //     server
 //
 //            Interactive/sub-process mode.  Listen for a series of commands
@@ -76,6 +81,11 @@
 //                       most n objects (not bytes).
 //
 //                 --depth=<depth>       // defaults to "1"
+//
+//                 --max-retries=<n>     // defaults to "6"
+//
+//                       Number of retries after transient network errors.
+//                       Set to zero to disable such retries.
 //
 //            Interactive verb: get
 //
@@ -143,6 +153,7 @@
 #include "credential.h"
 #include "oid-array.h"
 #include "send-pack.h"
+#include "path.h"
 #include "protocol.h"
 #include "quote.h"
 #include "transport.h"
@@ -175,7 +186,25 @@ static const char *const server_usage[] = {
 	NULL
 };
 
+/*
+ * "commitDepth" field in gvfs protocol
+ */
+#define GH__DEFAULT_COMMIT_DEPTH 1
+
+/*
+ * Chunk/block size in number of objects we request in each packfile
+ */
 #define GH__DEFAULT_BLOCK_SIZE 4000
+
+/*
+ * Retry attempts (after the initial request) for transient errors and 429s.
+ */
+#define GH__DEFAULT_MAX_RETRIES 6
+
+/*
+ * Maximum delay in seconds for transient (network) error retries.
+ */
+#define GH__DEFAULT_MAX_TRANSIENT_BACKOFF_SEC 300
 
 /*
  * Our exit-codes.
@@ -184,16 +213,18 @@ enum gh__error_code {
 	GH__ERROR_CODE__USAGE = -1, /* will be mapped to usage() */
 	GH__ERROR_CODE__OK = 0,
 	GH__ERROR_CODE__ERROR = 1, /* unspecified */
-//	GH__ERROR_CODE__CACHE_SERVER_NOT_FOUND = 2,
-	GH__ERROR_CODE__CURL_ERROR = 3,
-	GH__ERROR_CODE__HTTP_401 = 4,
-	GH__ERROR_CODE__HTTP_404 = 5,
-	GH__ERROR_CODE__HTTP_UNEXPECTED_CODE = 6,
-	GH__ERROR_CODE__UNEXPECTED_CONTENT_TYPE = 7,
+	GH__ERROR_CODE__CURL_ERROR = 2,
+	GH__ERROR_CODE__HTTP_401 = 3,
+	GH__ERROR_CODE__HTTP_404 = 4,
+	GH__ERROR_CODE__HTTP_429 = 5,
+	GH__ERROR_CODE__HTTP_503 = 6,
+	GH__ERROR_CODE__HTTP_OTHER = 7,
+	GH__ERROR_CODE__UNEXPECTED_CONTENT_TYPE = 8,
 	GH__ERROR_CODE__COULD_NOT_CREATE_TEMPFILE = 8,
-	GH__ERROR_CODE__COULD_NOT_INSTALL_LOOSE = 9,
-	GH__ERROR_CODE__COULD_NOT_INSTALL_PACKFILE = 10,
-	GH__ERROR_CODE__SUBPROCESS_SYNTAX = 11,
+	GH__ERROR_CODE__COULD_NOT_INSTALL_LOOSE = 10,
+	GH__ERROR_CODE__COULD_NOT_INSTALL_PACKFILE = 11,
+	GH__ERROR_CODE__SUBPROCESS_SYNTAX = 12,
+	GH__ERROR_CODE__INDEX_PACK_FAILED = 13,
 };
 
 enum gh__cache_server_mode {
@@ -219,6 +250,8 @@ static struct gh__cmd_opts {
 
 	int depth;
 	unsigned int block_size;
+	int max_retries;
+	int max_transient_backoff_sec;
 
 	enum gh__cache_server_mode cache_server_mode;
 } gh__cmd_opts;
@@ -242,6 +275,47 @@ static struct gh__global {
 	int main_creds_need_approval; /* try to only approve them once */
 
 } gh__global;
+
+enum gh__server_type {
+	GH__SERVER_TYPE__MAIN = 0,
+	GH__SERVER_TYPE__CACHE = 1,
+
+	GH__SERVER_TYPE__NR,
+};
+
+static const char *gh__server_type_label[GH__SERVER_TYPE__NR] = {
+	"(main)",
+	"(cs)"
+};
+
+struct gh__azure_throttle
+{
+	unsigned long tstu_limit;
+	unsigned long tstu_remaining;
+
+	unsigned long reset_sec;
+	unsigned long retry_after_sec;
+};
+
+static void gh__azure_throttle__zero(struct gh__azure_throttle *azure)
+{
+	azure->tstu_limit = 0;
+	azure->tstu_remaining = 0;
+	azure->reset_sec = 0;
+	azure->retry_after_sec = 0;
+}
+
+#define GH__AZURE_THROTTLE_INIT { \
+	.tstu_limit = 0, \
+	.tstu_remaining = 0, \
+	.reset_sec = 0, \
+	.retry_after_sec = 0, \
+	}
+
+static struct gh__azure_throttle gh__global_throttle[GH__SERVER_TYPE__NR] = {
+	GH__AZURE_THROTTLE_INIT,
+	GH__AZURE_THROTTLE_INIT,
+};
 
 /*
  * Stolen from http.c
@@ -271,7 +345,12 @@ enum gh__progress_state {
 struct gh__request_params {
 	int b_is_post;            /* POST=1 or GET=0 */
 	int b_write_to_file;      /* write to file=1 or strbuf=0 */
-	int b_no_cache_server;    /* force main server only */
+	int b_permit_cache_server_if_defined;
+
+	enum gh__server_type server_type;
+
+	int k_attempt; /* robust retry attempt */
+	int k_transient_delay_sec; /* delay before transient error retries */
 
 	unsigned long object_count; /* number of objects being fetched */
 
@@ -280,9 +359,16 @@ struct gh__request_params {
 	struct curl_slist *headers; /* additional http headers to send */
 	struct tempfile *tempfile; /* for response content when file */
 	struct strbuf *buffer;     /* for response content when strbuf */
-	struct strbuf label;       /* for trace2 regions */
+	struct strbuf tr2_label;   /* for trace2 regions */
 
 	struct strbuf loose_path;
+	struct object_id loose_oid;
+
+	struct strbuf temp_path_pack;
+	struct strbuf temp_path_idx;
+	struct strbuf final_path_pack;
+	struct strbuf final_path_idx;
+	struct strbuf final_packfile_filename;
 
 	/*
 	 * Note that I am putting all of the progress-related instance data
@@ -304,24 +390,36 @@ struct gh__request_params {
 	 */
 	struct strbuf progress_msg;
 	struct progress *progress;
+
+	struct strbuf e2eid;
 };
 
 #define GH__REQUEST_PARAMS_INIT { \
 	.b_is_post = 0, \
 	.b_write_to_file = 0, \
-	.b_no_cache_server = 0, \
+	.b_permit_cache_server_if_defined = 1, \
+	.server_type = GH__SERVER_TYPE__MAIN, \
+	.k_attempt = 0, \
+	.k_transient_delay_sec = 0, \
 	.object_count = 0, \
 	.post_payload = NULL, \
 	.headers = NULL, \
 	.tempfile = NULL, \
 	.buffer = NULL, \
-	.label = STRBUF_INIT, \
+	.tr2_label = STRBUF_INIT, \
 	.loose_path = STRBUF_INIT, \
+	.loose_oid = {{0}}, \
+	.temp_path_pack = STRBUF_INIT, \
+	.temp_path_idx = STRBUF_INIT, \
+	.final_path_pack = STRBUF_INIT, \
+	.final_path_idx = STRBUF_INIT, \
+	.final_packfile_filename = STRBUF_INIT, \
 	.progress_state = GH__PROGRESS_STATE__START, \
 	.progress_base_phase2_msg = STRBUF_INIT, \
 	.progress_base_phase3_msg = STRBUF_INIT, \
 	.progress_msg = STRBUF_INIT, \
 	.progress = NULL, \
+	.e2eid = STRBUF_INIT, \
 	}
 
 static void gh__request_params__release(struct gh__request_params *params)
@@ -338,8 +436,13 @@ static void gh__request_params__release(struct gh__request_params *params)
 
 	params->buffer = NULL; /* we do not own this */
 
-	strbuf_release(&params->label);
+	strbuf_release(&params->tr2_label);
 	strbuf_release(&params->loose_path);
+	strbuf_release(&params->temp_path_pack);
+	strbuf_release(&params->temp_path_idx);
+	strbuf_release(&params->final_path_pack);
+	strbuf_release(&params->final_path_idx);
+	strbuf_release(&params->final_packfile_filename);
 
 	strbuf_release(&params->progress_base_phase2_msg);
 	strbuf_release(&params->progress_base_phase3_msg);
@@ -347,7 +450,54 @@ static void gh__request_params__release(struct gh__request_params *params)
 
 	stop_progress(&params->progress);
 	params->progress = NULL;
+
+	strbuf_release(&params->e2eid);
 }
+
+/*
+ * How we handle retries for various unexpected network errors.
+ */
+enum gh__retry_mode {
+	/*
+	 * The operation was successful, so no retry is needed.
+	 * Use this for HTTP 200, for example.
+	 */
+	GH__RETRY_MODE__SUCCESS = 0,
+
+	/*
+	 * Retry using the normal 401 Auth mechanism.
+	 */
+	GH__RETRY_MODE__HTTP_401,
+
+	/*
+	 * Fail because at least one of the requested OIDs does not exist.
+	 */
+	GH__RETRY_MODE__FAIL_404,
+
+	/*
+	 * A transient network error, such as dropped connection
+	 * or network IO error.  Our belief is that a retry MAY
+	 * succeed.  (See Gremlins and Cosmic Rays....)
+	 */
+	GH__RETRY_MODE__TRANSIENT,
+
+	/*
+	 * Request was blocked completely because of a 429.
+	 */
+	GH__RETRY_MODE__HTTP_429,
+
+	/*
+	 * Request failed because the server was (temporarily?) offline.
+	 */
+	GH__RETRY_MODE__HTTP_503,
+
+	/*
+	 * The operation had a hard failure and we have no
+	 * expectation that a second attempt will give a different
+	 * answer, such as a bad hostname or a mal-formed URL.
+	 */
+	GH__RETRY_MODE__HARD_FAIL,
+};
 
 /*
  * Bucket to describe the results of an HTTP requests (may be
@@ -359,7 +509,9 @@ struct gh__response_status {
 	long response_code; /* http response code */
 	CURLcode curl_code;
 	enum gh__error_code ec;
+	enum gh__retry_mode retry;
 	intmax_t bytes_received;
+	struct gh__azure_throttle *azure;
 };
 
 #define GH__RESPONSE_STATUS_INIT { \
@@ -368,7 +520,9 @@ struct gh__response_status {
 	.response_code = 0, \
 	.curl_code = CURLE_OK, \
 	.ec = GH__ERROR_CODE__OK, \
+	.retry = GH__RETRY_MODE__SUCCESS, \
 	.bytes_received = 0, \
+	.azure = NULL, \
 	}
 
 static void gh__response_status__zero(struct gh__response_status *s)
@@ -378,7 +532,323 @@ static void gh__response_status__zero(struct gh__response_status *s)
 	s->response_code = 0;
 	s->curl_code = CURLE_OK;
 	s->ec = GH__ERROR_CODE__OK;
+	s->retry = GH__RETRY_MODE__SUCCESS;
 	s->bytes_received = 0;
+	s->azure = NULL;
+}
+
+static void install_packfile(struct gh__request_params *params,
+			     struct gh__response_status *status);
+static void install_loose(struct gh__request_params *params,
+			  struct gh__response_status *status);
+
+/*
+ * Log the E2EID for the current request.
+ *
+ * Since every HTTP request to the cache-server and to the main Git server
+ * will send back a unique E2EID (probably a GUID), we don't want to overload
+ * telemetry with each ID -- rather, only the ones for which there was a
+ * problem and that may be helpful in a post mortem.
+ */
+static void log_e2eid(struct gh__request_params *params,
+		      struct gh__response_status *status)
+{
+	if (!params->e2eid.len)
+		return;
+
+	switch (status->retry) {
+	default:
+	case GH__RETRY_MODE__SUCCESS:
+	case GH__RETRY_MODE__HTTP_401:
+	case GH__RETRY_MODE__FAIL_404:
+		return;
+
+	case GH__RETRY_MODE__HARD_FAIL:
+	case GH__RETRY_MODE__TRANSIENT:
+	case GH__RETRY_MODE__HTTP_429:
+	case GH__RETRY_MODE__HTTP_503:
+		break;
+	}
+
+	if (trace2_is_enabled()) {
+		struct strbuf key = STRBUF_INIT;
+
+		strbuf_addstr(&key, "e2eid");
+		strbuf_addstr(&key, gh__server_type_label[params->server_type]);
+
+		trace2_data_string("gvfs-helper", NULL, key.buf,
+				   params->e2eid.buf);
+
+		strbuf_release(&key);
+	}
+}
+
+/*
+ * Normalize a few error codes before we try to decide
+ * how to dispatch on them.
+ */
+static void gh__response_status__normalize_odd_codes(
+	struct gh__request_params *params,
+	struct gh__response_status *status)
+{
+	if (params->server_type == GH__SERVER_TYPE__CACHE &&
+	    status->response_code == 400) {
+		/*
+		 * The cache-server sends a somewhat bogus 400 instead of
+		 * the normal 401 when AUTH is required.  Fixup the status
+		 * to hide that.
+		 *
+		 * TODO Technically, the cache-server could send a 400
+		 * TODO for many reasons, not just for their bogus
+		 * TODO pseudo-401, but we're going to assume it is a
+		 * TODO 401 for now.  We should confirm the expected
+		 * TODO error message in the response-body.
+		 */
+		status->response_code = 401;
+	}
+
+	if (status->response_code == 203) {
+		/*
+		 * A proxy server transformed a 200 from the origin server
+		 * into a 203.  We don't care about the subtle distinction.
+		 */
+		status->response_code = 200;
+	}
+}
+
+/*
+ * Map HTTP response codes into a retry strategy.
+ * See https://en.wikipedia.org/wiki/List_of_HTTP_status_codes
+ *
+ * https://docs.microsoft.com/en-us/azure/devops/integrate/concepts/rate-limits?view=azure-devops
+ */
+static void compute_retry_mode_from_http_response(
+	struct gh__response_status *status)
+{
+	switch (status->response_code) {
+
+	case 200:
+		status->retry = GH__RETRY_MODE__SUCCESS;
+		status->ec = GH__ERROR_CODE__OK;
+		return;
+
+	case 301: /* all the various flavors of HTTP Redirect */
+	case 302:
+	case 303:
+	case 304:
+	case 305:
+	case 306:
+	case 307:
+	case 308:
+		/*
+		 * TODO Consider a redirected-retry (with or without
+		 * TODO a Retry-After header).
+		 */
+		goto hard_fail;
+
+	case 401:
+		strbuf_addstr(&status->error_message,
+			      "(http:401) Not Authorized");
+		status->retry = GH__RETRY_MODE__HTTP_401;
+		status->ec = GH__ERROR_CODE__HTTP_401;
+		return;
+
+	case 404:
+		/*
+		 * TODO if params->object_count > 1, consider
+		 * TODO splitting the request into 2 halves
+		 * TODO and retrying each half in series.
+		 */
+		strbuf_addstr(&status->error_message,
+			      "(http:404) Not Found");
+		status->retry = GH__RETRY_MODE__FAIL_404;
+		status->ec = GH__ERROR_CODE__HTTP_404;
+		return;
+
+	case 429:
+		/*
+		 * This is a hard block because we've been bad.
+		 */
+		strbuf_addstr(&status->error_message,
+			      "(http:429) Too Many Requests [throttled]");
+		status->retry = GH__RETRY_MODE__HTTP_429;
+		status->ec = GH__ERROR_CODE__HTTP_429;
+
+		trace2_data_string("gvfs-helper", NULL, "error/http",
+				   status->error_message.buf);
+		return;
+
+	case 503:
+		/*
+		 * We assume that this comes with a "Retry-After" header like 429s.
+		 */
+		strbuf_addstr(&status->error_message,
+			      "(http:503) Server Unavailable [throttled]");
+		status->retry = GH__RETRY_MODE__HTTP_503;
+		status->ec = GH__ERROR_CODE__HTTP_503;
+
+		trace2_data_string("gvfs-helper", NULL, "error/http",
+				   status->error_message.buf);
+		return;
+
+	default:
+		goto hard_fail;
+	}
+
+hard_fail:
+	strbuf_addf(&status->error_message, "(http:%d) Other [hard_fail]",
+		    (int)status->response_code);
+	status->retry = GH__RETRY_MODE__HARD_FAIL;
+	status->ec = GH__ERROR_CODE__HTTP_OTHER;
+
+	trace2_data_string("gvfs-helper", NULL, "error/http",
+			   status->error_message.buf);
+	return;
+}
+
+/*
+ * Map CURLE errors code to a retry strategy.
+ * See <curl/curl.h> and
+ * https://curl.haxx.se/libcurl/c/libcurl-errors.html
+ *
+ * This could be a static table rather than a switch, but
+ * that is harder to debug and we may want to selectively
+ * log errors.
+ *
+ * I've commented out all of the hard-fail cases for now
+ * and let the default handle them.  This is to indicate
+ * that I considered them and found them to be not actionable.
+ * Also, the spelling of some of the CURLE_ symbols seem
+ * to change between curl releases on different platforms,
+ * so I'm not going to fight that.
+ */
+static void compute_retry_mode_from_curl_error(
+	struct gh__response_status *status)
+{
+	switch (status->curl_code) {
+	case CURLE_OK:
+		status->retry = GH__RETRY_MODE__SUCCESS;
+		status->ec = GH__ERROR_CODE__OK;
+		return;
+
+	//se CURLE_UNSUPPORTED_PROTOCOL:     goto hard_fail;
+	//se CURLE_FAILED_INIT:              goto hard_fail;
+	//se CURLE_URL_MALFORMAT:            goto hard_fail;
+	//se CURLE_NOT_BUILT_IN:             goto hard_fail;
+	//se CURLE_COULDNT_RESOLVE_PROXY:    goto hard_fail;
+	//se CURLE_COULDNT_RESOLVE_HOST:     goto hard_fail;
+	case CURLE_COULDNT_CONNECT:          goto transient;
+	//se CURLE_WEIRD_SERVER_REPLY:       goto hard_fail;
+	//se CURLE_REMOTE_ACCESS_DENIED:     goto hard_fail;
+	//se CURLE_FTP_ACCEPT_FAILED:        goto hard_fail;
+	//se CURLE_FTP_WEIRD_PASS_REPLY:     goto hard_fail;
+	//se CURLE_FTP_ACCEPT_TIMEOUT:       goto hard_fail;
+	//se CURLE_FTP_WEIRD_PASV_REPLY:     goto hard_fail;
+	//se CURLE_FTP_WEIRD_227_FORMAT:     goto hard_fail;
+	//se CURLE_FTP_CANT_GET_HOST:        goto hard_fail;
+	case CURLE_HTTP2:                    goto transient;
+	//se CURLE_FTP_COULDNT_SET_TYPE:     goto hard_fail;
+	case CURLE_PARTIAL_FILE:             goto transient;
+	//se CURLE_FTP_COULDNT_RETR_FILE:    goto hard_fail;
+	//se CURLE_OBSOLETE20:               goto hard_fail;
+	//se CURLE_QUOTE_ERROR:              goto hard_fail;
+	//se CURLE_HTTP_RETURNED_ERROR:      goto hard_fail;
+	case CURLE_WRITE_ERROR:              goto transient;
+	//se CURLE_OBSOLETE24:               goto hard_fail;
+	case CURLE_UPLOAD_FAILED:            goto transient;
+	//se CURLE_READ_ERROR:               goto hard_fail;
+	//se CURLE_OUT_OF_MEMORY:            goto hard_fail;
+	case CURLE_OPERATION_TIMEDOUT:       goto transient;
+	//se CURLE_OBSOLETE29:               goto hard_fail;
+	//se CURLE_FTP_PORT_FAILED:          goto hard_fail;
+	//se CURLE_FTP_COULDNT_USE_REST:     goto hard_fail;
+	//se CURLE_OBSOLETE32:               goto hard_fail;
+	//se CURLE_RANGE_ERROR:              goto hard_fail;
+	case CURLE_HTTP_POST_ERROR:          goto transient;
+	//se CURLE_SSL_CONNECT_ERROR:        goto hard_fail;
+	//se CURLE_BAD_DOWNLOAD_RESUME:      goto hard_fail;
+	//se CURLE_FILE_COULDNT_READ_FILE:   goto hard_fail;
+	//se CURLE_LDAP_CANNOT_BIND:         goto hard_fail;
+	//se CURLE_LDAP_SEARCH_FAILED:       goto hard_fail;
+	//se CURLE_OBSOLETE40:               goto hard_fail;
+	//se CURLE_FUNCTION_NOT_FOUND:       goto hard_fail;
+	//se CURLE_ABORTED_BY_CALLBACK:      goto hard_fail;
+	//se CURLE_BAD_FUNCTION_ARGUMENT:    goto hard_fail;
+	//se CURLE_OBSOLETE44:               goto hard_fail;
+	//se CURLE_INTERFACE_FAILED:         goto hard_fail;
+	//se CURLE_OBSOLETE46:               goto hard_fail;
+	//se CURLE_TOO_MANY_REDIRECTS:       goto hard_fail;
+	//se CURLE_UNKNOWN_OPTION:           goto hard_fail;
+	//se CURLE_TELNET_OPTION_SYNTAX:     goto hard_fail;
+	//se CURLE_OBSOLETE50:               goto hard_fail;
+	//se CURLE_PEER_FAILED_VERIFICATION: goto hard_fail;
+	//se CURLE_GOT_NOTHING:              goto hard_fail;
+	//se CURLE_SSL_ENGINE_NOTFOUND:      goto hard_fail;
+	//se CURLE_SSL_ENGINE_SETFAILED:     goto hard_fail;
+	case CURLE_SEND_ERROR:               goto transient;
+	case CURLE_RECV_ERROR:               goto transient;
+	//se CURLE_OBSOLETE57:               goto hard_fail;
+	//se CURLE_SSL_CERTPROBLEM:          goto hard_fail;
+	//se CURLE_SSL_CIPHER:               goto hard_fail;
+	//se CURLE_SSL_CACERT:               goto hard_fail;
+	//se CURLE_BAD_CONTENT_ENCODING:     goto hard_fail;
+	//se CURLE_LDAP_INVALID_URL:         goto hard_fail;
+	//se CURLE_FILESIZE_EXCEEDED:        goto hard_fail;
+	//se CURLE_USE_SSL_FAILED:           goto hard_fail;
+	//se CURLE_SEND_FAIL_REWIND:         goto hard_fail;
+	//se CURLE_SSL_ENGINE_INITFAILED:    goto hard_fail;
+	//se CURLE_LOGIN_DENIED:             goto hard_fail;
+	//se CURLE_TFTP_NOTFOUND:            goto hard_fail;
+	//se CURLE_TFTP_PERM:                goto hard_fail;
+	//se CURLE_REMOTE_DISK_FULL:         goto hard_fail;
+	//se CURLE_TFTP_ILLEGAL:             goto hard_fail;
+	//se CURLE_TFTP_UNKNOWNID:           goto hard_fail;
+	//se CURLE_REMOTE_FILE_EXISTS:       goto hard_fail;
+	//se CURLE_TFTP_NOSUCHUSER:          goto hard_fail;
+	//se CURLE_CONV_FAILED:              goto hard_fail;
+	//se CURLE_CONV_REQD:                goto hard_fail;
+	//se CURLE_SSL_CACERT_BADFILE:       goto hard_fail;
+	//se CURLE_REMOTE_FILE_NOT_FOUND:    goto hard_fail;
+	//se CURLE_SSH:                      goto hard_fail;
+	//se CURLE_SSL_SHUTDOWN_FAILED:      goto hard_fail;
+	case CURLE_AGAIN:                    goto transient;
+	//se CURLE_SSL_CRL_BADFILE:          goto hard_fail;
+	//se CURLE_SSL_ISSUER_ERROR:         goto hard_fail;
+	//se CURLE_FTP_PRET_FAILED:          goto hard_fail;
+	//se CURLE_RTSP_CSEQ_ERROR:          goto hard_fail;
+	//se CURLE_RTSP_SESSION_ERROR:       goto hard_fail;
+	//se CURLE_FTP_BAD_FILE_LIST:        goto hard_fail;
+	//se CURLE_CHUNK_FAILED:             goto hard_fail;
+	//se CURLE_NO_CONNECTION_AVAILABLE:  goto hard_fail;
+	//se CURLE_SSL_PINNEDPUBKEYNOTMATCH: goto hard_fail;
+	//se CURLE_SSL_INVALIDCERTSTATUS:    goto hard_fail;
+#ifdef CURLE_HTTP2_STREAM
+	case CURLE_HTTP2_STREAM:             goto transient;
+#endif
+	default:                             goto hard_fail;
+	}
+
+hard_fail:
+	strbuf_addf(&status->error_message, "(curl:%d) %s [hard_fail]",
+		    status->curl_code,
+		    curl_easy_strerror(status->curl_code));
+	status->retry = GH__RETRY_MODE__HARD_FAIL;
+	status->ec = GH__ERROR_CODE__CURL_ERROR;
+
+	trace2_data_string("gvfs-helper", NULL, "error/curl",
+			   status->error_message.buf);
+	return;
+
+transient:
+	strbuf_addf(&status->error_message, "(curl:%d) %s [transient]",
+		    status->curl_code,
+		    curl_easy_strerror(status->curl_code));
+	status->retry = GH__RETRY_MODE__TRANSIENT;
+	status->ec = GH__ERROR_CODE__CURL_ERROR;
+
+	trace2_data_string("gvfs-helper", NULL, "error/curl",
+			   status->error_message.buf);
+	return;
 }
 
 /*
@@ -399,32 +869,18 @@ static void gh__response_status__set_from_slot(
 
 	strbuf_setlen(&status->error_message, 0);
 
-	if (status->response_code == 200)
-		status->ec = GH__ERROR_CODE__OK;
+	gh__response_status__normalize_odd_codes(params, status);
 
-	else if (status->response_code == 401) {
-		strbuf_addstr(&status->error_message, "401 Not Authorized");
-		status->ec = GH__ERROR_CODE__HTTP_401;
-
-	} else if (status->response_code == 404) {
-		strbuf_addstr(&status->error_message, "404 Not Found");
-		status->ec = GH__ERROR_CODE__HTTP_404;
-
-	} else if (status->curl_code != CURLE_OK) {
-		strbuf_addf(&status->error_message, "%s (curl)",
-			    curl_easy_strerror(status->curl_code));
-		status->ec = GH__ERROR_CODE__CURL_ERROR;
-
-		trace2_data_string("gvfs-helper", NULL,
-				   "error/curl", status->error_message.buf);
-	} else {
-		strbuf_addf(&status->error_message, "HTTP %ld Unexpected",
-			    status->response_code);
-		status->ec = GH__ERROR_CODE__HTTP_UNEXPECTED_CODE;
-
-		trace2_data_string("gvfs-helper", NULL,
-				   "error/http", status->error_message.buf);
-	}
+	/*
+	 * Use normalized response/status codes form curl/http to decide
+	 * how to set the error-code we propagate *AND* to decide if we
+	 * we should retry because of transient network problems.
+	 */
+	if (status->curl_code == CURLE_OK ||
+	    status->curl_code == CURLE_HTTP_RETURNED_ERROR)
+		compute_retry_mode_from_http_response(status);
+	else
+		compute_retry_mode_from_curl_error(status);
 
 	if (status->ec != GH__ERROR_CODE__OK)
 		status->bytes_received = 0;
@@ -440,26 +896,6 @@ static void gh__response_status__release(struct gh__response_status *status)
 		return;
 	strbuf_release(&status->error_message);
 	strbuf_release(&status->content_type);
-}
-
-/*
- * The cache-server sends a somewhat bogus 400 instead of
- * the normal 401 when AUTH is required.  Fixup the status
- * to hide that.
- */
-static void fixup_cache_server_400_to_401(struct gh__response_status *status)
-{
-	if (status->response_code != 400)
-		return;
-
-	/*
-	 * TODO Technically, the cache-server could send a 400
-	 * TODO for many reasons, not just for their bogus
-	 * TODO pseudo-401, but we're going to assume it is a
-	 * TODO 401 for now.  We should confirm the expected
-	 * TODO error message in the response-body.
-	 */
-	status->response_code = 401;
 }
 
 static int gh__curl_progress_cb(void *clientp,
@@ -552,8 +988,13 @@ enter_phase_1:
 enter_phase_2:
 	strbuf_setlen(&params->progress_msg, 0);
 	if (params->progress_base_phase2_msg.len) {
-		strbuf_addf(&params->progress_msg, "%s (bytes sent)",
-			    params->progress_base_phase2_msg.buf);
+		if (params->k_attempt > 0)
+			strbuf_addf(&params->progress_msg, "%s [retry %d/%d] (bytes sent)",
+				    params->progress_base_phase2_msg.buf,
+				    params->k_attempt, gh__cmd_opts.max_retries);
+		else
+			strbuf_addf(&params->progress_msg, "%s (bytes sent)",
+				    params->progress_base_phase2_msg.buf);
 		params->progress = start_progress(the_repository, params->progress_msg.buf, ultotal);
 		display_progress(params->progress, ulnow);
 	}
@@ -563,8 +1004,13 @@ enter_phase_2:
 enter_phase_3:
 	strbuf_setlen(&params->progress_msg, 0);
 	if (params->progress_base_phase3_msg.len) {
-		strbuf_addf(&params->progress_msg, "%s (bytes received)",
-			    params->progress_base_phase3_msg.buf);
+		if (params->k_attempt > 0)
+			strbuf_addf(&params->progress_msg, "%s [retry %d/%d] (bytes received)",
+				    params->progress_base_phase3_msg.buf,
+				    params->k_attempt, gh__cmd_opts.max_retries);
+		else
+			strbuf_addf(&params->progress_msg, "%s (bytes received)",
+				    params->progress_base_phase3_msg.buf);
 		params->progress = start_progress(the_repository, params->progress_msg.buf, dltotal);
 		display_progress(params->progress, dlnow);
 	}
@@ -581,12 +1027,19 @@ static void gh__run_one_slot(struct active_request_slot *slot,
 			     struct gh__request_params *params,
 			     struct gh__response_status *status)
 {
-	trace2_region_enter("gvfs-helper", params->label.buf, NULL);
+	struct strbuf key = STRBUF_INIT;
+
+	strbuf_addbuf(&key, &params->tr2_label);
+	strbuf_addstr(&key, gh__server_type_label[params->server_type]);
+
+	params->progress_state = GH__PROGRESS_STATE__START;
+	strbuf_setlen(&params->e2eid, 0);
+
+	trace2_region_enter("gvfs-helper", key.buf, NULL);
 
 	if (!start_active_slot(slot)) {
 		status->curl_code = CURLE_FAILED_INIT; /* a bit of a lie */
-		strbuf_addstr(&status->error_message,
-			      "failed to start HTTP request");
+		compute_retry_mode_from_curl_error(status);
 	} else {
 		run_active_slot(slot);
 		if (params->b_write_to_file)
@@ -594,27 +1047,38 @@ static void gh__run_one_slot(struct active_request_slot *slot,
 
 		gh__response_status__set_from_slot(params, status, slot);
 
+		log_e2eid(params, status);
+
 		if (status->ec == GH__ERROR_CODE__OK) {
-			int old_len = params->label.len;
+			int old_len = key.len;
 
-			strbuf_addstr(&params->label, "/nr_objects");
+			/*
+			 * We only log the number of bytes received.
+			 * We do not log the number of objects requested
+			 * because the server may give us more than that
+			 * (such as when we request a commit).
+			 */
+			strbuf_addstr(&key, "/nr_bytes");
 			trace2_data_intmax("gvfs-helper", NULL,
-					   params->label.buf,
-					   params->object_count);
-			strbuf_setlen(&params->label, old_len);
-
-			strbuf_addstr(&params->label, "/nr_bytes");
-			trace2_data_intmax("gvfs-helper", NULL,
-					   params->label.buf,
+					   key.buf,
 					   status->bytes_received);
-			strbuf_setlen(&params->label, old_len);
+			strbuf_setlen(&key, old_len);
 		}
 	}
 
 	if (params->progress)
 		stop_progress(&params->progress);
 
-	trace2_region_leave("gvfs-helper", params->label.buf, NULL);
+	if (status->ec == GH__ERROR_CODE__OK && params->b_write_to_file) {
+		if (params->b_is_post)
+			install_packfile(params, status);
+		else
+			install_loose(params, status);
+	}
+
+	trace2_region_leave("gvfs-helper", key.buf, NULL);
+
+	strbuf_release(&key);
 }
 
 static int option_parse_cache_server_mode(const struct option *opt,
@@ -1065,41 +1529,115 @@ static void select_odb(void)
  *
  * TODO Consider using lockfile for this rather than naked tempfile.
  */
-static struct tempfile *create_tempfile_for_packfile(void)
+static void create_tempfile_for_packfile(
+	struct gh__request_params *params,
+	struct gh__response_status *status)
 {
 	static unsigned int nth = 0;
 	static struct timeval tv = {0};
 	static struct tm tm = {0};
 	static time_t secs = 0;
-	static char tbuf[32] = {0};
+	static char date[32] = {0};
 
-	struct tempfile *tempfile = NULL;
-	struct strbuf buf_path = STRBUF_INIT;
+	struct strbuf basename = STRBUF_INIT;
+	struct strbuf buf = STRBUF_INIT;
+	int len_p;
+	enum scld_error scld;
+
+	gh__response_status__zero(status);
 
 	if (!nth) {
+		/*
+		 * Create a <date> string to use in the name of all packfiles
+		 * created by this process.
+		 */
 		gettimeofday(&tv, NULL);
 		secs = tv.tv_sec;
 		gmtime_r(&secs, &tm);
 
-		xsnprintf(tbuf, sizeof(tbuf), "%4d%02d%02d-%02d%02d%02d-%06ld",
+		xsnprintf(date, sizeof(date), "%4d%02d%02d-%02d%02d%02d-%06ld",
 			  tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
 			  tm.tm_hour, tm.tm_min, tm.tm_sec,
 			  (long)tv.tv_usec);
 	}
 
-	// TODO should this be in the "<ODB>/pack/tempPacks/"
-	// TODO directory instead? YES
+	/*
+	 * Create a <basename> for this packfile using a series number <n>,
+	 * so that all of the chunks we download will group together.
+	 */
+	strbuf_addf(&basename, "vfs-%s-%04d", date, nth++);
 
-	strbuf_addbuf(&buf_path, &gh__global.buf_odb_path);
-	strbuf_complete(&buf_path, '/');
-	strbuf_addf(&buf_path, "pack/vfs-%s-%04d.temp", tbuf, nth++);
+	/*
+	 * We will stream the data into a managed tempfile() in:
+	 *
+	 *     "<odb>/pack/tempPacks/vfs-<date>-<n>.temp"
+	 */
+	strbuf_setlen(&buf, 0);
+	strbuf_addbuf(&buf, &gh__global.buf_odb_path);
+	strbuf_complete(&buf, '/');
+	strbuf_addstr(&buf, "pack/");
+	len_p = buf.len;
+	strbuf_addstr(&buf, "tempPacks/");
+	strbuf_addbuf(&buf, &basename);
+	strbuf_addstr(&buf, ".temp");
 
-	tempfile = create_tempfile(buf_path.buf);
-	fdopen_tempfile(tempfile, "w");
+	scld = safe_create_leading_directories(the_repository, buf.buf);
+	if (scld != SCLD_OK && scld != SCLD_EXISTS) {
+		strbuf_addf(&status->error_message,
+			    "could not create directory for packfile: '%s'",
+			    buf.buf);
+		status->ec = GH__ERROR_CODE__COULD_NOT_CREATE_TEMPFILE;
+		goto cleanup;
+	}
 
-	strbuf_release(&buf_path);
+	params->tempfile = create_tempfile(buf.buf);
+	if (!params->tempfile) {
+		strbuf_addf(&status->error_message,
+			    "could not create tempfile for packfile: '%s'",
+			    buf.buf);
+		status->ec = GH__ERROR_CODE__COULD_NOT_CREATE_TEMPFILE;
+		goto cleanup;
+	}
 
-	return tempfile;
+	fdopen_tempfile(params->tempfile, "w");
+
+	/*
+	 * After the download is complete, we will need to steal the file
+	 * from the tempfile() class (so that it doesn't magically delete
+	 * it when we close the file handle) and then index it.
+	 *
+	 * We do this into the tempPacks directory to avoid contaminating
+	 * the real pack directory until we know there is no corruption.
+	 *
+	 *     "<odb>/pack/tempPacks/vfs-<date>-<n>.temp.pack"
+	 *     "<odb>/pack/tempPacks/vfs-<date>-<n>.temp.idx"
+	 */
+	strbuf_setlen(&params->temp_path_pack, 0);
+	strbuf_addf(&params->temp_path_pack, "%s.pack", buf.buf);
+
+	strbuf_setlen(&params->temp_path_idx, 0);
+	strbuf_addf(&params->temp_path_idx, "%s.idx", buf.buf);
+
+	/*
+	 * Later, if all goes well, we will install them as:
+	 *
+	 *     "<odb>/pack/vfs-<date>-<n>.pack"
+	 *     "<odb>/pack/vfs-<date>-<n>.idx"
+	 */
+	strbuf_setlen(&buf, len_p);
+	strbuf_setlen(&params->final_path_pack, 0);
+	strbuf_addf(&params->final_path_pack, "%s%s.pack",
+		    buf.buf, basename.buf);
+	strbuf_setlen(&params->final_path_idx, 0);
+	strbuf_addf(&params->final_path_idx, "%s%s.idx",
+		    buf.buf, basename.buf);
+	strbuf_setlen(&params->final_packfile_filename, 0);
+	strbuf_addf(&params->final_packfile_filename, "%s.pack",
+		    basename.buf);
+
+cleanup:
+	strbuf_release(&buf);
+	strbuf_release(&basename);
 }
 
 /*
@@ -1112,15 +1650,15 @@ static struct tempfile *create_tempfile_for_packfile(void)
  */
 static void create_tempfile_for_loose(
 	struct gh__request_params *params,
-	struct gh__response_status *status,
-	const struct object_id *oid)
+	struct gh__response_status *status)
 {
+	static int nth = 0;
 	struct strbuf buf_path = STRBUF_INIT;
 	const char *hex;
 
 	gh__response_status__zero(status);
 
-	hex = oid_to_hex(oid);
+	hex = oid_to_hex(&params->loose_oid);
 
 	strbuf_addbuf(&buf_path, &gh__global.buf_odb_path);
 	strbuf_complete(&buf_path, '/');
@@ -1148,7 +1686,7 @@ static void create_tempfile_for_loose(
 	 * using lockfiles to avoid issues with stale locks after
 	 * crashes.
 	 */
-	strbuf_addf(&buf_path, ".%08u.temp", getpid());
+	strbuf_addf(&buf_path, ".%08u.%.06u.temp", getpid(), nth++);
 
 	params->tempfile = create_tempfile(buf_path.buf);
 	if (!params->tempfile) {
@@ -1165,85 +1703,34 @@ cleanup:
 }
 
 /*
- * Extract the filename portion of the given pathname.
- *
- * TODO Wish I could find a strbuf_filename() function for this.
+ * Convert the tempfile into a temporary .pack, index it into a temporary .idx
+ * file, and then install the pair into ODB.
  */
-static void extract_filename(struct strbuf *filename,
-			     const struct strbuf *pathname)
-{
-	size_t len = pathname->len;
-
-	strbuf_setlen(filename, 0);
-
-	while (len > 0 && !is_dir_sep(pathname->buf[len - 1]))
-		len--;
-
-	strbuf_addstr(filename, &pathname->buf[len]);
-}
-
-/*
- * Convert the tempfile into a permanent .pack packfile in the ODB.
- * Create the corresponding .idx file.
- *
- * Return the filename (not pathname) of the resulting packfile.
- */
-static void install_packfile(struct gh__response_status *status,
-			     struct tempfile **pp_tempfile,
-			     struct strbuf *packfile_filename)
+static void install_packfile(struct gh__request_params *params,
+			     struct gh__response_status *status)
 {
 	struct child_process ip = CHILD_PROCESS_INIT;
-	struct strbuf pack_name_tmp = STRBUF_INIT;
-	struct strbuf pack_name_dst = STRBUF_INIT;
-	struct strbuf idx_name_tmp = STRBUF_INIT;
-	struct strbuf idx_name_dst = STRBUF_INIT;
-	size_t len_base;
-
-	gh__response_status__zero(status);
-
-	strbuf_setlen(packfile_filename, 0);
 
 	/*
-	 * start with "<base>.temp" (that is owned by tempfile class).
-	 * rename to "<base>.pack.temp" to break ownership.
-	 *
-	 * create "<base>.idx.temp" on provisional packfile.
-	 *
-	 * officially install both "<base>.{pack,idx}.temp" as
-	 * "<base>.{pack,idx}".
+	 * When we request more than 1 object, the server should always
+	 * send us a packfile.
 	 */
-
-	strbuf_addstr(&pack_name_tmp, get_tempfile_path(*pp_tempfile));
-	if (!strip_suffix(pack_name_tmp.buf, ".temp", &len_base)) {
-		/*
-		 * This is more of a BUG(), but I want the error
-		 * code propagated.
-		 */
+	if (strcmp(status->content_type.buf,
+		   "application/x-git-packfile")) {
 		strbuf_addf(&status->error_message,
-			    "packfile tempfile does not end in '.temp': '%s'",
-			    pack_name_tmp.buf);
-		status->ec = GH__ERROR_CODE__COULD_NOT_INSTALL_PACKFILE;
+			    "received unknown content-type '%s'",
+			    status->content_type.buf);
+		status->ec = GH__ERROR_CODE__UNEXPECTED_CONTENT_TYPE;
 		goto cleanup;
 	}
 
-	strbuf_setlen(&pack_name_tmp, (int)len_base);
-	strbuf_addbuf(&pack_name_dst, &pack_name_tmp);
-	strbuf_addbuf(&idx_name_tmp, &pack_name_tmp);
-	strbuf_addbuf(&idx_name_dst, &pack_name_tmp);
+	gh__response_status__zero(status);
 
-	strbuf_addstr(&pack_name_tmp, ".pack.temp");
-	strbuf_addstr(&pack_name_dst, ".pack");
-	strbuf_addstr(&idx_name_tmp, ".idx.temp");
-	strbuf_addstr(&idx_name_dst, ".idx");
-
-	// TODO if either pack_name_dst or idx_name_dst already
-	// TODO exists in the ODB, create alternate names so that
-	// TODO we don't step on them.
-
-	if (rename_tempfile(pp_tempfile, pack_name_tmp.buf) == -1) {
+	if (rename_tempfile(&params->tempfile,
+			    params->temp_path_pack.buf) == -1) {
 		strbuf_addf(&status->error_message,
 			    "could not rename packfile to '%s'",
-			    pack_name_tmp.buf);
+			    params->temp_path_pack.buf);
 		status->ec = GH__ERROR_CODE__COULD_NOT_INSTALL_PACKFILE;
 		goto cleanup;
 	}
@@ -1251,59 +1738,54 @@ static void install_packfile(struct gh__response_status *status,
 	strvec_push(&ip.args, "index-pack");
 	if (gh__cmd_opts.show_progress)
 		strvec_push(&ip.args, "-v");
-	strvec_pushl(&ip.args, "-o", idx_name_tmp.buf, NULL);
-	strvec_push(&ip.args, pack_name_tmp.buf);
+	strvec_pushl(&ip.args, "-o", params->temp_path_idx.buf, NULL);
+	strvec_push(&ip.args, params->temp_path_pack.buf);
 	ip.git_cmd = 1;
 	ip.no_stdin = 1;
 	ip.no_stdout = 1;
 
-	// TODO consider capturing stdout from index-pack because
-	// TODO it will contain the SHA of the packfile and we can
-	// TODO (should?) add it to the .pack and .idx pathnames
-	// TODO when we install them.
-	// TODO
-	// TODO See pipe_command() rather than run_command().
-	// TODO
-	// TODO Or should be SHA-it ourselves (or read the last 20 bytes)?
-
 	/*
-	 * Note that I DO NOT have a region around the index-pack process.
-	 * The region in gh__run_one_slot() currently only covers the
-	 * download time.  This index-pack is a separate step not covered
-	 * in the above region.  Later, if/when we have CURL directly stream
-	 * to index-pack, that region will be the combined download+index
-	 * time.  So, I'm not going to introduce it here.
+	 * Note that I DO NOT have a trace2 region around the
+	 * index-pack process by itself.  Currently, we are inside the
+	 * trace2 region for running the request and that's fine.
+	 * Later, if/when we stream the download directly to
+	 * index-pack, it will be inside under the same region anyway.
+	 * So, I'm not going to introduce it here.
 	 */
 	if (run_command(&ip)) {
-		unlink(pack_name_tmp.buf);
-		unlink(idx_name_tmp.buf);
+		unlink(params->temp_path_pack.buf);
+		unlink(params->temp_path_idx.buf);
 		strbuf_addf(&status->error_message,
-			    "index-pack failed on '%s'", pack_name_tmp.buf);
-		status->ec = GH__ERROR_CODE__COULD_NOT_INSTALL_PACKFILE;
+			    "index-pack failed on '%s'",
+			    params->temp_path_pack.buf);
+		/*
+		 * Lets assume that index-pack failed because the
+		 * downloaded file is corrupt (truncated).
+		 *
+		 * Retry it as if the network had dropped.
+		 */
+		status->retry = GH__RETRY_MODE__TRANSIENT;
+		status->ec = GH__ERROR_CODE__INDEX_PACK_FAILED;
 		goto cleanup;
 	}
 
-	if (finalize_object_file(the_repository, pack_name_tmp.buf, pack_name_dst.buf) ||
-	    finalize_object_file(the_repository, idx_name_tmp.buf, idx_name_dst.buf)) {
-		unlink(pack_name_tmp.buf);
-		unlink(pack_name_dst.buf);
-		unlink(idx_name_tmp.buf);
-		unlink(idx_name_dst.buf);
+	if (finalize_object_file(the_repository, params->temp_path_pack.buf,
+				 params->final_path_pack.buf) ||
+	    finalize_object_file(the_repository, params->temp_path_idx.buf,
+				 params->final_path_idx.buf)) {
+		unlink(params->temp_path_pack.buf);
+		unlink(params->temp_path_idx.buf);
+		unlink(params->final_path_pack.buf);
+		unlink(params->final_path_idx.buf);
 		strbuf_addf(&status->error_message,
 			    "could not install packfile '%s'",
-			    pack_name_dst.buf);
+			    params->final_path_pack.buf);
 		status->ec = GH__ERROR_CODE__COULD_NOT_INSTALL_PACKFILE;
 		goto cleanup;
 	}
-
-	extract_filename(packfile_filename, &pack_name_dst);
 
 cleanup:
 	child_process_clear(&ip);
-	strbuf_release(&pack_name_tmp);
-	strbuf_release(&pack_name_dst);
-	strbuf_release(&idx_name_tmp);
-	strbuf_release(&idx_name_dst);
 }
 
 /*
@@ -1370,6 +1852,249 @@ static void gh_http_cleanup(void)
 
 	http_cleanup();
 	gh__global.http_is_initialized = 0;
+}
+
+/*
+ * buffer has "<key>: <value>[\r]\n"
+ */
+static void parse_resp_hdr_1(const char *buffer, size_t size, size_t nitems,
+			     struct strbuf *key, struct strbuf *value)
+{
+	const char *end = buffer + (size * nitems);
+	const char *p;
+
+	p = strchr(buffer, ':');
+
+	strbuf_setlen(key, 0);
+	strbuf_add(key, buffer, (p - buffer));
+
+	p++; /* skip ':' */
+	p++; /* skip ' ' */
+
+	strbuf_setlen(value, 0);
+	strbuf_add(value, p, (end - p));
+	strbuf_trim_trailing_newline(value);
+}
+
+static size_t parse_resp_hdr(char *buffer, size_t size, size_t nitems,
+			     void *void_params)
+{
+	struct gh__request_params *params = void_params;
+	struct gh__azure_throttle *azure = &gh__global_throttle[params->server_type];
+
+	if (starts_with(buffer, "X-RateLimit-")) {
+		struct strbuf key = STRBUF_INIT;
+		struct strbuf val = STRBUF_INIT;
+
+		parse_resp_hdr_1(buffer, size, nitems, &key, &val);
+
+		/*
+		 * The following X- headers are specific to AzureDevOps.
+		 * Other servers have similar sets of values, but I haven't
+		 * compared them in depth.
+		 *
+		 * TODO Remove this.
+		 */
+		trace2_printf("Throttle: %s %s", key.buf, val.buf);
+
+		if (!strcmp(key.buf, "X-RateLimit-Resource")) {
+			/*
+			 * The name of the resource that is complaining.
+			 * Just log it because we can't do anything with it.
+			 */
+			strbuf_setlen(&key, 0);
+			strbuf_addstr(&key, "ratelimit/resource");
+			strbuf_addstr(&key, gh__server_type_label[params->server_type]);
+
+			trace2_data_string("gvfs-helper", NULL, key.buf, val.buf);
+		}
+
+		else if (!strcmp(key.buf, "X-RateLimit-Delay")) {
+			/*
+			 * The amount of delay added to our response.
+			 * Just log it because we can't do anything with it.
+			 */
+			unsigned long tarpit_delay_ms;
+
+			strbuf_setlen(&key, 0);
+			strbuf_addstr(&key, "ratelimit/delay_ms");
+			strbuf_addstr(&key, gh__server_type_label[params->server_type]);
+
+			git_parse_ulong(val.buf, &tarpit_delay_ms);
+
+			trace2_data_intmax("gvfs-helper", NULL, key.buf, tarpit_delay_ms);
+		}
+
+		else if (!strcmp(key.buf, "X-RateLimit-Limit")) {
+			/*
+			 * The resource limit/quota before we get a 429.
+			 */
+			git_parse_ulong(val.buf, &azure->tstu_limit);
+		}
+
+		else if (!strcmp(key.buf, "X-RateLimit-Remaining")) {
+			/*
+			 * The amount of our quota remaining.  When zero, we
+			 * should get 429s on futher requests until the reset
+			 * time.
+			 */
+			git_parse_ulong(val.buf, &azure->tstu_remaining);
+		}
+
+		else if (!strcmp(key.buf, "X-RateLimit-Reset")) {
+			/*
+			 * The server gave us a time-in-seconds-since-the-epoch
+			 * for when our quota will be reset (if we stop all
+			 * activity right now).
+			 *
+			 * Checkpoint the local system clock so we can do some
+			 * sanity checks on any clock skew.  Also, since we get
+			 * the headers before we get the content, we can adjust
+			 * our delay to compensate for the full download time.
+			 */
+			unsigned long now = time(NULL);
+			unsigned long reset_time;
+
+			git_parse_ulong(val.buf, &reset_time);
+			if (reset_time > now)
+				azure->reset_sec = reset_time - now;
+		}
+
+		strbuf_release(&key);
+		strbuf_release(&val);
+	}
+
+	else if (starts_with(buffer, "Retry-After")) {
+		struct strbuf key = STRBUF_INIT;
+		struct strbuf val = STRBUF_INIT;
+
+		parse_resp_hdr_1(buffer, size, nitems, &key, &val);
+
+		/*
+		 * We get this header with a 429 and 503 and possibly a 30x.
+		 *
+		 * Curl does have CURLINFO_RETRY_AFTER that nicely parses and
+		 * normalizes the value (and supports HTTP/1.1 usage), but it
+		 * is not present yet in the version shipped with the Mac, so
+		 * we do it directly here.
+		 */
+		git_parse_ulong(val.buf, &azure->retry_after_sec);
+
+		strbuf_release(&key);
+		strbuf_release(&val);
+	}
+
+	else if (starts_with(buffer, "X-VSS-E2EID")) {
+		struct strbuf key = STRBUF_INIT;
+
+		/*
+		 * Capture the E2EID as it goes by, but don't log it until we
+		 * know the request result.
+		 */
+		parse_resp_hdr_1(buffer, size, nitems, &key, &params->e2eid);
+
+		strbuf_release(&key);
+	}
+
+	return nitems * size;
+}
+
+/*
+ * Wait "duration" seconds and drive the progress mechanism.
+ *
+ * We spin slightly faster than we need to to keep the progress bar
+ * drawn (especially if the user presses return while waiting) and to
+ * compensate for delay factors built into the progress class (which
+ * might wait for 2 seconds before drawing the first message).
+ */
+static void do_throttle_spin(struct gh__request_params *params,
+			     const char *tr2_label,
+			     const char *progress_msg,
+			     int duration)
+{
+	struct strbuf region = STRBUF_INIT;
+	struct progress *progress = NULL;
+	unsigned long begin = time(NULL);
+	unsigned long now = begin;
+	unsigned long end = begin + duration;
+
+	strbuf_addstr(&region, tr2_label);
+	strbuf_addstr(&region, gh__server_type_label[params->server_type]);
+	trace2_region_enter("gvfs-helper", region.buf, NULL);
+
+	progress = start_progress(the_repository, progress_msg, duration);
+	while (now < end) {
+		display_progress(progress, (now - begin));
+
+		sleep_millisec(100);
+
+		now = time(NULL);
+	}
+	display_progress(progress, duration);
+	stop_progress(&progress);
+
+	trace2_region_leave("gvfs-helper", region.buf, NULL);
+	strbuf_release(&region);
+}
+
+/*
+ * Delay the outbound request if necessary in response to previous throttle
+ * blockages or hints.  Throttle data is somewhat orthogonal to the status
+ * results from any previous request and/or the request params of the next
+ * request.
+ *
+ * Note that the throttle info also is cross-process information, such as
+ * 2 concurrent fetches in 2 different terminal windows to the same server
+ * will be sharing the same server quota.  These could be coordinated too,
+ * so that a blockage received in one process would prevent the other
+ * process from starting another request (and also blocked or extending
+ * the delay interval).  We're NOT going to do that level of integration.
+ * We will let both processes independently attempt the next request.
+ * This may cause us to miss the end-of-quota boundary if the server
+ * extends it because of the second request.
+ *
+ * TODO Should we have a max-wait option and then return a hard-error
+ * TODO of some type?
+ */
+static void do_throttle_wait(struct gh__request_params *params,
+			     struct gh__response_status *status UNUSED)
+{
+	struct gh__azure_throttle *azure =
+		&gh__global_throttle[params->server_type];
+
+	if (azure->retry_after_sec) {
+		/*
+		 * We were given a hard delay (such as after a 429).
+		 * Spin until the requested time.
+		 */
+		do_throttle_spin(params, "throttle/hard",
+				 "Waiting on hard throttle (sec)",
+				 azure->retry_after_sec);
+		return;
+	}
+
+	if (azure->reset_sec > 0) {
+		/*
+		 * We were given a hint that we are overloading
+		 * the server.  Voluntarily backoff (before we
+		 * get tarpitted or blocked).
+		 */
+		do_throttle_spin(params, "throttle/soft",
+				 "Waiting on soft throttle (sec)",
+				 azure->reset_sec);
+		return;
+	}
+
+	if (params->k_transient_delay_sec) {
+		/*
+		 * Insert an arbitrary delay before retrying after a
+		 * transient (network) failure.
+		 */
+		do_throttle_spin(params, "throttle/transient",
+				 "Waiting to retry after network error (sec)",
+				 params->k_transient_delay_sec);
+		return;
+	}
 }
 
 static void set_main_creds_on_slot(struct active_request_slot *slot,
@@ -1451,7 +2176,7 @@ static void set_cache_server_creds_on_slot(struct active_request_slot *slot,
 }
 
 /*
- * Do a single HTTP request without auth-retry or fallback.
+ * Do a single HTTP request WITHOUT robust-retry, auth-retry or fallback.
  */
 static void do_req(const char *url_base,
 		   const char *url_component,
@@ -1466,13 +2191,26 @@ static void do_req(const char *url_base,
 	gh__response_status__zero(status);
 
 	if (params->b_write_to_file) {
-		// TODO ftruncate tempfile ??
+		/* Delete dirty tempfile from a previous attempt. */
+		if (params->tempfile)
+			delete_tempfile(&params->tempfile);
+
+		if (params->b_is_post)
+			create_tempfile_for_packfile(params, status);
+		else
+			create_tempfile_for_loose(params, status);
+		if (!params->tempfile || status->ec != GH__ERROR_CODE__OK)
+			return;
 	} else {
+		/* Guard against caller using dirty buffer */
 		strbuf_setlen(params->buffer, 0);
 	}
 
 	end_url_with_slash(&rest_url, url_base);
 	strbuf_addstr(&rest_url, url_component);
+
+	do_throttle_wait(params, status);
+	gh__azure_throttle__zero(&gh__global_throttle[params->server_type]);
 
 	slot = get_active_slot();
 	slot->results = &results;
@@ -1515,7 +2253,10 @@ static void do_req(const char *url_base,
 		curl_easy_setopt(slot->curl, CURLOPT_FILE, params->buffer);
 	}
 
-	if (url_base == gh__global.main_url)
+	curl_easy_setopt(slot->curl, CURLOPT_HEADERFUNCTION, parse_resp_hdr);
+	curl_easy_setopt(slot->curl, CURLOPT_HEADERDATA, params);
+
+	if (params->server_type == GH__SERVER_TYPE__MAIN)
 		set_main_creds_on_slot(slot, creds);
 	else
 		set_cache_server_creds_on_slot(slot, creds);
@@ -1534,25 +2275,104 @@ static void do_req(const char *url_base,
 	strbuf_release(&rest_url);
 }
 
+/*
+ * Compute the delay for the nth attempt.
+ *
+ * No delay for the first attempt. Then use a normal exponential backoff
+ * starting from 8.
+ */
+static int compute_transient_delay(int attempt)
+{
+	int v;
+
+	if (attempt < 1)
+		return 0;
+
+	/*
+	 * Let 8K be our hard limit (for integer overflow protection).
+	 * That's over 2 hours.  This is 8<<10.
+	 */
+	if (attempt > 10)
+		attempt = 10;
+
+	v = 8 << (attempt - 1);
+
+	if (v > gh__cmd_opts.max_transient_backoff_sec)
+		v = gh__cmd_opts.max_transient_backoff_sec;
+
+	return v;
+}
+
+/*
+ * Robustly make an HTTP request.  Retry if necessary to hide common
+ * transient network errors and/or 429 blockages.
+ *
+ * For a transient (network) failure (where we do not have a throttle
+ * delay factor), we should insert a small delay to let the network
+ * recover.  The outage might be because the VPN dropped, or the
+ * machine went to sleep or something and we want to give the network
+ * time to come back up.  Insert AI here :-)
+ */
+static void do_req__with_robust_retry(const char *url_base,
+				      const char *url_component,
+				      const struct credential *creds,
+				      struct gh__request_params *params,
+				      struct gh__response_status *status)
+{
+	for (params->k_attempt = 0;
+	     params->k_attempt < gh__cmd_opts.max_retries + 1;
+	     params->k_attempt++) {
+
+		do_req(url_base, url_component, creds, params, status);
+
+		switch (status->retry) {
+		default:
+		case GH__RETRY_MODE__SUCCESS:
+		case GH__RETRY_MODE__HTTP_401: /* caller does auth-retry */
+		case GH__RETRY_MODE__HARD_FAIL:
+		case GH__RETRY_MODE__FAIL_404:
+			return;
+
+		case GH__RETRY_MODE__HTTP_429:
+		case GH__RETRY_MODE__HTTP_503:
+			/*
+			 * We should have gotten a "Retry-After" header with
+			 * these and that gives us the wait time.  If not,
+			 * fallthru and use the backoff delay.
+			 */
+			if (gh__global_throttle[params->server_type].retry_after_sec)
+				continue;
+			/*fallthru*/
+
+		case GH__RETRY_MODE__TRANSIENT:
+			params->k_transient_delay_sec =
+				compute_transient_delay(params->k_attempt);
+			continue;
+		}
+	}
+}
+
 static void do_req__to_main(const char *url_component,
 			    struct gh__request_params *params,
 			    struct gh__response_status *status)
 {
-//	lookup_main_creds();
+	params->server_type = GH__SERVER_TYPE__MAIN;
 
 	/*
 	 * When talking to the main Git server, we DO NOT preload the
 	 * creds before the first request.
 	 */
 
-	do_req(gh__global.main_url, url_component, &gh__global.main_creds,
-	       params, status);
+	do_req__with_robust_retry(gh__global.main_url, url_component,
+				  &gh__global.main_creds,
+				  params, status);
 
 	if (status->response_code == 401) {
 		refresh_main_creds();
 
-		do_req(gh__global.main_url, url_component, &gh__global.main_creds,
-		       params, status);
+		do_req__with_robust_retry(gh__global.main_url, url_component,
+					  &gh__global.main_creds,
+					  params, status);
 	}
 
 	if (status->response_code == 200)
@@ -1563,33 +2383,40 @@ static void do_req__to_cache_server(const char *url_component,
 				    struct gh__request_params *params,
 				    struct gh__response_status *status)
 {
+	params->server_type = GH__SERVER_TYPE__CACHE;
+
 	/*
 	 * When talking to a cache-server, DO force load the creds.
 	 * This implicitly preloads the creds to the main server.
 	 */
 	synthesize_cache_server_creds();
 
-	do_req(gh__global.cache_server_url, url_component, &gh__global.cache_creds,
-	       params, status);
-	fixup_cache_server_400_to_401(status);
+	do_req__with_robust_retry(gh__global.cache_server_url, url_component,
+				  &gh__global.cache_creds,
+				  params, status);
 
 	if (status->response_code == 401) {
 		refresh_cache_server_creds();
 
-		do_req(gh__global.cache_server_url, url_component,
-		       &gh__global.cache_creds, params, status);
-		fixup_cache_server_400_to_401(status);
+		do_req__with_robust_retry(gh__global.cache_server_url,
+					  url_component,
+					  &gh__global.cache_creds,
+					  params, status);
 	}
 
 	if (status->response_code == 200)
 		approve_cache_server_creds();
 }
 
+/*
+ * Try the cache-server (if configured) then fall-back to the main Git server.
+ */
 static void do_req__with_fallback(const char *url_component,
 				  struct gh__request_params *params,
 				  struct gh__response_status *status)
 {
-	if (gh__global.cache_server_url && !params->b_no_cache_server) {
+	if (gh__global.cache_server_url &&
+	    params->b_permit_cache_server_if_defined) {
 		do_req__to_cache_server(url_component, params, status);
 
 		if (status->response_code == 200)
@@ -1624,11 +2451,12 @@ static void do__gvfs_config(struct gh__response_status *status,
 {
 	struct gh__request_params params = GH__REQUEST_PARAMS_INIT;
 
-	strbuf_addstr(&params.label, "GET/config");
+	strbuf_addstr(&params.tr2_label, "GET/config");
 
 	params.b_is_post = 0;
 	params.b_write_to_file = 0;
-	params.b_no_cache_server = 1; /* they don't handle gvfs/config API */
+	/* cache-servers do not handle gvfs/config REST calls */
+	params.b_permit_cache_server_if_defined = 0;
 	params.buffer = config_data;
 
 	params.object_count = 1; /* a bit of a lie */
@@ -1673,11 +2501,11 @@ static void do__loose__gvfs_object(struct gh__response_status *status,
 
 	strbuf_addf(&component_url, "gvfs/objects/%s", oid_to_hex(oid));
 
-	strbuf_addstr(&params.label, "GET/objects");
+	strbuf_addstr(&params.tr2_label, "GET/objects");
 
 	params.b_is_post = 0;
 	params.b_write_to_file = 1;
-	params.b_no_cache_server = 0;
+	params.b_permit_cache_server_if_defined = 1;
 
 	params.object_count = 1;
 
@@ -1687,9 +2515,7 @@ static void do__loose__gvfs_object(struct gh__response_status *status,
 	params.headers = curl_slist_append(params.headers,
 					   "Pragma: no-cache");
 
-	create_tempfile_for_loose(&params, status, oid);
-	if (!params.tempfile)
-		goto cleanup;
+	oidcpy(&params.loose_oid, oid);
 
 	if (gh__cmd_opts.show_progress) {
 		/*
@@ -1704,10 +2530,6 @@ static void do__loose__gvfs_object(struct gh__response_status *status,
 
 	do_req__with_fallback(component_url.buf, &params, status);
 
-	if (status->ec == GH__ERROR_CODE__OK)
-		install_loose(&params, status);
-
-cleanup:
 	gh__request_params__release(&params);
 	strbuf_release(&component_url);
 }
@@ -1720,23 +2542,26 @@ cleanup:
 static void do__packfile__gvfs_objects(struct gh__response_status *status,
 				       struct oidset_iter *iter,
 				       unsigned long nr_wanted_in_block,
+				       int j_pack_num, int j_pack_den,
 				       struct strbuf *output_filename,
-				       unsigned long *nr_taken)
+				       unsigned long *nr_oid_taken)
 {
 	struct json_writer jw_req = JSON_WRITER_INIT;
 	struct gh__request_params params = GH__REQUEST_PARAMS_INIT;
+
+	strbuf_setlen(output_filename, 0);
 
 	gh__response_status__zero(status);
 
 	params.object_count = build_json_payload__gvfs_objects(
 		&jw_req, iter, nr_wanted_in_block);
-	*nr_taken = params.object_count;
+	*nr_oid_taken = params.object_count;
 
-	strbuf_addstr(&params.label, "POST/objects");
+	strbuf_addstr(&params.tr2_label, "POST/objects");
 
 	params.b_is_post = 1;
 	params.b_write_to_file = 1;
-	params.b_no_cache_server = 0;
+	params.b_permit_cache_server_if_defined = 1;
 
 	params.post_payload = &jw_req.json;
 
@@ -1761,73 +2586,21 @@ static void do__packfile__gvfs_objects(struct gh__response_status *status,
 	params.headers = curl_slist_append(params.headers,
 					   "Accept: application/x-git-loose-object");
 
-	params.tempfile = create_tempfile_for_packfile();
-	if (!params.tempfile) {
-		strbuf_addstr(&status->error_message,
-			      "could not create tempfile for packfile");
-		status->ec = GH__ERROR_CODE__COULD_NOT_CREATE_TEMPFILE;
-		goto cleanup;
-	}
-
 	if (gh__cmd_opts.show_progress) {
 		strbuf_addf(&params.progress_base_phase2_msg,
-			    "Requesting packfile with %ld objects",
+			    "Requesting packfile %d/%d with %ld objects",
+			    j_pack_num, j_pack_den,
 			    params.object_count);
 		strbuf_addf(&params.progress_base_phase3_msg,
-			    "Receiving packfile with %ld objects",
+			    "Receiving packfile %d/%d with %ld objects",
+			    j_pack_num, j_pack_den,
 			    params.object_count);
 	}
 
 	do_req__with_fallback("gvfs/objects", &params, status);
+	if (status->ec == GH__ERROR_CODE__OK)
+		strbuf_addbuf(output_filename, &params.final_packfile_filename);
 
-	if (status->ec == GH__ERROR_CODE__OK) {
-		if (!strcmp(status->content_type.buf,
-			    "application/x-git-packfile")) {
-
-			// TODO Consider having a worker thread to manage
-			// TODO running index-pack and then install the
-			// TODO resulting .idx and .pack files.  This would
-			// TODO let us interleave those steps with our thread
-			// TODO fetching the next block of objects from the
-			// TODO server.  (Need to think about how progress
-			// TODO messages from our thread and index-pack
-			// TODO would mesh.)
-			// TODO
-			// TODO But then again, if we hack index-pack to write
-			// TODO to our alternate and stream the data thru it,
-			// TODO it won't matter.
-
-			install_packfile(status, &params.tempfile,
-					 output_filename);
-			goto cleanup;
-		}
-
-		if (!strcmp(status->content_type.buf,
-			    "application/x-git-loose-object"))
-		{
-			/*
-			 * This should not happen (when we request
-			 * more than one object).  The server can send
-			 * us a loose object (even when we use the
-			 * POST form) if there is only one object in
-			 * the payload (and despite the set of accept
-			 * headers we send), so I'm going to leave
-			 * this here.
-			 */
-			strbuf_addstr(&status->error_message,
-				      "received loose object when packfile expected");
-			status->ec = GH__ERROR_CODE__UNEXPECTED_CONTENT_TYPE;
-			goto cleanup;
-		}
-
-		strbuf_addf(&status->error_message,
-			    "received unknown content-type '%s'",
-			    status->content_type.buf);
-		status->ec = GH__ERROR_CODE__UNEXPECTED_CONTENT_TYPE;
-		goto cleanup;
-	}
-
-cleanup:
 	gh__request_params__release(&params);
 	jw_release(&jw_req);
 }
@@ -1841,7 +2614,7 @@ cleanup:
  */
 static void do_fetch_oidset(struct gh__response_status *status,
 			    struct oidset *oids,
-			    unsigned long nr_total,
+			    unsigned long nr_oid_total,
 			    struct string_list *result_list)
 {
 	struct oidset_iter iter;
@@ -1850,19 +2623,25 @@ static void do_fetch_oidset(struct gh__response_status *status,
 	struct strbuf err404 = STRBUF_INIT;
 	const struct object_id *oid;
 	unsigned long k;
-	unsigned long nr_taken;
+	unsigned long nr_oid_taken;
 	int had_404 = 0;
+	int j_pack_den = 0;
+	int j_pack_num = 0;
 
 	gh__response_status__zero(status);
-	if (!nr_total)
+	if (!nr_oid_total)
 		return;
+
+	if (nr_oid_total > 1)
+		j_pack_den = ((nr_oid_total + gh__cmd_opts.block_size - 1)
+			      / gh__cmd_opts.block_size);
 
 	oidset_iter_init(oids, &iter);
 
-	for (k = 0; k < nr_total; k += nr_taken) {
-		if (nr_total - k == 1 || gh__cmd_opts.block_size == 1) {
+	for (k = 0; k < nr_oid_total; k += nr_oid_taken) {
+		if (nr_oid_total - k == 1 || gh__cmd_opts.block_size == 1) {
 			oid = oidset_iter_next(&iter);
-			nr_taken = 1;
+			nr_oid_taken = 1;
 
 			do__loose__gvfs_object(status, oid);
 
@@ -1897,10 +2676,13 @@ static void do_fetch_oidset(struct gh__response_status *status,
 		} else {
 			strbuf_setlen(&output_filename, 0);
 
+			j_pack_num++;
+
 			do__packfile__gvfs_objects(status, &iter,
 						   gh__cmd_opts.block_size,
+						   j_pack_num, j_pack_den,
 						   &output_filename,
-						   &nr_taken);
+						   &nr_oid_taken);
 
 			/*
 			 * Because the oidset iterator has random
@@ -2016,6 +2798,8 @@ static enum gh__error_code do_sub_cmd__get(int argc, const char **argv)
 			     N_("number of objects to request at a time")),
 		OPT_INTEGER('d', "depth", &gh__cmd_opts.depth,
 			    N_("Commit depth")),
+		OPT_INTEGER('r', "max-retries", &gh__cmd_opts.max_retries,
+			    N_("retries for transient network errors")),
 		OPT_END(),
 	};
 
@@ -2023,7 +2807,7 @@ static enum gh__error_code do_sub_cmd__get(int argc, const char **argv)
 	struct oidset oids = OIDSET_INIT;
 	struct string_list result_list = STRING_LIST_INIT_DUP;
 	enum gh__error_code ec = GH__ERROR_CODE__OK;
-	unsigned long nr_total;
+	unsigned long nr_oid_total;
 	size_t k;
 
 	trace2_cmd_mode("get");
@@ -2034,14 +2818,16 @@ static enum gh__error_code do_sub_cmd__get(int argc, const char **argv)
 	argc = parse_options(argc, argv, NULL, get_options, get_usage, 0);
 	if (gh__cmd_opts.depth < 1)
 		gh__cmd_opts.depth = 1;
+	if (gh__cmd_opts.max_retries < 0)
+		gh__cmd_opts.max_retries = 0;
 
 	finish_init(1);
 
-	nr_total = read_stdin_from_rev_list(&oids);
+	nr_oid_total = read_stdin_from_rev_list(&oids);
 
 	trace2_region_enter("gvfs-helper", "get", NULL);
-	trace2_data_intmax("gvfs-helper", NULL, "get/nr_objects", nr_total);
-	do_fetch_oidset(&status, &oids, nr_total, &result_list);
+	trace2_data_intmax("gvfs-helper", NULL, "get/nr_objects", nr_oid_total);
+	do_fetch_oidset(&status, &oids, nr_oid_total, &result_list);
 	trace2_region_leave("gvfs-helper", "get", NULL);
 
 	ec = status.ec;
@@ -2076,7 +2862,7 @@ static enum gh__error_code do_server_subprocess_get(void)
 	int len;
 	int err;
 	size_t k;
-	unsigned long nr_total = 0;
+	unsigned long nr_oid_total = 0;
 
 	/*
 	 * Inside the "get" command, we expect a list of OIDs
@@ -2094,10 +2880,10 @@ static enum gh__error_code do_server_subprocess_get(void)
 		}
 
 		if (!oidset_insert(&oids, &oid))
-			nr_total++;
+			nr_oid_total++;
 	}
 
-	if (!nr_total) {
+	if (!nr_oid_total) {
 		if (packet_write_fmt_gently(1, "ok\n")) {
 			error("server: cannot write 'get' result to client");
 			ec = GH__ERROR_CODE__SUBPROCESS_SYNTAX;
@@ -2107,8 +2893,8 @@ static enum gh__error_code do_server_subprocess_get(void)
 	}
 
 	trace2_region_enter("gvfs-helper", "server/get", NULL);
-	trace2_data_intmax("gvfs-helper", NULL, "server/get/nr_objects", nr_total);
-	do_fetch_oidset(&status, &oids, nr_total, &result_list);
+	trace2_data_intmax("gvfs-helper", NULL, "server/get/nr_objects", nr_oid_total);
+	do_fetch_oidset(&status, &oids, nr_oid_total, &result_list);
 	trace2_region_leave("gvfs-helper", "server/get", NULL);
 
 	/*
@@ -2267,6 +3053,8 @@ static enum gh__error_code do_sub_cmd__server(int argc, const char **argv)
 			     N_("number of objects to request at a time")),
 		OPT_INTEGER('d', "depth", &gh__cmd_opts.depth,
 			    N_("Commit depth")),
+		OPT_INTEGER('r', "max-retries", &gh__cmd_opts.max_retries,
+			    N_("retries for transient network errors")),
 		OPT_END(),
 	};
 
@@ -2283,6 +3071,8 @@ static enum gh__error_code do_sub_cmd__server(int argc, const char **argv)
 	argc = parse_options(argc, argv, NULL, server_options, server_usage, 0);
 	if (gh__cmd_opts.depth < 1)
 		gh__cmd_opts.depth = 1;
+	if (gh__cmd_opts.max_retries < 0)
+		gh__cmd_opts.max_retries = 0;
 
 	finish_init(1);
 
@@ -2372,12 +3162,22 @@ int cmd_main(int argc, const char **argv)
 
 	setup_git_directory_gently(NULL);
 
-	repo_config(the_repository, git_default_config, NULL);
-
 	/* Set any non-zero initial values in gh__cmd_opts. */
-	gh__cmd_opts.depth = 1;
+	gh__cmd_opts.depth = GH__DEFAULT_COMMIT_DEPTH;
 	gh__cmd_opts.block_size = GH__DEFAULT_BLOCK_SIZE;
+	gh__cmd_opts.max_retries = GH__DEFAULT_MAX_RETRIES;
+	gh__cmd_opts.max_transient_backoff_sec =
+		GH__DEFAULT_MAX_TRANSIENT_BACKOFF_SEC;
+
 	gh__cmd_opts.show_progress = !!isatty(2);
+
+	// TODO use existing gvfs config settings to override our GH__DEFAULT_
+	// TODO values in gh__cmd_opts.  (And maybe add/remove our command line
+	// TODO options for them.)
+	// TODO
+	// TODO See "scalar.max-retries" (and maybe "gvfs.max-retries")
+
+	repo_config(the_repository, git_default_config, NULL);
 
 	argc = parse_options(argc, argv, NULL, main_options, main_usage,
 			     PARSE_OPT_STOP_AT_NON_OPTION);
