@@ -46,7 +46,28 @@
 //
 //     get
 //
-//            Fetch 1 or more objects.  If a cache-server is configured,
+//            Fetch 1 or more objects one at a time using a "/gvfs/objects"
+//            GET request.
+//
+//            If a cache-server is configured,
+//            try it first.  Optionally fallback to the main Git server.
+//
+//            The set of objects is given on stdin and is assumed to be
+//            a list of <oid>, one per line.
+//
+//            <get-options>:
+//
+//                 --max-retries=<n>     // defaults to "6"
+//
+//                       Number of retries after transient network errors.
+//                       Set to zero to disable such retries.
+//
+//     post
+//
+//            Fetch 1 or more objects in bulk using a "/gvfs/objects" POST
+//            request.
+//
+//            If a cache-server is configured,
 //            try it first.  Optionally fallback to the main Git server.
 //
 //            The set of objects is given on stdin and is assumed to be
@@ -78,7 +99,8 @@
 //                 --block-size=<n>      // defaults to "4000"
 //
 //                       Request objects from server in batches of at
-//                       most n objects (not bytes).
+//                       most n objects (not bytes) when using POST
+//                       requests.
 //
 //                 --depth=<depth>       // defaults to "1"
 //
@@ -87,17 +109,27 @@
 //                       Number of retries after transient network errors.
 //                       Set to zero to disable such retries.
 //
-//            Interactive verb: get
+//            Interactive verb: objects.get
 //
-//                 Fetch 1 or more objects.  If a cache-server is configured,
-//                 try it first.  Optionally fallback to the main Git server.
+//                 Fetch 1 or more objects, one at a time, using a
+//                 "/gvfs/objects" GET requests.
+//
+//                 Each object will be created as a loose object in the ODB.
+//
+//            Interactive verb: objects.post
+//
+//                 Fetch 1 or more objects, in bulk, using one or more
+//                 "/gvfs/objects" POST requests.
+//
+//            For both verbs, if a cache-server is configured, try it first.
+//            Optionally fallback to the main Git server.
 //
 //                 Create 1 or more loose objects and/or packfiles in the
 //                 shared-cache ODB.  (The pathname of the selected ODB is
 //                 reported at the beginning of the response; this should
 //                 match the pathname given on the command line).
 //
-//                 git> get
+//                 git> objects.get | objects.post
 //                 git> <oid>
 //                 git> <oid>
 //                 git> ...
@@ -115,20 +147,6 @@
 //            [1] Documentation/technical/protocol-common.txt
 //            [2] Documentation/technical/long-running-process-protocol.txt
 //            [3] See GIT_TRACE_PACKET
-//
-// Example:
-//
-// $ git -c core.virtualizeobjects=false -c core.usegvfshelper=false
-//           rev-list --objects --no-walk --missing=print HEAD
-//     | grep "^?"
-//     | sed 's/^?//'
-//     | git gvfs-helper get-missing
-//
-// Note: In this example, we need to turn off "core.virtualizeobjects" and
-//       "core.usegvfshelper" when building the list of objects.  This prevents
-//       rev-list (in oid_object_info_extended() from automatically fetching
-//       them with read-object-hook or "gvfs-helper server" sub-process (and
-//       defeating the whole purpose of this example).
 //
 //////////////////////////////////////////////////////////////////
 
@@ -172,12 +190,18 @@
 static const char * const main_usage[] = {
 	N_("git gvfs-helper [<main_options>] config      [<options>]"),
 	N_("git gvfs-helper [<main_options>] get         [<options>]"),
+	N_("git gvfs-helper [<main_options>] post        [<options>]"),
 	N_("git gvfs-helper [<main_options>] server      [<options>]"),
 	NULL
 };
 
-static const char *const get_usage[] = {
+static const char *const objects_get_usage[] = {
 	N_("git gvfs-helper [<main_options>] get [<options>]"),
+	NULL
+};
+
+static const char *const objects_post_usage[] = {
+	N_("git gvfs-helper [<main_options>] post [<options>]"),
 	NULL
 };
 
@@ -189,12 +213,12 @@ static const char *const server_usage[] = {
 /*
  * "commitDepth" field in gvfs protocol
  */
-#define GH__DEFAULT_COMMIT_DEPTH 1
+#define GH__DEFAULT__OBJECTS_POST__COMMIT_DEPTH 1
 
 /*
  * Chunk/block size in number of objects we request in each packfile
  */
-#define GH__DEFAULT_BLOCK_SIZE 4000
+#define GH__DEFAULT__OBJECTS_POST__BLOCK_SIZE 4000
 
 /*
  * Retry attempts (after the initial request) for transient errors and 429s.
@@ -274,6 +298,7 @@ static struct gh__global {
 	int cache_server_is_initialized; /* did sub-command look for one */
 	int main_creds_need_approval; /* try to only approve them once */
 
+	unsigned long connect_timeout_ms;
 } gh__global;
 
 enum gh__server_type {
@@ -286,6 +311,28 @@ enum gh__server_type {
 static const char *gh__server_type_label[GH__SERVER_TYPE__NR] = {
 	"(main)",
 	"(cs)"
+};
+
+enum gh__objects_mode {
+	/*
+	 * Bulk fetch objects.
+	 *
+	 * But also, force the use of HTTP POST regardless of how many
+	 * objects we are requesting.
+	 *
+	 * The GVFS Protocol treats requests for commit objects
+	 * differently in GET and POST requests WRT whether it
+	 * automatically also fetches the referenced trees.
+	 */
+	GH__OBJECTS_MODE__POST,
+
+	/*
+	 * Fetch objects one at a time using HTTP GET.
+	 *
+	 * Force the use of GET (primarily because of the commit
+	 * object treatment).
+	 */
+	GH__OBJECTS_MODE__GET,
 };
 
 struct gh__azure_throttle
@@ -343,7 +390,20 @@ enum gh__progress_state {
  * Parameters to drive an HTTP request (with any necessary retries).
  */
 struct gh__request_params {
-	int b_is_post;            /* POST=1 or GET=0 */
+	/*
+	 * b_is_post indicates if the current HTTP request is a POST=1 or
+	 * a GET=0.  This is a lower level field used to setup CURL and
+	 * the tempfile used to receive the content.
+	 *
+	 * It is related to, but different from the GH__OBJECTS_MODE__
+	 * field that we present to the gvfs-helper client or in the CLI
+	 * (which only concerns the semantics of the /gvfs/objects protocol
+	 * on the set of requested OIDs).
+	 *
+	 * For example, we use an HTTP GET to get the /gvfs/config data
+	 * into a buffer.
+	 */
+	int b_is_post;
 	int b_write_to_file;      /* write to file=1 or strbuf=0 */
 	int b_permit_cache_server_if_defined;
 
@@ -506,8 +566,6 @@ enum gh__retry_mode {
 struct gh__response_status {
 	struct strbuf error_message;
 	struct strbuf content_type;
-	long response_code; /* http response code */
-	CURLcode curl_code;
 	enum gh__error_code ec;
 	enum gh__retry_mode retry;
 	intmax_t bytes_received;
@@ -517,8 +575,6 @@ struct gh__response_status {
 #define GH__RESPONSE_STATUS_INIT { \
 	.error_message = STRBUF_INIT, \
 	.content_type = STRBUF_INIT, \
-	.response_code = 0, \
-	.curl_code = CURLE_OK, \
 	.ec = GH__ERROR_CODE__OK, \
 	.retry = GH__RETRY_MODE__SUCCESS, \
 	.bytes_received = 0, \
@@ -529,8 +585,6 @@ static void gh__response_status__zero(struct gh__response_status *s)
 {
 	strbuf_setlen(&s->error_message, 0);
 	strbuf_setlen(&s->content_type, 0);
-	s->response_code = 0;
-	s->curl_code = CURLE_OK;
 	s->ec = GH__ERROR_CODE__OK;
 	s->retry = GH__RETRY_MODE__SUCCESS;
 	s->bytes_received = 0;
@@ -584,15 +638,14 @@ static void log_e2eid(struct gh__request_params *params,
 }
 
 /*
- * Normalize a few error codes before we try to decide
+ * Normalize a few HTTP response codes before we try to decide
  * how to dispatch on them.
  */
-static void gh__response_status__normalize_odd_codes(
-	struct gh__request_params *params,
-	struct gh__response_status *status)
+static long gh__normalize_odd_codes(struct gh__request_params *params,
+				    long http_response_code)
 {
 	if (params->server_type == GH__SERVER_TYPE__CACHE &&
-	    status->response_code == 400) {
+	    http_response_code == 400) {
 		/*
 		 * The cache-server sends a somewhat bogus 400 instead of
 		 * the normal 401 when AUTH is required.  Fixup the status
@@ -604,16 +657,18 @@ static void gh__response_status__normalize_odd_codes(
 		 * TODO 401 for now.  We should confirm the expected
 		 * TODO error message in the response-body.
 		 */
-		status->response_code = 401;
+		return 401;
 	}
 
-	if (status->response_code == 203) {
+	if (http_response_code == 203) {
 		/*
 		 * A proxy server transformed a 200 from the origin server
 		 * into a 203.  We don't care about the subtle distinction.
 		 */
-		status->response_code = 200;
+		return 200;
 	}
+
+	return http_response_code;
 }
 
 /*
@@ -623,9 +678,10 @@ static void gh__response_status__normalize_odd_codes(
  * https://docs.microsoft.com/en-us/azure/devops/integrate/concepts/rate-limits?view=azure-devops
  */
 static void compute_retry_mode_from_http_response(
-	struct gh__response_status *status)
+	struct gh__response_status *status,
+	long http_response_code)
 {
-	switch (status->response_code) {
+	switch (http_response_code) {
 
 	case 200:
 		status->retry = GH__RETRY_MODE__SUCCESS;
@@ -697,7 +753,7 @@ static void compute_retry_mode_from_http_response(
 
 hard_fail:
 	strbuf_addf(&status->error_message, "(http:%d) Other [hard_fail]",
-		    (int)status->response_code);
+		    (int)http_response_code);
 	status->retry = GH__RETRY_MODE__HARD_FAIL;
 	status->ec = GH__ERROR_CODE__HTTP_OTHER;
 
@@ -723,9 +779,10 @@ hard_fail:
  * so I'm not going to fight that.
  */
 static void compute_retry_mode_from_curl_error(
-	struct gh__response_status *status)
+	struct gh__response_status *status,
+	CURLcode curl_code)
 {
-	switch (status->curl_code) {
+	switch (curl_code) {
 	case CURLE_OK:
 		status->retry = GH__RETRY_MODE__SUCCESS;
 		status->ec = GH__ERROR_CODE__OK;
@@ -830,8 +887,7 @@ static void compute_retry_mode_from_curl_error(
 
 hard_fail:
 	strbuf_addf(&status->error_message, "(curl:%d) %s [hard_fail]",
-		    status->curl_code,
-		    curl_easy_strerror(status->curl_code));
+		    curl_code, curl_easy_strerror(curl_code));
 	status->retry = GH__RETRY_MODE__HARD_FAIL;
 	status->ec = GH__ERROR_CODE__CURL_ERROR;
 
@@ -841,8 +897,7 @@ hard_fail:
 
 transient:
 	strbuf_addf(&status->error_message, "(curl:%d) %s [transient]",
-		    status->curl_code,
-		    curl_easy_strerror(status->curl_code));
+		    curl_code, curl_easy_strerror(curl_code));
 	status->retry = GH__RETRY_MODE__TRANSIENT;
 	status->ec = GH__ERROR_CODE__CURL_ERROR;
 
@@ -861,26 +916,31 @@ static void gh__response_status__set_from_slot(
 	struct gh__response_status *status,
 	const struct active_request_slot *slot)
 {
-	status->curl_code = slot->results->curl_result;
+	long http_response_code;
+	CURLcode curl_code;
+
+	curl_code = slot->results->curl_result;
 	gh__curlinfo_strbuf(slot->curl, CURLINFO_CONTENT_TYPE,
 			    &status->content_type);
 	curl_easy_getinfo(slot->curl, CURLINFO_RESPONSE_CODE,
-			  &status->response_code);
+			  &http_response_code);
 
 	strbuf_setlen(&status->error_message, 0);
 
-	gh__response_status__normalize_odd_codes(params, status);
+	http_response_code = gh__normalize_odd_codes(params,
+						     http_response_code);
 
 	/*
 	 * Use normalized response/status codes form curl/http to decide
 	 * how to set the error-code we propagate *AND* to decide if we
 	 * we should retry because of transient network problems.
 	 */
-	if (status->curl_code == CURLE_OK ||
-	    status->curl_code == CURLE_HTTP_RETURNED_ERROR)
-		compute_retry_mode_from_http_response(status);
+	if (curl_code == CURLE_OK ||
+	    curl_code == CURLE_HTTP_RETURNED_ERROR)
+		compute_retry_mode_from_http_response(status,
+						      http_response_code);
 	else
-		compute_retry_mode_from_curl_error(status);
+		compute_retry_mode_from_curl_error(status, curl_code);
 
 	if (status->ec != GH__ERROR_CODE__OK)
 		status->bytes_received = 0;
@@ -1038,8 +1098,8 @@ static void gh__run_one_slot(struct active_request_slot *slot,
 	trace2_region_enter("gvfs-helper", key.buf, NULL);
 
 	if (!start_active_slot(slot)) {
-		status->curl_code = CURLE_FAILED_INIT; /* a bit of a lie */
-		compute_retry_mode_from_curl_error(status);
+		compute_retry_mode_from_curl_error(status,
+						   CURLE_FAILED_INIT);
 	} else {
 		run_active_slot(slot);
 		if (params->b_write_to_file)
@@ -1070,7 +1130,7 @@ static void gh__run_one_slot(struct active_request_slot *slot,
 		stop_progress(&params->progress);
 
 	if (status->ec == GH__ERROR_CODE__OK && params->b_write_to_file) {
-		if (params->b_is_post)
+		if (params->b_is_post && params->object_count > 1)
 			install_packfile(params, status);
 		else
 			install_loose(params, status);
@@ -1226,8 +1286,8 @@ static void lookup_main_url(void)
 	trace2_data_string("gvfs-helper", NULL, "remote/url", gh__global.main_url);
 }
 
-static void do__gvfs_config(struct gh__response_status *status,
-			    struct strbuf *config_data);
+static void do__http_get__gvfs_config(struct gh__response_status *status,
+				      struct strbuf *config_data);
 
 /*
  * Find the URL of the cache-server, if we have one.
@@ -1286,7 +1346,7 @@ static void select_cache_server(void)
 	 * well-known by the main Git server.
 	 */
 
-	do__gvfs_config(&status, &config_data);
+	do__http_get__gvfs_config(&status, &config_data);
 
 	if (status.ec == GH__ERROR_CODE__OK) {
 		/*
@@ -1344,13 +1404,10 @@ static void select_cache_server(void)
  * Read stdin until EOF (or a blank line) and add the desired OIDs
  * to the oidset.
  *
- * Stdin should contain a list of OIDs.  It may have additional
- * decoration that we need to strip out.
- *
- * We expect:
- * <hex_oid> [<path>]   // present OIDs
+ * Stdin should contain a list of OIDs.  Lines may have additional
+ * text following the OID that we ignore.
  */
-static unsigned long read_stdin_from_rev_list(struct oidset *oids)
+static unsigned long read_stdin_for_oids(struct oidset *oids)
 {
 	struct object_id oid;
 	struct strbuf buf_stdin = STRBUF_INIT;
@@ -1373,17 +1430,23 @@ static unsigned long read_stdin_from_rev_list(struct oidset *oids)
 
 /*
  * Build a complete JSON payload for a gvfs/objects POST request
- * containing the first n OIDs in an OIDSET index by the iterator.
+ * containing the first `nr_in_block` OIDs found in the OIDSET
+ * indexed by the given iterator.
  *
  * https://github.com/microsoft/VFSForGit/blob/master/Protocol.md
+ *
+ * Return the number of OIDs we actually put into the payload.
+ * If only 1 OID was found, also return it.
  */
 static unsigned long build_json_payload__gvfs_objects(
 	struct json_writer *jw_req,
 	struct oidset_iter *iter,
-	unsigned long nr_in_block)
+	unsigned long nr_in_block,
+	struct object_id *oid_out)
 {
 	unsigned long k;
 	const struct object_id *oid;
+	const struct object_id *oid_prev = NULL;
 
 	k = 0;
 
@@ -1394,9 +1457,17 @@ static unsigned long build_json_payload__gvfs_objects(
 	while (k < nr_in_block && (oid = oidset_iter_next(iter))) {
 		jw_array_string(jw_req, oid_to_hex(oid));
 		k++;
+		oid_prev = oid;
 	}
 	jw_end(jw_req);
 	jw_end(jw_req);
+
+	if (oid_out) {
+		if (k == 1)
+			oidcpy(oid_out, oid_prev);
+		else
+			oidclr(oid_out, the_repository->hash_algo);
+	}
 
 	return k;
 }
@@ -1641,6 +1712,33 @@ cleanup:
 }
 
 /*
+ * Create a pathname to the loose object in the shared-cache ODB
+ * with the given OID.  Try to "mkdir -p" to ensure the parent
+ * directories exist.
+ */
+static int create_loose_pathname_in_odb(struct strbuf *buf_path,
+					const struct object_id *oid)
+{
+	enum scld_error scld;
+	const char *hex;
+
+	hex = oid_to_hex(oid);
+
+	strbuf_setlen(buf_path, 0);
+	strbuf_addbuf(buf_path, &gh__global.buf_odb_path);
+	strbuf_complete(buf_path, '/');
+	strbuf_add(buf_path, hex, 2);
+	strbuf_addch(buf_path, '/');
+	strbuf_addstr(buf_path, hex+2);
+
+	scld = safe_create_leading_directories(the_repository, buf_path->buf);
+	if (scld != SCLD_OK && scld != SCLD_EXISTS)
+		return -1;
+
+	return 0;
+}
+
+/*
  * Create a tempfile to stream a loose object into.
  *
  * We create a tempfile in the chosen ODB directory and let CURL
@@ -1654,28 +1752,16 @@ static void create_tempfile_for_loose(
 {
 	static int nth = 0;
 	struct strbuf buf_path = STRBUF_INIT;
-	const char *hex;
 
 	gh__response_status__zero(status);
 
-	hex = oid_to_hex(&params->loose_oid);
-
-	strbuf_addbuf(&buf_path, &gh__global.buf_odb_path);
-	strbuf_complete(&buf_path, '/');
-	strbuf_add(&buf_path, hex, 2);
-
-	if (!file_exists(buf_path.buf) &&
-	    mkdir(buf_path.buf, 0777) == -1 &&
-		!file_exists(buf_path.buf)) {
+	if (create_loose_pathname_in_odb(&buf_path, &params->loose_oid)) {
 		strbuf_addf(&status->error_message,
 			    "cannot create directory for loose object '%s'",
 			    buf_path.buf);
 		status->ec = GH__ERROR_CODE__COULD_NOT_CREATE_TEMPFILE;
 		goto cleanup;
 	}
-
-	strbuf_addch(&buf_path, '/');
-	strbuf_addstr(&buf_path, hex+2);
 
 	/* Remember the full path of the final destination. */
 	strbuf_setlen(&params->loose_path, 0);
@@ -1718,7 +1804,7 @@ static void install_packfile(struct gh__request_params *params,
 	if (strcmp(status->content_type.buf,
 		   "application/x-git-packfile")) {
 		strbuf_addf(&status->error_message,
-			    "received unknown content-type '%s'",
+			    "install_packfile: received unknown content-type '%s'",
 			    status->content_type.buf);
 		status->ec = GH__ERROR_CODE__UNEXPECTED_CONTENT_TYPE;
 		goto cleanup;
@@ -1795,6 +1881,19 @@ static void install_loose(struct gh__request_params *params,
 			  struct gh__response_status *status)
 {
 	struct strbuf tmp_path = STRBUF_INIT;
+
+	/*
+	 * We expect a loose object when we do a GET -or- when we
+	 * do a POST with only 1 object.
+	 */
+	if (strcmp(status->content_type.buf,
+		   "application/x-git-loose-object")) {
+		strbuf_addf(&status->error_message,
+			    "install_loose: received unknown content-type '%s'",
+			    status->content_type.buf);
+		status->ec = GH__ERROR_CODE__UNEXPECTED_CONTENT_TYPE;
+		return;
+	}
 
 	gh__response_status__zero(status);
 
@@ -1892,10 +1991,8 @@ static size_t parse_resp_hdr(char *buffer, size_t size, size_t nitems,
 		 * The following X- headers are specific to AzureDevOps.
 		 * Other servers have similar sets of values, but I haven't
 		 * compared them in depth.
-		 *
-		 * TODO Remove this.
 		 */
-		trace2_printf("Throttle: %s %s", key.buf, val.buf);
+		// trace2_printf("Throttle: %s %s", key.buf, val.buf);
 
 		if (!strcmp(key.buf, "X-RateLimit-Resource")) {
 			/*
@@ -2195,10 +2292,11 @@ static void do_req(const char *url_base,
 		if (params->tempfile)
 			delete_tempfile(&params->tempfile);
 
-		if (params->b_is_post)
+		if (params->b_is_post && params->object_count > 1)
 			create_tempfile_for_packfile(params, status);
 		else
 			create_tempfile_for_loose(params, status);
+
 		if (!params->tempfile || status->ec != GH__ERROR_CODE__OK)
 			return;
 	} else {
@@ -2270,6 +2368,10 @@ static void do_req(const char *url_base,
 	} else {
 		curl_easy_setopt(slot->curl, CURLOPT_NOPROGRESS, 1L);
 	}
+
+	if (gh__global.connect_timeout_ms)
+		curl_easy_setopt(slot->curl, CURLOPT_CONNECTTIMEOUT_MS,
+				gh__global.connect_timeout_ms);
 
 	gh__run_one_slot(slot, params, status);
 	strbuf_release(&rest_url);
@@ -2367,7 +2469,7 @@ static void do_req__to_main(const char *url_component,
 				  &gh__global.main_creds,
 				  params, status);
 
-	if (status->response_code == 401) {
+	if (status->retry == GH__RETRY_MODE__HTTP_401) {
 		refresh_main_creds();
 
 		do_req__with_robust_retry(gh__global.main_url, url_component,
@@ -2375,7 +2477,7 @@ static void do_req__to_main(const char *url_component,
 					  params, status);
 	}
 
-	if (status->response_code == 200)
+	if (status->retry == GH__RETRY_MODE__SUCCESS)
 		approve_main_creds();
 }
 
@@ -2395,7 +2497,7 @@ static void do_req__to_cache_server(const char *url_component,
 				  &gh__global.cache_creds,
 				  params, status);
 
-	if (status->response_code == 401) {
+	if (status->retry == GH__RETRY_MODE__HTTP_401) {
 		refresh_cache_server_creds();
 
 		do_req__with_robust_retry(gh__global.cache_server_url,
@@ -2404,7 +2506,7 @@ static void do_req__to_cache_server(const char *url_component,
 					  params, status);
 	}
 
-	if (status->response_code == 200)
+	if (status->retry == GH__RETRY_MODE__SUCCESS)
 		approve_cache_server_creds();
 }
 
@@ -2419,7 +2521,7 @@ static void do_req__with_fallback(const char *url_component,
 	    params->b_permit_cache_server_if_defined) {
 		do_req__to_cache_server(url_component, params, status);
 
-		if (status->response_code == 200)
+		if (status->retry == GH__RETRY_MODE__SUCCESS)
 			return;
 
 		if (!gh__cmd_opts.try_fallback)
@@ -2434,7 +2536,7 @@ static void do_req__with_fallback(const char *url_component,
 		 * Falling-back would likely just cause the 3rd (or maybe
 		 * 4th) cred prompt.
 		 */
-		if (status->response_code == 401)
+		if (status->retry == GH__RETRY_MODE__HTTP_401)
 			return;
 	}
 
@@ -2446,8 +2548,8 @@ static void do_req__with_fallback(const char *url_component,
  *
  * Return server's response buffer.  This is probably a raw JSON string.
  */
-static void do__gvfs_config(struct gh__response_status *status,
-			    struct strbuf *config_data)
+static void do__http_get__gvfs_config(struct gh__response_status *status,
+				      struct strbuf *config_data)
 {
 	struct gh__request_params params = GH__REQUEST_PARAMS_INIT;
 
@@ -2487,12 +2589,34 @@ static void do__gvfs_config(struct gh__response_status *status,
 	gh__request_params__release(&params);
 }
 
+static void setup_gvfs_objects_progress(struct gh__request_params *params,
+					unsigned long num, unsigned long den)
+{
+	if (!gh__cmd_opts.show_progress)
+		return;
+
+	if (params->b_is_post && params->object_count > 1) {
+		strbuf_addf(&params->progress_base_phase2_msg,
+			    "Requesting packfile %ld/%ld with %ld objects",
+			    num, den, params->object_count);
+		strbuf_addf(&params->progress_base_phase3_msg,
+			    "Receiving packfile %ld/%ld with %ld objects",
+			    num, den, params->object_count);
+	} else {
+		strbuf_addf(&params->progress_base_phase3_msg,
+			    "Receiving %ld/%ld loose object",
+			    num, den);
+	}
+}
+
 /*
  * Call "gvfs/objects/<oid>" REST API to fetch a loose object
  * and write it to the ODB.
  */
-static void do__loose__gvfs_object(struct gh__response_status *status,
-				   const struct object_id *oid)
+static void do__http_get__gvfs_object(struct gh__response_status *status,
+				      const struct object_id *oid,
+				      unsigned long l_num, unsigned long l_den,
+				      struct string_list *result_list)
 {
 	struct gh__request_params params = GH__REQUEST_PARAMS_INIT;
 	struct strbuf component_url = STRBUF_INIT;
@@ -2517,44 +2641,52 @@ static void do__loose__gvfs_object(struct gh__response_status *status,
 
 	oidcpy(&params.loose_oid, oid);
 
-	if (gh__cmd_opts.show_progress) {
-		/*
-		 * Likewise, a gvfs/objects/{oid} has a very small reqest
-		 * payload, so I don't see any need to report progress on
-		 * the upload side of the GET.  So just report progress
-		 * on the download side.
-		 */
-		strbuf_addstr(&params.progress_base_phase3_msg,
-			      "Receiving 1 loose object");
-	}
+	setup_gvfs_objects_progress(&params, l_num, l_den);
 
 	do_req__with_fallback(component_url.buf, &params, status);
+
+	if (status->ec == GH__ERROR_CODE__OK) {
+		struct strbuf msg = STRBUF_INIT;
+
+		strbuf_addf(&msg, "loose %s",
+			    oid_to_hex(&params.loose_oid));
+
+		string_list_append(result_list, msg.buf);
+		strbuf_release(&msg);
+	}
 
 	gh__request_params__release(&params);
 	strbuf_release(&component_url);
 }
 
 /*
- * Call "gvfs/objects" POST REST API to fetch a packfile containing
- * the objects in the requested OIDSET.  Returns the filename (not
- * pathname) to the new packfile.
+ * Call "gvfs/objects" POST REST API to fetch a batch of objects
+ * from the OIDSET.  Normal, this is results in a packfile containing
+ * `nr_wanted_in_block` objects.  And we return the number actually
+ * consumed (along with the filename of the resulting packfile).
+ *
+ * However, if we only have 1 oid (remaining) in the OIDSET, the
+ * server will respond to our POST with a loose object rather than
+ * a packfile with 1 object.
+ *
+ * Append a message to the result_list describing the result.
+ *
+ * Return the number of OIDs consumed from the OIDSET.
  */
-static void do__packfile__gvfs_objects(struct gh__response_status *status,
-				       struct oidset_iter *iter,
-				       unsigned long nr_wanted_in_block,
-				       int j_pack_num, int j_pack_den,
-				       struct strbuf *output_filename,
-				       unsigned long *nr_oid_taken)
+static void do__http_post__gvfs_objects(struct gh__response_status *status,
+					struct oidset_iter *iter,
+					unsigned long nr_wanted_in_block,
+					int j_pack_num, int j_pack_den,
+					struct string_list *result_list,
+					unsigned long *nr_oid_taken)
 {
 	struct json_writer jw_req = JSON_WRITER_INIT;
 	struct gh__request_params params = GH__REQUEST_PARAMS_INIT;
 
-	strbuf_setlen(output_filename, 0);
-
 	gh__response_status__zero(status);
 
 	params.object_count = build_json_payload__gvfs_objects(
-		&jw_req, iter, nr_wanted_in_block);
+		&jw_req, iter, nr_wanted_in_block, &params.loose_oid);
 	*nr_oid_taken = params.object_count;
 
 	strbuf_addstr(&params.tr2_label, "POST/objects");
@@ -2574,7 +2706,7 @@ static void do__packfile__gvfs_objects(struct gh__response_status *status,
 					   "Content-Type: application/json");
 	/*
 	 * We really always want a packfile.  But if the payload only
-	 * requests 1 OID, the server will/may send us a single loose
+	 * requests 1 OID, the server will send us a single loose
 	 * objects instead.  (Apparently the server ignores us when we
 	 * only send application/x-git-packfile and does it anyway.)
 	 *
@@ -2586,156 +2718,172 @@ static void do__packfile__gvfs_objects(struct gh__response_status *status,
 	params.headers = curl_slist_append(params.headers,
 					   "Accept: application/x-git-loose-object");
 
-	if (gh__cmd_opts.show_progress) {
-		strbuf_addf(&params.progress_base_phase2_msg,
-			    "Requesting packfile %d/%d with %ld objects",
-			    j_pack_num, j_pack_den,
-			    params.object_count);
-		strbuf_addf(&params.progress_base_phase3_msg,
-			    "Receiving packfile %d/%d with %ld objects",
-			    j_pack_num, j_pack_den,
-			    params.object_count);
-	}
+	setup_gvfs_objects_progress(&params, j_pack_num, j_pack_den);
 
 	do_req__with_fallback("gvfs/objects", &params, status);
-	if (status->ec == GH__ERROR_CODE__OK)
-		strbuf_addbuf(output_filename, &params.final_packfile_filename);
+
+	if (status->ec == GH__ERROR_CODE__OK) {
+		struct strbuf msg = STRBUF_INIT;
+
+		if (params.object_count > 1)
+			strbuf_addf(&msg, "packfile %s",
+				    params.final_packfile_filename.buf);
+		else
+			strbuf_addf(&msg, "loose %s",
+				    oid_to_hex(&params.loose_oid));
+
+		string_list_append(result_list, msg.buf);
+		strbuf_release(&msg);
+	}
 
 	gh__request_params__release(&params);
 	jw_release(&jw_req);
 }
 
 /*
- * Bulk or individually fetch a list of objects in one or more http requests.
- * Create one or more packfiles and/or loose objects.
+ * Drive one or more HTTP GET requests to fetch the objects
+ * in the given OIDSET.  These are received into loose objects.
  *
- * We accumulate results for each request in `result_list` until we get a
+ * Accumulate results for each request in `result_list` until we get a
  * hard error and have to stop.
  */
-static void do_fetch_oidset(struct gh__response_status *status,
-			    struct oidset *oids,
-			    unsigned long nr_oid_total,
-			    struct string_list *result_list)
+static void do__http_get__fetch_oidset(struct gh__response_status *status,
+				       struct oidset *oids,
+				       unsigned long nr_oid_total,
+				       struct string_list *result_list)
 {
 	struct oidset_iter iter;
-	struct strbuf output_filename = STRBUF_INIT;
-	struct strbuf msg = STRBUF_INIT;
 	struct strbuf err404 = STRBUF_INIT;
 	const struct object_id *oid;
 	unsigned long k;
-	unsigned long nr_oid_taken;
 	int had_404 = 0;
-	int j_pack_den = 0;
-	int j_pack_num = 0;
 
 	gh__response_status__zero(status);
 	if (!nr_oid_total)
 		return;
 
-	if (nr_oid_total > 1)
-		j_pack_den = ((nr_oid_total + gh__cmd_opts.block_size - 1)
-			      / gh__cmd_opts.block_size);
-
 	oidset_iter_init(oids, &iter);
 
-	for (k = 0; k < nr_oid_total; k += nr_oid_taken) {
-		if (nr_oid_total - k == 1 || gh__cmd_opts.block_size == 1) {
-			oid = oidset_iter_next(&iter);
-			nr_oid_taken = 1;
+	for (k = 0; k < nr_oid_total; k++) {
+		oid = oidset_iter_next(&iter);
 
-			do__loose__gvfs_object(status, oid);
+		do__http_get__gvfs_object(status, oid, k+1, nr_oid_total,
+					  result_list);
 
-			/*
-			 * If we get a 404 for an individual object, ignore
-			 * it and get the rest.  We'll fixup the 'ec' later.
-			 */
-			if (status->ec == GH__ERROR_CODE__HTTP_404) {
-				if (!err404.len)
-					strbuf_addf(&err404, "%s: loose object %s",
-						    status->error_message.buf,
-						    oid_to_hex(oid));
-				/*
-				 * Mark the fetch as "incomplete", but don't
-				 * stop trying to get other chunks.
-				 */
-				had_404 = 1;
-				continue;
-			}
-
-			if (status->ec != GH__ERROR_CODE__OK) {
-				/* Stop at the first hard error. */
-				strbuf_addf(&status->error_message, ": loose %s",
+		/*
+		 * If we get a 404 for an individual object, ignore
+		 * it and get the rest.  We'll fixup the 'ec' later.
+		 */
+		if (status->ec == GH__ERROR_CODE__HTTP_404) {
+			if (!err404.len)
+				strbuf_addf(&err404, "%s: from GET %s",
+					    status->error_message.buf,
 					    oid_to_hex(oid));
-				goto cleanup;
-			}
-
-			strbuf_setlen(&msg, 0);
-			strbuf_addf(&msg, "loose %s", oid_to_hex(oid));
-			string_list_append(result_list, msg.buf);
-
-		} else {
-			strbuf_setlen(&output_filename, 0);
-
-			j_pack_num++;
-
-			do__packfile__gvfs_objects(status, &iter,
-						   gh__cmd_opts.block_size,
-						   j_pack_num, j_pack_den,
-						   &output_filename,
-						   &nr_oid_taken);
-
 			/*
-			 * Because the oidset iterator has random
-			 * order, it does no good to say the k-th or
-			 * n-th chunk was incomplete; the client
-			 * cannot use that index for anything.
-			 *
-			 * We get a 404 when at least one object in
-			 * the chunk was not found.
-			 *
-			 * TODO Consider various retry strategies (such as
-			 * TODO loose or bisect) on the members within this
-			 * TODO chunk to reduce the impact of the miss.
-			 *
-			 * For now, ignore the 404 and go on to the
-			 * next chunk and then fixup the 'ec' later.
+			 * Mark the fetch as "incomplete", but don't
+			 * stop trying to get other chunks.
 			 */
-			if (status->ec == GH__ERROR_CODE__HTTP_404) {
-				if (!err404.len)
-					strbuf_addf(&err404,
-						    "%s: packfile object",
-						    status->error_message.buf);
-				/*
-				 * Mark the fetch as "incomplete", but don't
-				 * stop trying to get other chunks.
-				 */
-				had_404 = 1;
-				continue;
-			}
+			had_404 = 1;
+			continue;
+		}
 
-			if (status->ec != GH__ERROR_CODE__OK) {
-				/* Stop at the first hard error. */
-				strbuf_addstr(&status->error_message,
-					      ": in packfile");
-				goto cleanup;
-			}
-
-			strbuf_setlen(&msg, 0);
-			strbuf_addf(&msg, "packfile %s", output_filename.buf);
-			string_list_append(result_list, msg.buf);
+		if (status->ec != GH__ERROR_CODE__OK) {
+			/* Stop at the first hard error. */
+			strbuf_addf(&status->error_message, ": from GET %s",
+				    oid_to_hex(oid));
+			goto cleanup;
 		}
 	}
 
 cleanup:
-	strbuf_release(&msg);
-	strbuf_release(&err404);
-	strbuf_release(&output_filename);
-
 	if (had_404 && status->ec == GH__ERROR_CODE__OK) {
 		strbuf_setlen(&status->error_message, 0);
-		strbuf_addstr(&status->error_message, "404 Not Found");
+		strbuf_addbuf(&status->error_message, &err404);
 		status->ec = GH__ERROR_CODE__HTTP_404;
 	}
+
+	strbuf_release(&err404);
+}
+
+/*
+ * Drive one or more HTTP POST requests to bulk fetch the objects in
+ * the given OIDSET.  Create one or more packfiles and/or loose objects.
+ *
+ * Accumulate results for each request in `result_list` until we get a
+ * hard error and have to stop.
+ */
+static void do__http_post__fetch_oidset(struct gh__response_status *status,
+					struct oidset *oids,
+					unsigned long nr_oid_total,
+					struct string_list *result_list)
+{
+	struct oidset_iter iter;
+	struct strbuf err404 = STRBUF_INIT;
+	unsigned long k;
+	unsigned long nr_oid_taken;
+	int j_pack_den = 0;
+	int j_pack_num = 0;
+	int had_404 = 0;
+
+	gh__response_status__zero(status);
+	if (!nr_oid_total)
+		return;
+
+	oidset_iter_init(oids, &iter);
+
+	j_pack_den = ((nr_oid_total + gh__cmd_opts.block_size - 1)
+		      / gh__cmd_opts.block_size);
+
+	for (k = 0; k < nr_oid_total; k += nr_oid_taken) {
+		j_pack_num++;
+
+		do__http_post__gvfs_objects(status, &iter,
+					    gh__cmd_opts.block_size,
+					    j_pack_num, j_pack_den,
+					    result_list,
+					    &nr_oid_taken);
+
+		/*
+		 * Because the oidset iterator has random
+		 * order, it does no good to say the k-th or
+		 * n-th chunk was incomplete; the client
+		 * cannot use that index for anything.
+		 *
+		 * We get a 404 when at least one object in
+		 * the chunk was not found.
+		 *
+		 * For now, ignore the 404 and go on to the
+		 * next chunk and then fixup the 'ec' later.
+		 */
+		if (status->ec == GH__ERROR_CODE__HTTP_404) {
+			if (!err404.len)
+				strbuf_addf(&err404,
+					    "%s: from POST",
+					    status->error_message.buf);
+			/*
+			 * Mark the fetch as "incomplete", but don't
+			 * stop trying to get other chunks.
+			 */
+			had_404 = 1;
+			continue;
+		}
+
+		if (status->ec != GH__ERROR_CODE__OK) {
+			/* Stop at the first hard error. */
+			strbuf_addstr(&status->error_message,
+				      ": from POST");
+			goto cleanup;
+		}
+	}
+
+cleanup:
+	if (had_404 && status->ec == GH__ERROR_CODE__OK) {
+		strbuf_setlen(&status->error_message, 0);
+		strbuf_addbuf(&status->error_message, &err404);
+		status->ec = GH__ERROR_CODE__HTTP_404;
+	}
+
+	strbuf_release(&err404);
 }
 
 /*
@@ -2773,7 +2921,7 @@ static enum gh__error_code do_sub_cmd__config(int argc UNUSED, const char **argv
 
 	finish_init(0);
 
-	do__gvfs_config(&status, &config_data);
+	do__http_get__gvfs_config(&status, &config_data);
 	ec = status.ec;
 
 	if (ec == GH__ERROR_CODE__OK)
@@ -2788,18 +2936,17 @@ static enum gh__error_code do_sub_cmd__config(int argc UNUSED, const char **argv
 }
 
 /*
- * Read a list of objects from stdin and fetch them in a single request (or
- * multiple block-size requests).
+ * Read a list of objects from stdin and fetch them as a series of
+ * single object HTTP GET requests.
  */
 static enum gh__error_code do_sub_cmd__get(int argc, const char **argv)
 {
 	static struct option get_options[] = {
-		OPT_UNSIGNED('b', "block-size", &gh__cmd_opts.block_size,
-			     N_("number of objects to request at a time")),
-		OPT_INTEGER('d', "depth", &gh__cmd_opts.depth,
-			    N_("Commit depth")),
 		OPT_INTEGER('r', "max-retries", &gh__cmd_opts.max_retries,
 			    N_("retries for transient network errors")),
+		OPT_UNSIGNED(0, "connect-timeout-ms",
+			     &gh__global.connect_timeout_ms,
+			     N_("try to connect only for this many milliseconds")),
 		OPT_END(),
 	};
 
@@ -2813,22 +2960,17 @@ static enum gh__error_code do_sub_cmd__get(int argc, const char **argv)
 	trace2_cmd_mode("get");
 
 	if (argc > 1 && !strcmp(argv[1], "-h"))
-		usage_with_options(get_usage, get_options);
+		usage_with_options(objects_get_usage, get_options);
 
-	argc = parse_options(argc, argv, NULL, get_options, get_usage, 0);
-	if (gh__cmd_opts.depth < 1)
-		gh__cmd_opts.depth = 1;
+	argc = parse_options(argc, argv, NULL, get_options, objects_get_usage, 0);
 	if (gh__cmd_opts.max_retries < 0)
 		gh__cmd_opts.max_retries = 0;
 
 	finish_init(1);
 
-	nr_oid_total = read_stdin_from_rev_list(&oids);
+	nr_oid_total = read_stdin_for_oids(&oids);
 
-	trace2_region_enter("gvfs-helper", "get", NULL);
-	trace2_data_intmax("gvfs-helper", NULL, "get/nr_objects", nr_oid_total);
-	do_fetch_oidset(&status, &oids, nr_oid_total, &result_list);
-	trace2_region_leave("gvfs-helper", "get", NULL);
+	do__http_get__fetch_oidset(&status, &oids, nr_oid_total, &result_list);
 
 	ec = status.ec;
 
@@ -2846,12 +2988,69 @@ static enum gh__error_code do_sub_cmd__get(int argc, const char **argv)
 }
 
 /*
- * Handle the 'get' command when in "server mode".  Only call error() and set ec
- * for hard errors where we cannot communicate correctly with the foreground
- * client process.  Pass any actual data errors (such as 404's or 401's from
- * the fetch back to the client process.
+ * Read a list of objects from stdin and fetch them in a single request (or
+ * multiple block-size requests) using one or more HTTP POST requests.
  */
-static enum gh__error_code do_server_subprocess_get(void)
+static enum gh__error_code do_sub_cmd__post(int argc, const char **argv)
+{
+	static struct option post_options[] = {
+		OPT_UNSIGNED('b', "block-size", &gh__cmd_opts.block_size,
+			     N_("number of objects to request at a time")),
+		OPT_INTEGER('d', "depth", &gh__cmd_opts.depth,
+			    N_("Commit depth")),
+		OPT_INTEGER('r', "max-retries", &gh__cmd_opts.max_retries,
+			    N_("retries for transient network errors")),
+		OPT_END(),
+	};
+
+	struct gh__response_status status = GH__RESPONSE_STATUS_INIT;
+	struct oidset oids = OIDSET_INIT;
+	struct string_list result_list = STRING_LIST_INIT_DUP;
+	enum gh__error_code ec = GH__ERROR_CODE__OK;
+	unsigned long nr_oid_total;
+	size_t k;
+
+	trace2_cmd_mode("post");
+
+	if (argc > 1 && !strcmp(argv[1], "-h"))
+		usage_with_options(objects_post_usage, post_options);
+
+	argc = parse_options(argc, argv, NULL, post_options, objects_post_usage, 0);
+	if (gh__cmd_opts.depth < 1)
+		gh__cmd_opts.depth = 1;
+	if (gh__cmd_opts.max_retries < 0)
+		gh__cmd_opts.max_retries = 0;
+
+	finish_init(1);
+
+	nr_oid_total = read_stdin_for_oids(&oids);
+
+	do__http_post__fetch_oidset(&status, &oids, nr_oid_total, &result_list);
+
+	ec = status.ec;
+
+	for (k = 0; k < result_list.nr; k++)
+		printf("%s\n", result_list.items[k].string);
+
+	if (ec != GH__ERROR_CODE__OK)
+		error("post: %s", status.error_message.buf);
+
+	gh__response_status__release(&status);
+	oidset_clear(&oids);
+	string_list_clear(&result_list, 0);
+
+	return ec;
+}
+
+/*
+ * Handle the 'objects.get' and 'objects.post' verbs in "server mode".
+ *
+ * Only call error() and set ec for hard errors where we cannot
+ * communicate correctly with the foreground client process.  Pass any
+ * actual data errors (such as 404's or 401's from the fetch) back to
+ * the client process.
+ */
+static enum gh__error_code do_server_subprocess__objects(const char *verb_line)
 {
 	struct gh__response_status status = GH__RESPONSE_STATUS_INIT;
 	struct oidset oids = OIDSET_INIT;
@@ -2862,12 +3061,19 @@ static enum gh__error_code do_server_subprocess_get(void)
 	int len;
 	int err;
 	size_t k;
+	enum gh__objects_mode objects_mode;
 	unsigned long nr_oid_total = 0;
 
-	/*
-	 * Inside the "get" command, we expect a list of OIDs
-	 * and a flush.
-	 */
+	if (!strcmp(verb_line, "objects.get"))
+		objects_mode = GH__OBJECTS_MODE__GET;
+	else if (!strcmp(verb_line, "objects.post"))
+		objects_mode = GH__OBJECTS_MODE__POST;
+	else {
+		error("server: unexpected objects-mode verb '%s'", verb_line);
+		ec = GH__ERROR_CODE__SUBPROCESS_SYNTAX;
+		goto cleanup;
+	}
+
 	while (1) {
 		len = packet_read_line_gently(0, NULL, &line);
 		if (len < 0 || !line)
@@ -2892,10 +3098,10 @@ static enum gh__error_code do_server_subprocess_get(void)
 		goto cleanup;
 	}
 
-	trace2_region_enter("gvfs-helper", "server/get", NULL);
-	trace2_data_intmax("gvfs-helper", NULL, "server/get/nr_objects", nr_oid_total);
-	do_fetch_oidset(&status, &oids, nr_oid_total, &result_list);
-	trace2_region_leave("gvfs-helper", "server/get", NULL);
+	if (objects_mode == GH__OBJECTS_MODE__GET)
+		do__http_get__fetch_oidset(&status, &oids, nr_oid_total, &result_list);
+	else
+		do__http_post__fetch_oidset(&status, &oids, nr_oid_total, &result_list);
 
 	/*
 	 * Write pathname of the ODB where we wrote all of the objects
@@ -2951,7 +3157,7 @@ cleanup:
 	return ec;
 }
 
-typedef enum gh__error_code (fn_subprocess_cmd)(void);
+typedef enum gh__error_code (fn_subprocess_cmd)(const char *verb_line);
 
 struct subprocess_capability {
 	const char *name;
@@ -2960,7 +3166,7 @@ struct subprocess_capability {
 };
 
 static struct subprocess_capability caps[] = {
-	{ "get", 0, do_server_subprocess_get },
+	{ "objects", 0, do_server_subprocess__objects },
 	{ NULL, 0, NULL },
 };
 
@@ -3091,8 +3297,9 @@ top_of_loop:
 		}
 
 		for (k = 0; caps[k].name; k++) {
-			if (caps[k].client_has && !strcmp(line, caps[k].name)) {
-				ec = (caps[k].pfn)();
+			if (caps[k].client_has &&
+			    starts_with(line, caps[k].name)) {
+				ec = (caps[k].pfn)(line);
 				if (ec != GH__ERROR_CODE__OK)
 					goto cleanup;
 				goto top_of_loop;
@@ -3112,6 +3319,9 @@ static enum gh__error_code do_sub_cmd(int argc, const char **argv)
 {
 	if (!strcmp(argv[0], "get"))
 		return do_sub_cmd__get(argc, argv);
+
+	if (!strcmp(argv[0], "post"))
+		return do_sub_cmd__post(argc, argv);
 
 	if (!strcmp(argv[0], "config"))
 		return do_sub_cmd__config(argc, argv);
@@ -3163,8 +3373,8 @@ int cmd_main(int argc, const char **argv)
 	setup_git_directory_gently(NULL);
 
 	/* Set any non-zero initial values in gh__cmd_opts. */
-	gh__cmd_opts.depth = GH__DEFAULT_COMMIT_DEPTH;
-	gh__cmd_opts.block_size = GH__DEFAULT_BLOCK_SIZE;
+	gh__cmd_opts.depth = GH__DEFAULT__OBJECTS_POST__COMMIT_DEPTH;
+	gh__cmd_opts.block_size = GH__DEFAULT__OBJECTS_POST__BLOCK_SIZE;
 	gh__cmd_opts.max_retries = GH__DEFAULT_MAX_RETRIES;
 	gh__cmd_opts.max_transient_backoff_sec =
 		GH__DEFAULT_MAX_TRANSIENT_BACKOFF_SEC;
