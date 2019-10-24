@@ -2596,17 +2596,11 @@ static void setup_gvfs_objects_progress(struct gh__request_params *params,
 		return;
 
 	if (params->b_is_post && params->object_count > 1) {
-		strbuf_addf(&params->progress_base_phase2_msg,
-			    "Requesting packfile %ld/%ld with %ld objects",
-			    num, den, params->object_count);
 		strbuf_addf(&params->progress_base_phase3_msg,
 			    "Receiving packfile %ld/%ld with %ld objects",
 			    num, den, params->object_count);
-	} else {
-		strbuf_addf(&params->progress_base_phase3_msg,
-			    "Receiving %ld/%ld loose object",
-			    num, den);
 	}
+	/* If requesting only one object, then do not show progress */
 }
 
 /*
