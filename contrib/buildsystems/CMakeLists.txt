@@ -1113,6 +1113,20 @@ set(wrapper_scripts
 set(wrapper_test_scripts
 	test-fake-ssh test-tool)
 
+if(CURL_FOUND)
+	list(APPEND wrapper_test_scripts test-gvfs-protocol)
+
+	add_executable(test-gvfs-protocol ${CMAKE_SOURCE_DIR}/t/helper/test-gvfs-protocol.c)
+	target_link_libraries(test-gvfs-protocol common-main)
+
+	if(MSVC)
+		set_target_properties(test-gvfs-protocol
+					PROPERTIES RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/t/helper)
+		set_target_properties(test-gvfs-protocol
+					PROPERTIES RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/t/helper)
+	endif()
+endif()
+
 
 foreach(script ${wrapper_scripts})
 	file(STRINGS ${CMAKE_SOURCE_DIR}/bin-wrappers/wrap-for-bin.sh content NEWLINE_CONSUME)

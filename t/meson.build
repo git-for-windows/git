@@ -740,6 +740,7 @@ integration_tests = [
   't5731-protocol-v2-bundle-uri-git.sh',
   't5732-protocol-v2-bundle-uri-http.sh',
   't5750-bundle-uri-parse.sh',
+  't5799-gvfs-helper.sh',
   't5801-remote-helpers.sh',
   't5802-connect-helper.sh',
   't5810-proto-disable-local.sh',

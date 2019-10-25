@@ -1772,6 +1772,7 @@ endif
 	BASIC_CFLAGS += $(CURL_CFLAGS)
 
 	PROGRAM_OBJS += gvfs-helper.o
+	TEST_PROGRAMS_NEED_X += test-gvfs-protocol
 
 	REMOTE_CURL_PRIMARY = git-remote-http$X
 	REMOTE_CURL_ALIASES = git-remote-https$X git-remote-ftp$X git-remote-ftps$X

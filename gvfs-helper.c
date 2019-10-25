@@ -186,6 +186,7 @@
 #include "abspath.h"
 #include "progress.h"
 #include "trace2.h"
+#include "versioncmp.h"
 
 static const char * const main_usage[] = {
 	N_("git gvfs-helper [<main_options>] config      [<options>]"),
@@ -207,6 +208,11 @@ static const char *const objects_post_usage[] = {
 
 static const char *const server_usage[] = {
 	N_("git gvfs-helper [<main_options>] server [<options>]"),
+	NULL
+};
+
+static const char *const curl_version_usage[] = {
+	N_("git gvfs-helper [<main_options>] curl-version [<operator> <version>]"),
 	NULL
 };
 
@@ -1887,6 +1893,8 @@ static void install_loose(struct gh__request_params *params,
 	/*
 	 * We expect a loose object when we do a GET -or- when we
 	 * do a POST with only 1 object.
+	 *
+	 * Note that this content type is singular, not plural.
 	 */
 	if (strcmp(status->content_type.buf,
 		   "application/x-git-loose-object")) {
@@ -2121,7 +2129,9 @@ static void do_throttle_spin(struct gh__request_params *params,
 	strbuf_addstr(&region, gh__server_type_label[params->server_type]);
 	trace2_region_enter("gvfs-helper", region.buf, NULL);
 
-	progress = start_progress(the_repository, progress_msg, duration);
+	if (gh__cmd_opts.show_progress)
+		progress = start_progress(the_repository, progress_msg, duration);
+
 	while (now < end) {
 		display_progress(progress, (now - begin));
 
@@ -2129,6 +2139,7 @@ static void do_throttle_spin(struct gh__request_params *params,
 
 		now = time(NULL);
 	}
+
 	display_progress(progress, duration);
 	stop_progress(&progress);
 
@@ -2701,13 +2712,15 @@ static void do__http_post__gvfs_objects(struct gh__response_status *status,
 	params.headers = curl_slist_append(params.headers,
 					   "Content-Type: application/json");
 	/*
-	 * We really always want a packfile.  But if the payload only
-	 * requests 1 OID, the server will send us a single loose
-	 * objects instead.  (Apparently the server ignores us when we
-	 * only send application/x-git-packfile and does it anyway.)
+	 * If our POST contains more than one object, we want the
+	 * server to send us a packfile.  We DO NOT want the non-standard
+	 * concatenated loose object format, so we DO NOT send:
+	 *     "Accept: application/x-git-loose-objects" (plural)
 	 *
-	 * So to make it clear to my future self, go ahead and add
-	 * an accept header for loose objects and own it.
+	 * However, if the payload only requests 1 OID, the server
+	 * will send us a single loose object instead of a packfile,
+	 * so we ACK that and send:
+	 *     "Accept: application/x-git-loose-object" (singular)
 	 */
 	params.headers = curl_slist_append(params.headers,
 					   "Accept: application/x-git-packfile");
@@ -3311,6 +3324,37 @@ cleanup:
 	return ec;
 }
 
+static enum gh__error_code do_sub_cmd__curl_version(int argc, const char **argv)
+{
+	static struct option curl_version_options[] = {
+		OPT_END(),
+	};
+	const char *current_version = curl_version_info(CURLVERSION_NOW)->version;
+
+	trace2_cmd_mode("curl-version");
+
+	if (argc > 1 && !strcmp(argv[1], "-h"))
+		usage_with_options(curl_version_usage, curl_version_options);
+
+	argc = parse_options(argc, argv, NULL,
+			     curl_version_options, curl_version_usage, 0);
+
+	if (argc == 0)
+		printf("%s\n", current_version);
+	else if (argc != 2)
+		die("expected [<operator> <version>], but got %d parameters", argc);
+	else {
+		int cmp = versioncmp(current_version, argv[1]);
+
+		return (strchr(argv[0], '=') && !cmp) ||
+			(strchr(argv[0], '>') && cmp > 0) ||
+			(strchr(argv[0], '<') && cmp < 0) ?
+			GH__ERROR_CODE__OK : GH__ERROR_CODE__ERROR;
+	}
+
+	return GH__ERROR_CODE__OK;
+}
+
 static enum gh__error_code do_sub_cmd(int argc, const char **argv)
 {
 	if (!strcmp(argv[0], "get"))
@@ -3324,6 +3368,9 @@ static enum gh__error_code do_sub_cmd(int argc, const char **argv)
 
 	if (!strcmp(argv[0], "server"))
 		return do_sub_cmd__server(argc, argv);
+
+	if (!strcmp(argv[0], "curl-version"))
+		return do_sub_cmd__curl_version(argc, argv);
 
 	// TODO have "test" mode that could be used to drive
 	// TODO unit testing.
