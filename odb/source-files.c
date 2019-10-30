@@ -856,6 +856,8 @@ static int odb_source_files_generate_pack(struct odb_source *source UNUSED,
 		strvec_push(&cp->args, "--shallow");
 	if (opts->ofs_delta)
 		strvec_push(&cp->args, "--delta-base-offset");
+	if (opts->no_ref_delta)
+		strvec_push(&cp->args, "--no-ref-delta");
 	if (opts->include_tag)
 		strvec_push(&cp->args, "--include-tag");
 	if (opts->missing_allow_promisor)
