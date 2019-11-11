@@ -22,7 +22,7 @@
 //
 //            error    := verify cache-server and abort if not well-known.
 //
-//            trust    := do not verify cache-server.  just use it.
+//            trust    := do not verify cache-server.  just use it, if set.
 //
 //            disable  := disable the cache-server and always use the main
 //                        Git server.
@@ -87,6 +87,24 @@
 //                       Number of retries after transient network errors.
 //                       Set to zero to disable such retries.
 //
+//     prefetch
+//
+//            Use "/gvfs/prefetch" REST API to fetch 1 or more commits-and-trees
+//            prefetch packs from the server.
+//
+//            <prefetch-options>:
+//
+//                 --since=<t>           // defaults to "0"
+//
+//                       Time in seconds since the epoch.  If omitted or
+//                       zero, the timestamp from the newest prefetch
+//                       packfile found in the shared-cache ODB is used.
+//                       (This is based upon the packfile name, not the
+//                       mtime.)
+//
+//                       The GVFS Protocol defines this value as a way to
+//                       request cached packfiles NEWER THAN this timestamp.
+//
 //     server
 //
 //            Interactive/sub-process mode.  Listen for a series of commands
@@ -116,20 +134,36 @@
 //
 //                 Each object will be created as a loose object in the ODB.
 //
+//                 Create 1 or more loose objects in the shared-cache ODB.
+//                 (The pathname of the selected ODB is reported at the
+//                 beginning of the response; this should match the pathname
+//                 given on the command line).
+//
+//                 git> objects.get
+//                 git> <oid>
+//                 git> <oid>
+//                 git> ...
+//                 git> <oid>
+//                 git> 0000
+//
+//                 git< odb <directory>
+//                 git< loose <oid>
+//                 git< loose <oid>
+//                 git< ...
+//                 git< loose <oid>
+//                 git< ok | partial | error <message>
+//                 git< 0000
+//
 //            Interactive verb: objects.post
 //
 //                 Fetch 1 or more objects, in bulk, using one or more
 //                 "/gvfs/objects" POST requests.
 //
-//            For both verbs, if a cache-server is configured, try it first.
-//            Optionally fallback to the main Git server.
-//
 //                 Create 1 or more loose objects and/or packfiles in the
-//                 shared-cache ODB.  (The pathname of the selected ODB is
-//                 reported at the beginning of the response; this should
-//                 match the pathname given on the command line).
+//                 shared-cache ODB.  A POST is allowed to respond with
+//                 either loose or packed objects.
 //
-//                 git> objects.get | objects.post
+//                 git> objects.post
 //                 git> <oid>
 //                 git> <oid>
 //                 git> ...
@@ -139,10 +173,30 @@
 //                 git< odb <directory>
 //                 git< loose <oid> | packfile <filename.pack>
 //                 git< loose <oid> | packfile <filename.pack>
-//                 gid< ...
+//                 git< ...
 //                 git< loose <oid> | packfile <filename.pack>
 //                 git< ok | partial | error <message>
 //                 git< 0000
+//
+//            Interactive verb: object.prefetch
+//
+//                 Fetch 1 or more prefetch packs using a "/gvfs/prefetch"
+//                 request.
+//
+//                 git> objects.prefetch
+//                 git> <timestamp>            // optional
+//                 git> 0000
+//
+//                 git< odb <directory>
+//                 git< packfile <filename.pack>
+//                 git< packfile <filename.pack>
+//                 git< ...
+//                 git< packfile <filename.pack>
+//                 git< ok | error <message>
+//                 git< 0000
+//
+//            If a cache-server is configured, try it first.
+//            Optionally fallback to the main Git server.
 //
 //            [1] Documentation/technical/protocol-common.txt
 //            [2] Documentation/technical/long-running-process-protocol.txt
@@ -186,12 +240,18 @@
 #include "abspath.h"
 #include "progress.h"
 #include "trace2.h"
+#include "wrapper.h"
+#include "packfile.h"
+#include "date.h"
 #include "versioncmp.h"
+
+#define TR2_CAT "gvfs-helper"
 
 static const char * const main_usage[] = {
 	N_("git gvfs-helper [<main_options>] config      [<options>]"),
 	N_("git gvfs-helper [<main_options>] get         [<options>]"),
 	N_("git gvfs-helper [<main_options>] post        [<options>]"),
+	N_("git gvfs-helper [<main_options>] prefetch    [<options>]"),
 	N_("git gvfs-helper [<main_options>] server      [<options>]"),
 	NULL
 };
@@ -203,6 +263,11 @@ static const char *const objects_get_usage[] = {
 
 static const char *const objects_post_usage[] = {
 	N_("git gvfs-helper [<main_options>] post [<options>]"),
+	NULL
+};
+
+static const char *const prefetch_usage[] = {
+	N_("git gvfs-helper [<main_options>] prefetch [<options>]"),
 	NULL
 };
 
@@ -255,6 +320,7 @@ enum gh__error_code {
 	GH__ERROR_CODE__COULD_NOT_INSTALL_PACKFILE = 11,
 	GH__ERROR_CODE__SUBPROCESS_SYNTAX = 12,
 	GH__ERROR_CODE__INDEX_PACK_FAILED = 13,
+	GH__ERROR_CODE__COULD_NOT_INSTALL_PREFETCH = 14,
 };
 
 enum gh__cache_server_mode {
@@ -320,6 +386,8 @@ static const char *gh__server_type_label[GH__SERVER_TYPE__NR] = {
 };
 
 enum gh__objects_mode {
+	GH__OBJECTS_MODE__NONE = 0,
+
 	/*
 	 * Bulk fetch objects.
 	 *
@@ -339,6 +407,12 @@ enum gh__objects_mode {
 	 * object treatment).
 	 */
 	GH__OBJECTS_MODE__GET,
+
+	/*
+	 * Fetch one or more pre-computed "prefetch packs" containing
+	 * commits and trees.
+	 */
+	GH__OBJECTS_MODE__PREFETCH,
 };
 
 struct gh__azure_throttle
@@ -413,6 +487,7 @@ struct gh__request_params {
 	int b_write_to_file;      /* write to file=1 or strbuf=0 */
 	int b_permit_cache_server_if_defined;
 
+	enum gh__objects_mode objects_mode;
 	enum gh__server_type server_type;
 
 	int k_attempt; /* robust retry attempt */
@@ -427,14 +502,7 @@ struct gh__request_params {
 	struct strbuf *buffer;     /* for response content when strbuf */
 	struct strbuf tr2_label;   /* for trace2 regions */
 
-	struct strbuf loose_path;
 	struct object_id loose_oid;
-
-	struct strbuf temp_path_pack;
-	struct strbuf temp_path_idx;
-	struct strbuf final_path_pack;
-	struct strbuf final_path_idx;
-	struct strbuf final_packfile_filename;
 
 	/*
 	 * Note that I am putting all of the progress-related instance data
@@ -475,13 +543,7 @@ struct gh__request_params {
 	.tempfile = NULL, \
 	.buffer = NULL, \
 	.tr2_label = STRBUF_INIT, \
-	.loose_path = STRBUF_INIT, \
 	.loose_oid = {{0}}, \
-	.temp_path_pack = STRBUF_INIT, \
-	.temp_path_idx = STRBUF_INIT, \
-	.final_path_pack = STRBUF_INIT, \
-	.final_path_idx = STRBUF_INIT, \
-	.final_packfile_filename = STRBUF_INIT, \
 	.progress_state = GH__PROGRESS_STATE__START, \
 	.progress_base_phase2_msg = STRBUF_INIT, \
 	.progress_base_phase3_msg = STRBUF_INIT, \
@@ -506,12 +568,6 @@ static void gh__request_params__release(struct gh__request_params *params)
 	params->buffer = NULL; /* we do not own this */
 
 	strbuf_release(&params->tr2_label);
-	strbuf_release(&params->loose_path);
-	strbuf_release(&params->temp_path_pack);
-	strbuf_release(&params->temp_path_idx);
-	strbuf_release(&params->final_path_pack);
-	strbuf_release(&params->final_path_idx);
-	strbuf_release(&params->final_packfile_filename);
 
 	strbuf_release(&params->progress_base_phase2_msg);
 	strbuf_release(&params->progress_base_phase3_msg);
@@ -602,9 +658,7 @@ static void gh__response_status__zero(struct gh__response_status *s)
 	s->azure = NULL;
 }
 
-static void install_packfile(struct gh__request_params *params,
-			     struct gh__response_status *status);
-static void install_loose(struct gh__request_params *params,
+static void install_result(struct gh__request_params *params,
 			  struct gh__response_status *status);
 
 /*
@@ -641,7 +695,7 @@ static void log_e2eid(struct gh__request_params *params,
 		strbuf_addstr(&key, "e2eid");
 		strbuf_addstr(&key, gh__server_type_label[params->server_type]);
 
-		trace2_data_string("gvfs-helper", NULL, key.buf,
+		trace2_data_string(TR2_CAT, NULL, key.buf,
 				   params->e2eid.buf);
 
 		strbuf_release(&key);
@@ -741,7 +795,7 @@ static void compute_retry_mode_from_http_response(
 		status->retry = GH__RETRY_MODE__HTTP_429;
 		status->ec = GH__ERROR_CODE__HTTP_429;
 
-		trace2_data_string("gvfs-helper", NULL, "error/http",
+		trace2_data_string(TR2_CAT, NULL, "error/http",
 				   status->error_message.buf);
 		return;
 
@@ -754,7 +808,7 @@ static void compute_retry_mode_from_http_response(
 		status->retry = GH__RETRY_MODE__HTTP_503;
 		status->ec = GH__ERROR_CODE__HTTP_503;
 
-		trace2_data_string("gvfs-helper", NULL, "error/http",
+		trace2_data_string(TR2_CAT, NULL, "error/http",
 				   status->error_message.buf);
 		return;
 
@@ -768,7 +822,7 @@ hard_fail:
 	status->retry = GH__RETRY_MODE__HARD_FAIL;
 	status->ec = GH__ERROR_CODE__HTTP_OTHER;
 
-	trace2_data_string("gvfs-helper", NULL, "error/http",
+	trace2_data_string(TR2_CAT, NULL, "error/http",
 			   status->error_message.buf);
 	return;
 }
@@ -902,7 +956,7 @@ hard_fail:
 	status->retry = GH__RETRY_MODE__HARD_FAIL;
 	status->ec = GH__ERROR_CODE__CURL_ERROR;
 
-	trace2_data_string("gvfs-helper", NULL, "error/curl",
+	trace2_data_string(TR2_CAT, NULL, "error/curl",
 			   status->error_message.buf);
 	return;
 
@@ -912,7 +966,7 @@ transient:
 	status->retry = GH__RETRY_MODE__TRANSIENT;
 	status->ec = GH__ERROR_CODE__CURL_ERROR;
 
-	trace2_data_string("gvfs-helper", NULL, "error/curl",
+	trace2_data_string(TR2_CAT, NULL, "error/curl",
 			   status->error_message.buf);
 	return;
 }
@@ -1106,7 +1160,7 @@ static void gh__run_one_slot(struct active_request_slot *slot,
 	params->progress_state = GH__PROGRESS_STATE__START;
 	strbuf_setlen(&params->e2eid, 0);
 
-	trace2_region_enter("gvfs-helper", key.buf, NULL);
+	trace2_region_enter(TR2_CAT, key.buf, NULL);
 
 	if (!start_active_slot(slot)) {
 		compute_retry_mode_from_curl_error(status,
@@ -1130,7 +1184,7 @@ static void gh__run_one_slot(struct active_request_slot *slot,
 			 * (such as when we request a commit).
 			 */
 			strbuf_addstr(&key, "/nr_bytes");
-			trace2_data_intmax("gvfs-helper", NULL,
+			trace2_data_intmax(TR2_CAT, NULL,
 					   key.buf,
 					   status->bytes_received);
 			strbuf_setlen(&key, old_len);
@@ -1140,16 +1194,10 @@ static void gh__run_one_slot(struct active_request_slot *slot,
 	if (params->progress)
 		stop_progress(&params->progress);
 
-	if (status->ec == GH__ERROR_CODE__OK && params->b_write_to_file) {
-		if (params->b_is_post &&
-		    !strcmp(status->content_type.buf,
-			    "application/x-git-packfile"))
-			install_packfile(params, status);
-		else
-			install_loose(params, status);
-	}
+	if (status->ec == GH__ERROR_CODE__OK && params->b_write_to_file)
+		install_result(params, status);
 
-	trace2_region_leave("gvfs-helper", key.buf, NULL);
+	trace2_region_leave(TR2_CAT, key.buf, NULL);
 
 	strbuf_release(&key);
 }
@@ -1296,7 +1344,7 @@ static void lookup_main_url(void)
 	 */
 	gh__global.main_url = transport_anonymize_url(gh__global.remote->url.v[0]);
 
-	trace2_data_string("gvfs-helper", NULL, "remote/url", gh__global.main_url);
+	trace2_data_string(TR2_CAT, NULL, "remote/url", gh__global.main_url);
 }
 
 static void do__http_get__gvfs_config(struct gh__response_status *status,
@@ -1323,8 +1371,21 @@ static void select_cache_server(void)
 	gh__global.cache_server_url = NULL;
 
 	if (gh__cmd_opts.cache_server_mode == GH__CACHE_SERVER_MODE__DISABLE) {
-		trace2_data_string("gvfs-helper", NULL, "cache/url", "disabled");
+		trace2_data_string(TR2_CAT, NULL, "cache/url", "disabled");
 		return;
+	}
+
+	if (!gvfs_cache_server_url || !*gvfs_cache_server_url) {
+		switch (gh__cmd_opts.cache_server_mode) {
+		default:
+		case GH__CACHE_SERVER_MODE__TRUST_WITHOUT_VERIFY:
+		case GH__CACHE_SERVER_MODE__VERIFY_DISABLE:
+			trace2_data_string(TR2_CAT, NULL, "cache/url", "unset");
+			return;
+
+		case GH__CACHE_SERVER_MODE__VERIFY_ERROR:
+			die("cache-server not set");
+		}
 	}
 
 	/*
@@ -1334,14 +1395,14 @@ static void select_cache_server(void)
 	 */
 	if (!strcmp(gvfs_cache_server_url, gh__global.main_url)) {
 		gh__cmd_opts.try_fallback = 0;
-		trace2_data_string("gvfs-helper", NULL, "cache/url", "same");
+		trace2_data_string(TR2_CAT, NULL, "cache/url", "same");
 		return;
 	}
 
 	if (gh__cmd_opts.cache_server_mode ==
 	    GH__CACHE_SERVER_MODE__TRUST_WITHOUT_VERIFY) {
 		gh__global.cache_server_url = gvfs_cache_server_url;
-		trace2_data_string("gvfs-helper", NULL, "cache/url",
+		trace2_data_string(TR2_CAT, NULL, "cache/url",
 				   gvfs_cache_server_url);
 		return;
 	}
@@ -1382,7 +1443,7 @@ static void select_cache_server(void)
 
 	if (match) {
 		gh__global.cache_server_url = gvfs_cache_server_url;
-		trace2_data_string("gvfs-helper", NULL, "cache/url",
+		trace2_data_string(TR2_CAT, NULL, "cache/url",
 				   gvfs_cache_server_url);
 	}
 
@@ -1406,7 +1467,7 @@ static void select_cache_server(void)
 		else
 			warning("could not verify cache-server '%s'",
 				gvfs_cache_server_url);
-		trace2_data_string("gvfs-helper", NULL, "cache/url",
+		trace2_data_string(TR2_CAT, NULL, "cache/url",
 				   "disabled");
 	}
 
@@ -1595,27 +1656,14 @@ static void select_odb(void)
 }
 
 /*
- * Create a tempfile to stream the packfile into.
- *
- * We create a tempfile in the chosen ODB directory and let CURL
- * automatically stream data to the file.  If successful, we can
- * later rename it to a proper .pack and run "git index-pack" on
- * it to create the corresponding .idx file.
- *
- * TODO I would rather to just stream the packfile directly into
- * TODO "git index-pack --stdin" (and save some I/O) because it
- * TODO will automatically take care of the rename of both files
- * TODO and any other cleanup.  BUT INDEX-PACK WILL ONLY WRITE
- * TODO TO THE PRIMARY ODB -- it will not write into the alternates
- * TODO (this is considered bad form).  So we would need to add
- * TODO an option to index-pack to handle this.  I don't want to
- * TODO deal with this issue right now.
- *
- * TODO Consider using lockfile for this rather than naked tempfile.
+ * Create a unique tempfile or tempfile-pair inside the
+ * tempPacks directory.
  */
-static void create_tempfile_for_packfile(
-	struct gh__request_params *params,
-	struct gh__response_status *status)
+static void my_create_tempfile(
+	struct gh__response_status *status,
+	int b_fdopen,
+	const char *suffix1, struct tempfile **t1,
+	const char *suffix2, struct tempfile **t2)
 {
 	static unsigned int nth = 0;
 	static struct timeval tv = {0};
@@ -1625,15 +1673,15 @@ static void create_tempfile_for_packfile(
 
 	struct strbuf basename = STRBUF_INIT;
 	struct strbuf buf = STRBUF_INIT;
-	int len_p;
+	int len_tp;
 	enum scld_error scld;
 
 	gh__response_status__zero(status);
 
 	if (!nth) {
 		/*
-		 * Create a <date> string to use in the name of all packfiles
-		 * created by this process.
+		 * Create a unique <date> string to use in the name of all
+		 * tempfiles created by this process.
 		 */
 		gettimeofday(&tv, NULL);
 		secs = tv.tv_sec;
@@ -1646,82 +1694,112 @@ static void create_tempfile_for_packfile(
 	}
 
 	/*
-	 * Create a <basename> for this packfile using a series number <n>,
-	 * so that all of the chunks we download will group together.
+	 * Create a <basename> for this instance/pair using a series
+	 * number <n>.
 	 */
-	strbuf_addf(&basename, "vfs-%s-%04d", date, nth++);
+	strbuf_addf(&basename, "t-%s-%04d", date, nth++);
+
+	if (!suffix1 || !*suffix1)
+		suffix1 = "temp";
 
 	/*
-	 * We will stream the data into a managed tempfile() in:
+	 * Create full pathname as:
 	 *
-	 *     "<odb>/pack/tempPacks/vfs-<date>-<n>.temp"
+	 *     "<odb>/pack/tempPacks/<basename>.<suffix1>"
 	 */
 	strbuf_setlen(&buf, 0);
 	strbuf_addbuf(&buf, &gh__global.buf_odb_path);
 	strbuf_complete(&buf, '/');
-	strbuf_addstr(&buf, "pack/");
-	len_p = buf.len;
-	strbuf_addstr(&buf, "tempPacks/");
-	strbuf_addbuf(&buf, &basename);
-	strbuf_addstr(&buf, ".temp");
+	strbuf_addstr(&buf, "pack/tempPacks/");
+	len_tp = buf.len;
+	strbuf_addf(  &buf, "%s.%s", basename.buf, suffix1);
 
 	scld = safe_create_leading_directories(the_repository, buf.buf);
 	if (scld != SCLD_OK && scld != SCLD_EXISTS) {
 		strbuf_addf(&status->error_message,
-			    "could not create directory for packfile: '%s'",
+			    "could not create directory for tempfile: '%s'",
 			    buf.buf);
 		status->ec = GH__ERROR_CODE__COULD_NOT_CREATE_TEMPFILE;
 		goto cleanup;
 	}
 
-	params->tempfile = create_tempfile(buf.buf);
-	if (!params->tempfile) {
+	*t1 = create_tempfile(buf.buf);
+	if (!*t1) {
 		strbuf_addf(&status->error_message,
-			    "could not create tempfile for packfile: '%s'",
+			    "could not create tempfile: '%s'",
 			    buf.buf);
 		status->ec = GH__ERROR_CODE__COULD_NOT_CREATE_TEMPFILE;
 		goto cleanup;
 	}
-
-	fdopen_tempfile(params->tempfile, "w");
-
-	/*
-	 * After the download is complete, we will need to steal the file
-	 * from the tempfile() class (so that it doesn't magically delete
-	 * it when we close the file handle) and then index it.
-	 *
-	 * We do this into the tempPacks directory to avoid contaminating
-	 * the real pack directory until we know there is no corruption.
-	 *
-	 *     "<odb>/pack/tempPacks/vfs-<date>-<n>.temp.pack"
-	 *     "<odb>/pack/tempPacks/vfs-<date>-<n>.temp.idx"
-	 */
-	strbuf_setlen(&params->temp_path_pack, 0);
-	strbuf_addf(&params->temp_path_pack, "%s.pack", buf.buf);
-
-	strbuf_setlen(&params->temp_path_idx, 0);
-	strbuf_addf(&params->temp_path_idx, "%s.idx", buf.buf);
+	if (b_fdopen)
+		fdopen_tempfile(*t1, "w");
 
 	/*
-	 * Later, if all goes well, we will install them as:
+	 * Optionally create a peer tempfile with the same basename.
+	 * (This is useful for prefetching .pack and .idx pairs.)
 	 *
-	 *     "<odb>/pack/vfs-<date>-<n>.pack"
-	 *     "<odb>/pack/vfs-<date>-<n>.idx"
+	 *     "<odb>/pack/tempPacks/<basename>.<suffix2>"
 	 */
-	strbuf_setlen(&buf, len_p);
-	strbuf_setlen(&params->final_path_pack, 0);
-	strbuf_addf(&params->final_path_pack, "%s%s.pack",
-		    buf.buf, basename.buf);
-	strbuf_setlen(&params->final_path_idx, 0);
-	strbuf_addf(&params->final_path_idx, "%s%s.idx",
-		    buf.buf, basename.buf);
-	strbuf_setlen(&params->final_packfile_filename, 0);
-	strbuf_addf(&params->final_packfile_filename, "%s.pack",
-		    basename.buf);
+	if (suffix2 && *suffix2 && t2) {
+		strbuf_setlen(&buf, len_tp);
+		strbuf_addf(  &buf, "%s.%s", basename.buf, suffix2);
+
+		*t2 = create_tempfile(buf.buf);
+		if (!*t2) {
+			strbuf_addf(&status->error_message,
+				    "could not create tempfile: '%s'",
+				    buf.buf);
+			status->ec = GH__ERROR_CODE__COULD_NOT_CREATE_TEMPFILE;
+			goto cleanup;
+		}
+		if (b_fdopen)
+			fdopen_tempfile(*t2, "w");
+	}
 
 cleanup:
 	strbuf_release(&buf);
 	strbuf_release(&basename);
+}
+
+/*
+ * Create pathnames to the final location of the .pack and .idx
+ * files in the ODB.  These are of the form:
+ *
+ *    "<odb>/pack/<term_1>-<term_2>[-<term_3>].<suffix>"
+ *
+ * For example, for prefetch packs, <term_2> will be the epoch
+ * timestamp and <term_3> will be the packfile hash.
+ */
+static void create_final_packfile_pathnames(
+	const char *term_1, const char *term_2, const char *term_3,
+	struct strbuf *pack_path, struct strbuf *idx_path,
+	struct strbuf *pack_filename)
+{
+	struct strbuf base = STRBUF_INIT;
+	struct strbuf path = STRBUF_INIT;
+
+	if (term_3 && *term_3)
+		strbuf_addf(&base, "%s-%s-%s", term_1, term_2, term_3);
+	else
+		strbuf_addf(&base, "%s-%s", term_1, term_2);
+
+	strbuf_setlen(pack_filename, 0);
+	strbuf_addf(  pack_filename, "%s.pack", base.buf);
+
+	strbuf_addbuf(&path, &gh__global.buf_odb_path);
+	strbuf_complete(&path, '/');
+	strbuf_addstr(&path, "pack/");
+
+	strbuf_setlen(pack_path, 0);
+	strbuf_addbuf(pack_path, &path);
+	strbuf_addf(  pack_path, "%s.pack", base.buf);
+
+	strbuf_setlen(idx_path, 0);
+	strbuf_addbuf(idx_path, &path);
+	strbuf_addf(  idx_path, "%s.idx", base.buf);
+
+	strbuf_release(&base);
+	strbuf_release(&path);
 }
 
 /*
@@ -1751,112 +1829,35 @@ static int create_loose_pathname_in_odb(struct strbuf *buf_path,
 	return 0;
 }
 
-/*
- * Create a tempfile to stream a loose object into.
- *
- * We create a tempfile in the chosen ODB directory and let CURL
- * automatically stream data to the file.
- *
- * We put it directly in the "<odb>/xx/" directory.
- */
-static void create_tempfile_for_loose(
-	struct gh__request_params *params,
-	struct gh__response_status *status)
-{
-	static int nth = 0;
-	struct strbuf buf_path = STRBUF_INIT;
-
-	gh__response_status__zero(status);
-
-	if (create_loose_pathname_in_odb(&buf_path, &params->loose_oid)) {
-		strbuf_addf(&status->error_message,
-			    "cannot create directory for loose object '%s'",
-			    buf_path.buf);
-		status->ec = GH__ERROR_CODE__COULD_NOT_CREATE_TEMPFILE;
-		goto cleanup;
-	}
-
-	/* Remember the full path of the final destination. */
-	strbuf_setlen(&params->loose_path, 0);
-	strbuf_addbuf(&params->loose_path, &buf_path);
-
-	/*
-	 * Build a unique tempfile pathname based upon it.  We avoid
-	 * using lockfiles to avoid issues with stale locks after
-	 * crashes.
-	 */
-	strbuf_addf(&buf_path, ".%08u.%.06u.temp", getpid(), nth++);
-
-	params->tempfile = create_tempfile(buf_path.buf);
-	if (!params->tempfile) {
-		strbuf_addstr(&status->error_message,
-			      "could not create tempfile for loose object");
-		status->ec = GH__ERROR_CODE__COULD_NOT_CREATE_TEMPFILE;
-		goto cleanup;
-	}
-
-	fdopen_tempfile(params->tempfile, "w");
-
-cleanup:
-	strbuf_release(&buf_path);
-}
-
-/*
- * Convert the tempfile into a temporary .pack, index it into a temporary .idx
- * file, and then install the pair into ODB.
- */
-static void install_packfile(struct gh__request_params *params,
-			     struct gh__response_status *status)
+static void my_run_index_pack(struct gh__request_params *params UNUSED,
+			      struct gh__response_status *status,
+			      const struct strbuf *temp_path_pack,
+			      const struct strbuf *temp_path_idx,
+			      struct strbuf *packfile_checksum)
 {
 	struct child_process ip = CHILD_PROCESS_INIT;
+	struct strbuf ip_stdout = STRBUF_INIT;
 
-	/*
-	 * When we request more than 1 object, the server should always
-	 * send us a packfile.
-	 */
-	if (strcmp(status->content_type.buf,
-		   "application/x-git-packfile")) {
-		strbuf_addf(&status->error_message,
-			    "install_packfile: received unknown content-type '%s'",
-			    status->content_type.buf);
-		status->ec = GH__ERROR_CODE__UNEXPECTED_CONTENT_TYPE;
-		goto cleanup;
-	}
-
-	gh__response_status__zero(status);
-
-	if (rename_tempfile(&params->tempfile,
-			    params->temp_path_pack.buf) == -1) {
-		strbuf_addf(&status->error_message,
-			    "could not rename packfile to '%s'",
-			    params->temp_path_pack.buf);
-		status->ec = GH__ERROR_CODE__COULD_NOT_INSTALL_PACKFILE;
-		goto cleanup;
-	}
-
+	strvec_push(&ip.args, "git");
 	strvec_push(&ip.args, "index-pack");
-	if (gh__cmd_opts.show_progress)
-		strvec_push(&ip.args, "-v");
-	strvec_pushl(&ip.args, "-o", params->temp_path_idx.buf, NULL);
-	strvec_push(&ip.args, params->temp_path_pack.buf);
-	ip.git_cmd = 1;
-	ip.no_stdin = 1;
-	ip.no_stdout = 1;
 
-	/*
-	 * Note that I DO NOT have a trace2 region around the
-	 * index-pack process by itself.  Currently, we are inside the
-	 * trace2 region for running the request and that's fine.
-	 * Later, if/when we stream the download directly to
-	 * index-pack, it will be inside under the same region anyway.
-	 * So, I'm not going to introduce it here.
-	 */
-	if (run_command(&ip)) {
-		unlink(params->temp_path_pack.buf);
-		unlink(params->temp_path_idx.buf);
+	ip.err = -1;
+	ip.no_stderr = 1;
+
+	/* Skip generating the rev index, we don't need it. */
+	strvec_push(&ip.args, "--no-rev-index");
+
+	strvec_pushl(&ip.args, "-o", temp_path_idx->buf, NULL);
+	strvec_push(&ip.args, temp_path_pack->buf);
+	ip.no_stdin = 1;
+	ip.out = -1;
+
+	if (pipe_command(&ip, NULL, 0, &ip_stdout, 0, NULL, 0)) {
+		unlink(temp_path_pack->buf);
+		unlink(temp_path_idx->buf);
 		strbuf_addf(&status->error_message,
 			    "index-pack failed on '%s'",
-			    params->temp_path_pack.buf);
+			    temp_path_pack->buf);
 		/*
 		 * Lets assume that index-pack failed because the
 		 * downloaded file is corrupt (truncated).
@@ -1868,33 +1869,399 @@ static void install_packfile(struct gh__request_params *params,
 		goto cleanup;
 	}
 
-	if (finalize_object_file(the_repository, params->temp_path_pack.buf,
-				 params->final_path_pack.buf) ||
-	    finalize_object_file(the_repository, params->temp_path_idx.buf,
-				 params->final_path_idx.buf)) {
-		unlink(params->temp_path_pack.buf);
-		unlink(params->temp_path_idx.buf);
-		unlink(params->final_path_pack.buf);
-		unlink(params->final_path_idx.buf);
-		strbuf_addf(&status->error_message,
-			    "could not install packfile '%s'",
-			    params->final_path_pack.buf);
-		status->ec = GH__ERROR_CODE__COULD_NOT_INSTALL_PACKFILE;
-		goto cleanup;
+	if (packfile_checksum) {
+		/*
+		 * stdout from index-pack should have the packfile hash.
+		 * Extract it and use it in the final packfile name.
+		 *
+		 * TODO What kind of validation should we do on the
+		 * TODO string and is there ever any other output besides
+		 * TODO just the checksum ?
+		 */
+		strbuf_trim_trailing_newline(&ip_stdout);
+
+		strbuf_addbuf(packfile_checksum, &ip_stdout);
 	}
 
+cleanup:
+	strbuf_release(&ip_stdout);
+	child_process_clear(&ip);
+}
+
+static void my_finalize_packfile(struct gh__request_params *params,
+				 struct gh__response_status *status,
+				 const struct strbuf *temp_path_pack,
+				 const struct strbuf *temp_path_idx,
+				 struct strbuf *final_path_pack,
+				 struct strbuf *final_path_idx,
+				 struct strbuf *final_filename)
+{
+	if (finalize_object_file(the_repository, temp_path_pack->buf, final_path_pack->buf) ||
+	    finalize_object_file(the_repository, temp_path_idx->buf, final_path_idx->buf)) {
+		unlink(temp_path_pack->buf);
+		unlink(temp_path_idx->buf);
+		unlink(final_path_pack->buf);
+		unlink(final_path_idx->buf);
+		strbuf_addf(&status->error_message,
+			    "could not install packfile '%s'",
+			    final_path_pack->buf);
+		status->ec = GH__ERROR_CODE__COULD_NOT_INSTALL_PACKFILE;
+		return;
+	}
 
 	if (params->result_list) {
 		struct strbuf result_msg = STRBUF_INIT;
 
-		strbuf_addf(&result_msg, "packfile %s",
-			    params->final_packfile_filename.buf);
+		strbuf_addf(&result_msg, "packfile %s", final_filename->buf);
 		string_list_append(params->result_list, result_msg.buf);
 		strbuf_release(&result_msg);
 	}
+}
+
+/*
+ * Convert the tempfile into a temporary .pack, index it into a temporary .idx
+ * file, and then install the pair into ODB.
+ */
+static void install_packfile(struct gh__request_params *params,
+			     struct gh__response_status *status)
+{
+	struct strbuf temp_path_pack = STRBUF_INIT;
+	struct strbuf temp_path_idx = STRBUF_INIT;
+	struct strbuf packfile_checksum = STRBUF_INIT;
+	struct strbuf final_path_pack = STRBUF_INIT;
+	struct strbuf final_path_idx = STRBUF_INIT;
+	struct strbuf final_filename = STRBUF_INIT;
+
+	gh__response_status__zero(status);
+
+	/*
+	 * After the download is complete, we will need to steal the file
+	 * from the tempfile() class (so that it doesn't magically delete
+	 * it when we close the file handle) and then index it.
+	 */
+	strbuf_addf(&temp_path_pack, "%s.pack",
+		    get_tempfile_path(params->tempfile));
+	strbuf_addf(&temp_path_idx, "%s.idx",
+		    get_tempfile_path(params->tempfile));
+
+	if (rename_tempfile(&params->tempfile,
+			    temp_path_pack.buf) == -1) {
+		strbuf_addf(&status->error_message,
+			    "could not rename packfile to '%s'",
+			    temp_path_pack.buf);
+		status->ec = GH__ERROR_CODE__COULD_NOT_INSTALL_PACKFILE;
+		goto cleanup;
+	}
+
+	my_run_index_pack(params, status, &temp_path_pack, &temp_path_idx,
+			  &packfile_checksum);
+	if (status->ec != GH__ERROR_CODE__OK)
+		goto cleanup;
+
+	create_final_packfile_pathnames("vfs", packfile_checksum.buf, NULL,
+					&final_path_pack, &final_path_idx,
+					&final_filename);
+	my_finalize_packfile(params, status,
+			     &temp_path_pack, &temp_path_idx,
+			     &final_path_pack, &final_path_idx,
+			     &final_filename);
 
 cleanup:
-	child_process_clear(&ip);
+	strbuf_release(&temp_path_pack);
+	strbuf_release(&temp_path_idx);
+	strbuf_release(&packfile_checksum);
+	strbuf_release(&final_path_pack);
+	strbuf_release(&final_path_idx);
+	strbuf_release(&final_filename);
+}
+
+/*
+ * bswap.h only defines big endian functions.
+ * The GVFS Protocol defines fields in little endian.
+ */
+static inline uint64_t my_get_le64(uint64_t le_val)
+{
+#if GIT_BYTE_ORDER == GIT_LITTLE_ENDIAN
+	return le_val;
+#else
+	return default_bswap64(le_val);
+#endif
+}
+
+#define MY_MIN(x,y) (((x) < (y)) ? (x) : (y))
+#define MY_MAX(x,y) (((x) > (y)) ? (x) : (y))
+
+/*
+ * Copy the `nr_bytes_total` from `fd_in` to `fd_out`.
+ *
+ * This could be used to extract a single packfile from
+ * a multipart file, for example.
+ */
+static int my_copy_fd_len(int fd_in, int fd_out, ssize_t nr_bytes_total)
+{
+	char buffer[8192];
+
+	while (nr_bytes_total > 0) {
+		ssize_t len_to_read = MY_MIN(nr_bytes_total, (ssize_t)sizeof(buffer));
+		ssize_t nr_read = xread(fd_in, buffer, len_to_read);
+
+		if (!nr_read)
+			break;
+		if (nr_read < 0)
+			return -1;
+
+		if (write_in_full(fd_out, buffer, nr_read) < 0)
+			return -1;
+
+		nr_bytes_total -= nr_read;
+	}
+
+	return 0;
+}
+
+/*
+ * Copy the `nr_bytes_total` from `fd_in` to `fd_out` AND save the
+ * final `tail_len` bytes in the given buffer.
+ *
+ * This could be used to extract a single packfile from
+ * a multipart file and read the final SHA into the buffer.
+ */
+static int my_copy_fd_len_tail(int fd_in, int fd_out, ssize_t nr_bytes_total,
+			       unsigned char *buf_tail, ssize_t tail_len)
+{
+	memset(buf_tail, 0, tail_len);
+
+	if (nr_bytes_total < tail_len)
+		return my_copy_fd_len(fd_in, fd_out, nr_bytes_total);
+
+	if (my_copy_fd_len(fd_in, fd_out, (nr_bytes_total - tail_len)) < 0)
+		return -1;
+
+	if (xread(fd_in, (char *)buf_tail, tail_len) != tail_len)
+		return -1;
+
+	if (write_in_full(fd_out, buf_tail, tail_len) < 0)
+		return -1;
+
+	return 0;
+}
+
+/*
+ * See the protocol document for the per-packfile header.
+ */
+struct ph {
+	uint64_t timestamp;
+	uint64_t pack_len;
+	uint64_t idx_len;
+};
+
+/*
+ * Extract the next packfile from the multipack.
+ */
+static void extract_packfile_from_multipack(
+	struct gh__request_params *params,
+	struct gh__response_status *status,
+	int fd_multipack,
+	unsigned short k)
+{
+	struct ph ph;
+	struct tempfile *tempfile_pack = NULL;
+	struct tempfile *tempfile_idx = NULL;
+	int result = -1;
+	int b_no_idx_in_multipack;
+	struct object_id packfile_checksum;
+	char hex_checksum[GIT_MAX_HEXSZ + 1];
+	struct strbuf buf_timestamp = STRBUF_INIT;
+	struct strbuf temp_path_pack = STRBUF_INIT;
+	struct strbuf temp_path_idx = STRBUF_INIT;
+	struct strbuf final_path_pack = STRBUF_INIT;
+	struct strbuf final_path_idx = STRBUF_INIT;
+	struct strbuf final_filename = STRBUF_INIT;
+
+	if (xread(fd_multipack, &ph, sizeof(ph)) != sizeof(ph)) {
+		strbuf_addf(&status->error_message,
+			    "could not read header for packfile[%d] in multipack",
+			    k);
+		status->ec = GH__ERROR_CODE__COULD_NOT_INSTALL_PREFETCH;
+		goto done;
+	}
+
+	ph.timestamp = my_get_le64(ph.timestamp);
+	ph.pack_len = my_get_le64(ph.pack_len);
+	ph.idx_len = my_get_le64(ph.idx_len);
+
+	if (!ph.pack_len) {
+		strbuf_addf(&status->error_message,
+			    "packfile[%d]: zero length packfile?", k);
+		status->ec = GH__ERROR_CODE__COULD_NOT_INSTALL_PREFETCH;
+		goto done;
+	}
+
+	b_no_idx_in_multipack = (ph.idx_len == maximum_unsigned_value_of_type(uint64_t) ||
+				 ph.idx_len == 0);
+
+	if (b_no_idx_in_multipack) {
+		my_create_tempfile(status, 0, "pack", &tempfile_pack, NULL, NULL);
+		if (!tempfile_pack)
+			goto done;
+	} else {
+		/* create a pair of tempfiles with the same basename */
+		my_create_tempfile(status, 0, "pack", &tempfile_pack, "idx", &tempfile_idx);
+		if (!tempfile_pack || !tempfile_idx)
+			goto done;
+	}
+
+	/*
+	 * Copy the current packfile from the open stream and capture
+	 * the checksum.
+	 *
+	 * TODO This assumes that the checksum is SHA1.  Fix this if/when
+	 * TODO Git converts to SHA256.
+	 */
+	result = my_copy_fd_len_tail(fd_multipack,
+				     get_tempfile_fd(tempfile_pack),
+				     ph.pack_len,
+				     packfile_checksum.hash,
+				     GIT_SHA1_RAWSZ);
+	packfile_checksum.algo = GIT_HASH_SHA1;
+
+	if (result < 0){
+		strbuf_addf(&status->error_message,
+			    "could not extract packfile[%d] from multipack",
+			    k);
+		goto done;
+	}
+	strbuf_addstr(&temp_path_pack, get_tempfile_path(tempfile_pack));
+	close_tempfile_gently(tempfile_pack);
+
+	oid_to_hex_r(hex_checksum, &packfile_checksum);
+
+	if (b_no_idx_in_multipack) {
+		/*
+		 * The server did not send the corresponding .idx, so
+		 * we have to compute it ourselves.
+		 */
+		strbuf_addbuf(&temp_path_idx, &temp_path_pack);
+		strbuf_strip_suffix(&temp_path_idx, ".pack");
+		strbuf_addstr(&temp_path_idx, ".idx");
+
+		my_run_index_pack(params, status,
+				  &temp_path_pack, &temp_path_idx,
+				  NULL);
+		if (status->ec != GH__ERROR_CODE__OK)
+			goto done;
+
+	} else {
+		/*
+		 * Server send the .idx immediately after the .pack in the
+		 * data stream.  I'm tempted to verify it, but that defeats
+		 * the purpose of having it cached...
+		 */
+		if (my_copy_fd_len(fd_multipack, get_tempfile_fd(tempfile_idx),
+				   ph.idx_len) < 0) {
+			strbuf_addf(&status->error_message,
+				    "could not extract index[%d] in multipack",
+				    k);
+			status->ec = GH__ERROR_CODE__COULD_NOT_INSTALL_PREFETCH;
+			goto done;
+		}
+
+		strbuf_addstr(&temp_path_idx, get_tempfile_path(tempfile_idx));
+		close_tempfile_gently(tempfile_idx);
+	}
+
+	strbuf_addf(&buf_timestamp, "%u", (unsigned int)ph.timestamp);
+	create_final_packfile_pathnames("prefetch", buf_timestamp.buf, hex_checksum,
+					&final_path_pack, &final_path_idx,
+					&final_filename);
+	strbuf_release(&buf_timestamp);
+
+	my_finalize_packfile(params, status,
+			     &temp_path_pack, &temp_path_idx,
+			     &final_path_pack, &final_path_idx,
+			     &final_filename);
+
+done:
+	delete_tempfile(&tempfile_pack);
+	delete_tempfile(&tempfile_idx);
+	strbuf_release(&temp_path_pack);
+	strbuf_release(&temp_path_idx);
+	strbuf_release(&final_path_pack);
+	strbuf_release(&final_path_idx);
+	strbuf_release(&final_filename);
+}
+
+/*
+ * Cut apart the received multipart response into individual packfiles
+ * and install each one.
+ */
+static void install_prefetch(struct gh__request_params *params,
+			     struct gh__response_status *status)
+{
+	static unsigned char v1_h[6] = { 'G', 'P', 'R', 'E', ' ', 0x01 };
+
+	struct mh {
+		unsigned char h[6];
+		unsigned char np[2];
+	};
+
+	struct mh mh;
+	unsigned short np;
+	unsigned short k;
+	int fd = -1;
+
+	struct strbuf temp_path_mp = STRBUF_INIT;
+
+	/*
+	 * Steal the multi-part file from the tempfile class.
+	 */
+	strbuf_addf(&temp_path_mp, "%s.mp", get_tempfile_path(params->tempfile));
+	if (rename_tempfile(&params->tempfile, temp_path_mp.buf) == -1) {
+		strbuf_addf(&status->error_message,
+			    "could not rename prefetch tempfile to '%s'",
+			    temp_path_mp.buf);
+		status->ec = GH__ERROR_CODE__COULD_NOT_INSTALL_PREFETCH;
+		goto cleanup;
+	}
+
+	fd = git_open_cloexec(temp_path_mp.buf, O_RDONLY);
+	if (fd == -1) {
+		strbuf_addf(&status->error_message,
+			    "could not reopen prefetch tempfile '%s'",
+			    temp_path_mp.buf);
+		status->ec = GH__ERROR_CODE__COULD_NOT_INSTALL_PREFETCH;
+		goto cleanup;
+	}
+
+	if ((xread(fd, &mh, sizeof(mh)) != sizeof(mh)) ||
+	    (memcmp(mh.h, &v1_h, sizeof(mh.h)))) {
+		strbuf_addstr(&status->error_message,
+			      "invalid prefetch multipart header");
+		goto cleanup;
+	}
+
+	np = (unsigned short)mh.np[0] + ((unsigned short)mh.np[1] << 8);
+	if (np)
+		trace2_data_intmax(TR2_CAT, NULL,
+				   "prefetch/packfile_count", np);
+
+	if (gh__cmd_opts.show_progress)
+		params->progress = start_progress(the_repository, "Installing prefetch packfiles", np);
+
+	for (k = 0; k < np; k++) {
+		extract_packfile_from_multipack(params, status, fd, k);
+		display_progress(params->progress, k + 1);
+		if (status->ec != GH__ERROR_CODE__OK)
+			break;
+	}
+	stop_progress(&params->progress);
+
+cleanup:
+	if (fd != -1)
+		close(fd);
+
+	unlink(temp_path_mp.buf);
+	strbuf_release(&temp_path_mp);
 }
 
 /*
@@ -1928,21 +2295,7 @@ static void install_loose(struct gh__request_params *params,
 			  struct gh__response_status *status)
 {
 	struct strbuf tmp_path = STRBUF_INIT;
-
-	/*
-	 * We expect a loose object when we do a GET -or- when we
-	 * do a POST with only 1 object.
-	 *
-	 * Note that this content type is singular, not plural.
-	 */
-	if (strcmp(status->content_type.buf,
-		   "application/x-git-loose-object")) {
-		strbuf_addf(&status->error_message,
-			    "install_loose: received unknown content-type '%s'",
-			    status->content_type.buf);
-		status->ec = GH__ERROR_CODE__UNEXPECTED_CONTENT_TYPE;
-		return;
-	}
+	struct strbuf loose_path = STRBUF_INIT;
 
 	gh__response_status__zero(status);
 
@@ -1980,11 +2333,19 @@ static void install_loose(struct gh__request_params *params,
 	 * collision we have to assume something else is happening in
 	 * parallel and we lost the race.  And that's OK.
 	 */
-	if (finalize_object_file(the_repository, tmp_path.buf, params->loose_path.buf)) {
+	if (create_loose_pathname_in_odb(&loose_path, &params->loose_oid)) {
+		strbuf_addf(&status->error_message,
+			    "cannot create directory for loose object '%s'",
+			    loose_path.buf);
+		status->ec = GH__ERROR_CODE__COULD_NOT_INSTALL_LOOSE;
+		goto cleanup;
+	}
+
+	if (finalize_object_file(the_repository, tmp_path.buf, loose_path.buf)) {
 		unlink(tmp_path.buf);
 		strbuf_addf(&status->error_message,
 			    "could not install loose object '%s'",
-			    params->loose_path.buf);
+			    loose_path.buf);
 		status->ec = GH__ERROR_CODE__COULD_NOT_INSTALL_LOOSE;
 		goto cleanup;
 	}
@@ -2000,6 +2361,57 @@ static void install_loose(struct gh__request_params *params,
 
 cleanup:
 	strbuf_release(&tmp_path);
+	strbuf_release(&loose_path);
+}
+
+static void install_result(struct gh__request_params *params,
+			   struct gh__response_status *status)
+{
+	if (params->objects_mode == GH__OBJECTS_MODE__PREFETCH) {
+		/*
+		 * The "gvfs/prefetch" API is the only thing that sends
+		 * these multi-part packfiles.  According to the protocol
+		 * documentation, they will have this x- content type.
+		 *
+		 * However, it appears that there is a BUG in the origin
+		 * server causing it to sometimes send "text/html" instead.
+		 * So, we silently handle both.
+		 */
+		if (!strcmp(status->content_type.buf,
+			    "application/x-gvfs-timestamped-packfiles-indexes")) {
+			install_prefetch(params, status);
+			return;
+		}
+
+		if (!strcmp(status->content_type.buf, "text/html")) {
+			install_prefetch(params, status);
+			return;
+		}
+	}
+
+	if (!strcmp(status->content_type.buf, "application/x-git-packfile")) {
+		assert(params->b_is_post);
+		assert(params->objects_mode == GH__OBJECTS_MODE__POST);
+
+		install_packfile(params, status);
+		return;
+	}
+
+	if (!strcmp(status->content_type.buf,
+		    "application/x-git-loose-object")) {
+		/*
+		 * We get these for "gvfs/objects" GET and POST requests.
+		 *
+		 * Note that this content type is singular, not plural.
+		 */
+		install_loose(params, status);
+		return;
+	}
+
+	strbuf_addf(&status->error_message,
+		    "install_result: received unknown content-type '%s'",
+		    status->content_type.buf);
+	status->ec = GH__ERROR_CODE__UNEXPECTED_CONTENT_TYPE;
 }
 
 /*
@@ -2065,7 +2477,7 @@ static size_t parse_resp_hdr(char *buffer, size_t size, size_t nitems,
 		 * Other servers have similar sets of values, but I haven't
 		 * compared them in depth.
 		 */
-		// trace2_printf("Throttle: %s %s", key.buf, val.buf);
+		// trace2_printf("%s: Throttle: %s %s", TR2_CAT, key.buf, val.buf);
 
 		if (!strcmp(key.buf, "X-RateLimit-Resource")) {
 			/*
@@ -2076,7 +2488,7 @@ static size_t parse_resp_hdr(char *buffer, size_t size, size_t nitems,
 			strbuf_addstr(&key, "ratelimit/resource");
 			strbuf_addstr(&key, gh__server_type_label[params->server_type]);
 
-			trace2_data_string("gvfs-helper", NULL, key.buf, val.buf);
+			trace2_data_string(TR2_CAT, NULL, key.buf, val.buf);
 		}
 
 		else if (!strcmp(key.buf, "X-RateLimit-Delay")) {
@@ -2092,7 +2504,7 @@ static size_t parse_resp_hdr(char *buffer, size_t size, size_t nitems,
 
 			git_parse_ulong(val.buf, &tarpit_delay_ms);
 
-			trace2_data_intmax("gvfs-helper", NULL, key.buf, tarpit_delay_ms);
+			trace2_data_intmax(TR2_CAT, NULL, key.buf, tarpit_delay_ms);
 		}
 
 		else if (!strcmp(key.buf, "X-RateLimit-Limit")) {
@@ -2190,7 +2602,7 @@ static void do_throttle_spin(struct gh__request_params *params,
 
 	strbuf_addstr(&region, tr2_label);
 	strbuf_addstr(&region, gh__server_type_label[params->server_type]);
-	trace2_region_enter("gvfs-helper", region.buf, NULL);
+	trace2_region_enter(TR2_CAT, region.buf, NULL);
 
 	if (gh__cmd_opts.show_progress)
 		progress = start_progress(the_repository, progress_msg, duration);
@@ -2206,7 +2618,7 @@ static void do_throttle_spin(struct gh__request_params *params,
 	display_progress(progress, duration);
 	stop_progress(&progress);
 
-	trace2_region_leave("gvfs-helper", region.buf, NULL);
+	trace2_region_leave(TR2_CAT, region.buf, NULL);
 	strbuf_release(&region);
 }
 
@@ -2368,11 +2780,7 @@ static void do_req(const char *url_base,
 		if (params->tempfile)
 			delete_tempfile(&params->tempfile);
 
-		if (params->b_is_post)
-			create_tempfile_for_packfile(params, status);
-
-		create_tempfile_for_loose(params, status);
-
+		my_create_tempfile(status, 1, NULL, &params->tempfile, NULL, NULL);
 		if (!params->tempfile || status->ec != GH__ERROR_CODE__OK)
 			return;
 	} else {
@@ -2636,6 +3044,7 @@ static void do__http_get__gvfs_config(struct gh__response_status *status,
 	/* cache-servers do not handle gvfs/config REST calls */
 	params.b_permit_cache_server_if_defined = 0;
 	params.buffer = config_data;
+	params.objects_mode = GH__OBJECTS_MODE__NONE;
 
 	params.object_count = 1; /* a bit of a lie */
 
@@ -2700,6 +3109,7 @@ static void do__http_get__gvfs_object(struct gh__response_status *status,
 	params.b_is_post = 0;
 	params.b_write_to_file = 1;
 	params.b_permit_cache_server_if_defined = 1;
+	params.objects_mode = GH__OBJECTS_MODE__GET;
 
 	params.object_count = 1;
 
@@ -2756,6 +3166,7 @@ static void do__http_post__gvfs_objects(struct gh__response_status *status,
 	params.b_is_post = 1;
 	params.b_write_to_file = 1;
 	params.b_permit_cache_server_if_defined = 1;
+	params.objects_mode = GH__OBJECTS_MODE__POST;
 
 	params.post_payload = &jw_req.json;
 
@@ -2790,6 +3201,126 @@ static void do__http_post__gvfs_objects(struct gh__response_status *status,
 
 	gh__request_params__release(&params);
 	jw_release(&jw_req);
+}
+
+struct find_last_data {
+	timestamp_t timestamp;
+	int nr_files;
+};
+
+static void cb_find_last(const char *full_path UNUSED, size_t full_path_len UNUSED,
+			 const char *file_path, void *void_data)
+{
+	struct find_last_data *data = void_data;
+	const char *val;
+	timestamp_t t;
+
+	if (!skip_prefix(file_path, "prefetch-", &val))
+		return;
+	if (!ends_with(val, ".pack"))
+		return;
+
+	data->nr_files++;
+
+	/*
+	 * We expect prefetch packfiles named like:
+	 *
+	 *     prefetch-<seconds>-<checksum>.pack
+	 */
+	t = strtol(val, NULL, 10);
+
+	data->timestamp = MY_MAX(t, data->timestamp);
+}
+
+/*
+ * Find the server timestamp on the last prefetch packfile that
+ * we have in the ODB.
+ *
+ * TODO I'm going to assume that all prefetch packs are created
+ * TODO equal and take the one with the largest t value.
+ * TODO
+ * TODO Or should we look for one marked with .keep ?
+ *
+ * TODO Alternatively, should we maybe get the 2nd largest?
+ * TODO (Or maybe subtract an hour delta from the largest?)
+ * TODO
+ * TODO Since each cache-server maintains its own set of prefetch
+ * TODO packs (such that 2 requests may hit 2 different
+ * TODO load-balanced servers and get different answers (with or
+ * TODO without clock-skew issues)), is it possible for us to miss
+ * TODO the absolute fringe of new commits and trees?
+ * TODO
+ * TODO That is, since the cache-server generates hourly prefetch
+ * TODO packs, we could do a prefetch and be up-to-date, but then
+ * TODO do the main fetch and hit a different cache/main server
+ * TODO and be behind by as much as an hour and have to demand-
+ * TODO load the commits/trees.
+ *
+ * TODO Alternatively, should we compare the last timestamp found
+ * TODO with "now" and silently do nothing if within an epsilon?
+ */
+static void find_last_prefetch_timestamp(timestamp_t *last)
+{
+	struct find_last_data data;
+
+	memset(&data, 0, sizeof(data));
+
+	for_each_file_in_pack_dir(gh__global.buf_odb_path.buf, cb_find_last, &data);
+
+	*last = data.timestamp;
+}
+
+/*
+ * Call "gvfs/prefetch[?lastPackTimestamp=<secondsSinceEpoch>]" REST API to
+ * fetch a series of packfiles and write them to the ODB.
+ *
+ * Return a list of packfile names.
+ */
+static void do__http_get__gvfs_prefetch(struct gh__response_status *status,
+					timestamp_t seconds_since_epoch,
+					struct string_list *result_list)
+{
+	struct gh__request_params params = GH__REQUEST_PARAMS_INIT;
+	struct strbuf component_url = STRBUF_INIT;
+
+	gh__response_status__zero(status);
+
+	strbuf_addstr(&component_url, "gvfs/prefetch");
+
+	if (!seconds_since_epoch)
+		find_last_prefetch_timestamp(&seconds_since_epoch);
+	if (seconds_since_epoch)
+		strbuf_addf(&component_url, "?lastPackTimestamp=%"PRItime,
+			    seconds_since_epoch);
+
+	params.b_is_post = 0;
+	params.b_write_to_file = 1;
+	params.b_permit_cache_server_if_defined = 1;
+	params.objects_mode = GH__OBJECTS_MODE__PREFETCH;
+
+	params.object_count = -1;
+
+	params.result_list = result_list;
+
+	params.headers = http_copy_default_headers();
+	params.headers = curl_slist_append(params.headers,
+					   "X-TFS-FedAuthRedirect: Suppress");
+	params.headers = curl_slist_append(params.headers,
+					   "Pragma: no-cache");
+	params.headers = curl_slist_append(params.headers,
+					   "Accept: application/x-gvfs-timestamped-packfiles-indexes");
+
+	if (gh__cmd_opts.show_progress)
+		strbuf_addf(&params.progress_base_phase3_msg,
+			    "Prefetch %"PRItime" (%s)",
+			    seconds_since_epoch,
+			    show_date(seconds_since_epoch, 0,
+				      DATE_MODE(ISO8601)));
+
+	do_req__with_fallback(component_url.buf, &params, status);
+
+	gh__request_params__release(&params);
+	strbuf_release(&component_url);
 }
 
 /*
@@ -3095,7 +3626,83 @@ static enum gh__error_code do_sub_cmd__post(int argc, const char **argv)
 }
 
 /*
- * Handle the 'objects.get' and 'objects.post' verbs in "server mode".
+ * Interpret the given string as a timestamp and compute an absolute
+ * UTC-seconds-since-epoch value (and without TZ).
+ *
+ * Note that the gvfs/prefetch API only accepts seconds since epoch,
+ * so that is all we really need here. But there is a tradition of
+ * various Git commands allowing a variety of formats for args like
+ * this.  For example, see the `--date` arg in `git commit`.  We allow
+ * these other forms mainly for testing purposes.
+ */
+static int my_parse_since(const char *since, timestamp_t *p_timestamp)
+{
+	int offset = 0;
+	int errors = 0;
+	unsigned long t;
+
+	if (!parse_date_basic(since, p_timestamp, &offset))
+		return 0;
+
+	t = approxidate_careful(since, &errors);
+	if (!errors) {
+		*p_timestamp = t;
+		return 0;
+	}
+
+	return -1;
+}
+
+/*
+ * Ask the server for all available packfiles -or- all available since
+ * the given timestamp.
+ */
+static enum gh__error_code do_sub_cmd__prefetch(int argc, const char **argv)
+{
+	static const char *since_str;
+	static struct option prefetch_options[] = {
+		OPT_STRING(0, "since", &since_str, N_("since"), N_("seconds since epoch")),
+		OPT_END(),
+	};
+
+	struct gh__response_status status = GH__RESPONSE_STATUS_INIT;
+	struct string_list result_list = STRING_LIST_INIT_DUP;
+	enum gh__error_code ec = GH__ERROR_CODE__OK;
+	timestamp_t seconds_since_epoch = 0;
+	size_t k;
+
+	trace2_cmd_mode("prefetch");
+
+	if (argc > 1 && !strcmp(argv[1], "-h"))
+		usage_with_options(prefetch_usage, prefetch_options);
+
+	argc = parse_options(argc, argv, NULL, prefetch_options, prefetch_usage, 0);
+	if (since_str && *since_str) {
+		if (my_parse_since(since_str, &seconds_since_epoch))
+			die("could not parse 'since' field");
+	}
+
+	finish_init(1);
+
+	do__http_get__gvfs_prefetch(&status, seconds_since_epoch, &result_list);
+
+	ec = status.ec;
+
+	for (k = 0; k < result_list.nr; k++)
+		printf("%s\n", result_list.items[k].string);
+
+	if (ec != GH__ERROR_CODE__OK)
+		error("prefetch: %s", status.error_message.buf);
+
+	gh__response_status__release(&status);
+	string_list_clear(&result_list, 0);
+
+	return ec;
+}
+
+/*
+ * Handle the 'objects.get' and 'objects.post' and 'objects.prefetch'
+ * verbs in "server mode".
  *
  * Only call error() and set ec for hard errors where we cannot
  * communicate correctly with the foreground client process.  Pass any
@@ -3115,45 +3722,73 @@ static enum gh__error_code do_server_subprocess__objects(const char *verb_line)
 	size_t k;
 	enum gh__objects_mode objects_mode;
 	unsigned long nr_oid_total = 0;
+	timestamp_t seconds_since_epoch = 0;
 
 	if (!strcmp(verb_line, "objects.get"))
 		objects_mode = GH__OBJECTS_MODE__GET;
 	else if (!strcmp(verb_line, "objects.post"))
 		objects_mode = GH__OBJECTS_MODE__POST;
+	else if (!strcmp(verb_line, "objects.prefetch"))
+		objects_mode = GH__OBJECTS_MODE__PREFETCH;
 	else {
 		error("server: unexpected objects-mode verb '%s'", verb_line);
 		ec = GH__ERROR_CODE__SUBPROCESS_SYNTAX;
 		goto cleanup;
 	}
 
-	while (1) {
-		len = packet_read_line_gently(0, NULL, &line);
-		if (len < 0 || !line)
-			break;
+	switch (objects_mode) {
+	case GH__OBJECTS_MODE__GET:
+	case GH__OBJECTS_MODE__POST:
+		while (1) {
+			len = packet_read_line_gently(0, NULL, &line);
+			if (len < 0 || !line)
+				break;
 
-		if (get_oid_hex(line, &oid)) {
-			error("server: invalid oid syntax '%s'", line);
-			ec = GH__ERROR_CODE__SUBPROCESS_SYNTAX;
+			if (get_oid_hex(line, &oid)) {
+				error("server: invalid oid syntax '%s'", line);
+				ec = GH__ERROR_CODE__SUBPROCESS_SYNTAX;
+				goto cleanup;
+			}
+
+			if (!oidset_insert(&oids, &oid))
+				nr_oid_total++;
+		}
+
+		if (!nr_oid_total) {
+			/* if zero objects requested, trivial OK. */
+			if (packet_write_fmt_gently(1, "ok\n")) {
+				error("server: cannot write 'get' result to client");
+				ec = GH__ERROR_CODE__SUBPROCESS_SYNTAX;
+			} else
+				ec = GH__ERROR_CODE__OK;
 			goto cleanup;
 		}
 
-		if (!oidset_insert(&oids, &oid))
-			nr_oid_total++;
-	}
+		if (objects_mode == GH__OBJECTS_MODE__GET)
+			do__http_get__fetch_oidset(&status, &oids,
+						   nr_oid_total, &result_list);
+		else
+			do__http_post__fetch_oidset(&status, &oids,
+						    nr_oid_total, &result_list);
+		break;
 
-	if (!nr_oid_total) {
-		if (packet_write_fmt_gently(1, "ok\n")) {
-			error("server: cannot write 'get' result to client");
-			ec = GH__ERROR_CODE__SUBPROCESS_SYNTAX;
-		} else
-			ec = GH__ERROR_CODE__OK;
-		goto cleanup;
-	}
+	case GH__OBJECTS_MODE__PREFETCH:
+		/* get optional timestamp line */
+		while (1) {
+			len = packet_read_line_gently(0, NULL, &line);
+			if (len < 0 || !line)
+				break;
 
-	if (objects_mode == GH__OBJECTS_MODE__GET)
-		do__http_get__fetch_oidset(&status, &oids, nr_oid_total, &result_list);
-	else
-		do__http_post__fetch_oidset(&status, &oids, nr_oid_total, &result_list);
+			seconds_since_epoch = strtoul(line, NULL, 10);
+		}
+
+		do__http_get__gvfs_prefetch(&status, seconds_since_epoch,
+					    &result_list);
+		break;
+
+	default:
+		BUG("unexpected object_mode in switch '%d'", objects_mode);
+	}
 
 	/*
 	 * Write pathname of the ODB where we wrote all of the objects
@@ -3409,14 +4044,18 @@ static enum gh__error_code do_sub_cmd(int argc, const char **argv)
 	if (!strcmp(argv[0], "config"))
 		return do_sub_cmd__config(argc, argv);
 
+	if (!strcmp(argv[0], "prefetch"))
+		return do_sub_cmd__prefetch(argc, argv);
+
+	/*
+	 * server mode is for talking with git.exe via the "gh_client_" API
+	 * using packet-line format.
+	 */
 	if (!strcmp(argv[0], "server"))
 		return do_sub_cmd__server(argc, argv);
 
 	if (!strcmp(argv[0], "curl-version"))
 		return do_sub_cmd__curl_version(argc, argv);
-
-	// TODO have "test" mode that could be used to drive
-	// TODO unit testing.
 
 	return GH__ERROR_CODE__USAGE;
 }
