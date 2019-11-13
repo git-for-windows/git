@@ -73,7 +73,7 @@ get_list_of_oids () {
 
 	if test $# -eq 1
 	then
-		actual_nr=$(( $(wc -l <"$OIDS_FILE") ))
+		actual_nr=$(wc -l <"$OIDS_FILE")
 		if test $actual_nr -lt $1
 		then
 			echo "get_list_of_oids: insufficient data.  Need $1 OIDs."
@@ -93,7 +93,7 @@ get_list_of_commit_and_tree_oids () {
 
 	if test $# -eq 1
 	then
-		actual_nr=$(( $(wc -l <"$OIDS_CT_FILE") ))
+		actual_nr=$(wc -l <"$OIDS_CT_FILE")
 		if test $actual_nr -lt $1
 		then
 			echo "get_list_of_commit_and_tree_oids: insufficient data.  Need $1 OIDs."
@@ -122,6 +122,8 @@ test_expect_success 'setup repos' '
 	#
 	# test_commit() creates commits, trees, tags, and blobs and leave
 	# them loose.
+	#
+	test_config gc.auto 0 &&
 	#
 	test_commit -C "$REPO_SRC" file1.txt &&
 	test_commit -C "$REPO_SRC" file2.txt &&
@@ -288,7 +290,7 @@ verify_connection_count () {
 		expected_nr=1
 	fi
 
-	actual_nr=$(( $(grep "Connection from" "$SERVER_LOG" | wc -l) ))
+	actual_nr=$(grep -c "Connection from" "$SERVER_LOG")
 
 	if test $actual_nr -ne $expected_nr
 	then
@@ -339,7 +341,7 @@ verify_received_packfile_count () {
 		expected_nr=1
 	fi
 
-	actual_nr=$(( $(grep "packfile " OUT.output | wc -l) ))
+	actual_nr=$(grep -c "packfile " <OUT.output)
 
 	if test $actual_nr -ne $expected_nr
 	then
