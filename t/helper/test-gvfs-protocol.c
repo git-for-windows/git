@@ -500,8 +500,7 @@ done:
  *     write_object_file_prepare()
  *     write_loose_object()
  */
-static enum worker_result send_loose_object(const struct object_info *oi,
-					    const struct object_id *oid,
+static enum worker_result send_loose_object(const struct object_id *oid,
 					    int fd)
 {
 #define MAX_HEADER_LEN 32
@@ -514,6 +513,44 @@ static enum worker_result send_loose_object(const struct object_info *oi,
 	struct git_hash_ctx c;
 	int object_header_len;
 	int ret;
+	unsigned flags = 0;
+	void *content;
+	unsigned long size;
+	enum object_type type;
+	struct object_info oi = OBJECT_INFO_INIT;
+
+	/*
+	 * Since `test-gvfs-protocol` is mocking a real GVFS server (cache or
+	 * main), we don't want a request for a missing object to cause the
+	 * implicit dynamic fetch mechanism to try to fault-it-in (and cause
+	 * our call to odb_read_object_info_extended() to launch another instance
+	 * of `gvfs-helper` to magically fetch it (which would connect to a
+	 * new instance of `test-gvfs-protocol`)).
+	 *
+	 * Rather, we want a missing object to fail, so we can respond with
+	 * a 404, for example.
+	 */
+	flags |= OBJECT_INFO_FOR_PREFETCH;
+	flags |= OBJECT_INFO_LOOKUP_REPLACE;
+
+	oi.typep = &type;
+	oi.sizep = &size;
+	oi.contentp = &content;
+
+	if (odb_read_object_info_extended(the_repository->objects, oid, &oi, flags)) {
+		logerror("Could not find OID: '%s'", oid_to_hex(oid));
+		free(content);
+		return send_http_error(1, 404, "Not Found", -1, WR_OK);
+	}
+
+	if (string_list_has_string(&mayhem_list, "http_404")) {
+		logmayhem("http_404");
+		free(content);
+		return send_http_error(1, 404, "Not Found", -1, WR_MAYHEM);
+	}
+
+	trace2_printf("%s: OBJECT type=%d len=%ld '%.40s'", TR2_CAT,
+		      type, size, (const char *)content);
 
 	/*
 	 * We are blending several somewhat independent concepts here:
@@ -554,6 +591,7 @@ static enum worker_result send_loose_object(const struct object_info *oi,
 
 	if (write_in_full(fd, response_header.buf, response_header.len) < 0) {
 		logerror("unable to write response header");
+		free(content);
 		return WR_IO_ERROR;
 	}
 
@@ -562,20 +600,21 @@ static enum worker_result send_loose_object(const struct object_info *oi,
 
 	if (string_list_has_string(&mayhem_list, "close_write")) {
 		logmayhem("close_write");
+		free(content);
 		return WR_MAYHEM | WR_HANGUP;
 	}
 
 	/* [1a] */
 	object_header_len = 1 + xsnprintf(object_header, MAX_HEADER_LEN,
 					  "%s %"PRIuMAX,
-					  type_name(*oi->typep),
-					  (uintmax_t)*oi->sizep);
+					  type_name(*oi.typep),
+					  (uintmax_t)*oi.sizep);
 
 	/* [2] */
 	memset(&oid_check, 0, sizeof(oid_check));
 	the_hash_algo->init_fn(&c);
 	the_hash_algo->update_fn(&c, object_header, object_header_len);
-	the_hash_algo->update_fn(&c, *oi->contentp, *oi->sizep);
+	the_hash_algo->update_fn(&c, *oi.contentp, *oi.sizep);
 	the_hash_algo->final_fn(oid_check.hash, &c);
 	if (!oideq(oid, &oid_check))
 		BUG("send_loose_object[2]: invalid construction '%s' '%s'",
@@ -595,8 +634,8 @@ static enum worker_result send_loose_object(const struct object_info *oi,
 	the_hash_algo->update_fn(&c, object_header, object_header_len);
 
 	/* [3, 1b, 5, 6] */
-	stream.next_in = *oi->contentp;
-	stream.avail_in = *oi->sizep;
+	stream.next_in = *oi.contentp;
+	stream.avail_in = *oi.sizep;
 	do {
 		enum worker_result wr;
 		unsigned char *in0 = stream.next_in;
@@ -606,6 +645,7 @@ static enum worker_result send_loose_object(const struct object_info *oi,
 		/* [5] */
 		wr = send_chunk(fd, compressed, stream.next_out - compressed);
 		if (wr & WR_STOP_THE_MUSIC) {
+			free(content);
 			return wr;
 		}
 
@@ -628,6 +668,7 @@ static enum worker_result send_loose_object(const struct object_info *oi,
 		    oid_to_hex(oid), oid_to_hex(&oid_check));
 
 	/* [5] */
+	free(content);
 	return send_final_chunk(fd);
 }
 
@@ -642,25 +683,6 @@ static enum worker_result send_loose_object(const struct object_info *oi,
 static enum worker_result do__gvfs_objects__get(struct req *req)
 {
 	struct object_id oid;
-	void *content;
-	unsigned long size;
-	enum object_type type;
-	struct object_info oi = OBJECT_INFO_INIT;
-	unsigned flags = 0;
-
-	/*
-	 * Since `test-gvfs-protocol` is mocking a real GVFS server (cache or
-	 * main), we don't want a request for a missing object to cause the
-	 * implicit dynamic fetch mechanism to try to fault-it-in (and cause
-	 * our call to oid_object_info_extended() to launch another instance
-	 * of `gvfs-helper` to magically fetch it (which would connect to a
-	 * new instance of `test-gvfs-protocol`)).
-	 *
-	 * Rather, we want a missing object to fail, so we can respond with
-	 * a 404, for example.
-	 */
-	flags |= OBJECT_INFO_FOR_PREFETCH;
-	flags |= OBJECT_INFO_LOOKUP_REPLACE;
 
 	if (!req->slash_args.len ||
 	    get_oid_hex(req->slash_args.buf, &oid)) {
@@ -671,29 +693,13 @@ static enum worker_result do__gvfs_objects__get(struct req *req)
 
 	trace2_printf("%s: GET %s", TR2_CAT, oid_to_hex(&oid));
 
-	oi.typep = &type;
-	oi.sizep = &size;
-	oi.contentp = &content;
-
-	if (oid_object_info_extended(the_repository, &oid, &oi, flags)) {
-		logerror("Could not find OID: '%s'", oid_to_hex(&oid));
-		return send_http_error(1, 404, "Not Found", -1, WR_OK);
-	}
-
-	if (string_list_has_string(&mayhem_list, "http_404")) {
-		logmayhem("http_404");
-		return send_http_error(1, 404, "Not Found", -1, WR_MAYHEM);
-	}
-
-	trace2_printf("%s: OBJECT type=%d len=%ld '%.40s'", TR2_CAT,
-		      type, size, (const char *)content);
-
-	return send_loose_object(&oi, &oid, 1);
+	return send_loose_object(&oid, 1);
 }
 
 static enum worker_result read_json_post_body(
 	struct req *req,
-	struct oidset *oids)
+	struct oidset *oids,
+	int *nr_oids)
 {
 	struct object_id oid;
 	struct string_list_item *item;
@@ -762,7 +768,8 @@ static enum worker_result read_json_post_body(
 
 		if (get_oid_hex(pstart, &oid))
 			goto could_not_parse_json;
-		oidset_insert(oids, &oid);
+		if (!oidset_insert(oids, &oid))
+			*nr_oids += 1;
 		trace2_printf("%s: POST %s", TR2_CAT, oid_to_hex(&oid));
 
 		/* Eat trailing whitespace after trailing DQUOTE */
@@ -806,16 +813,6 @@ could_not_parse_json:
  *
  * My assumption here is that we're not testing with GBs
  * of data....
- *
- * Note: The GVFS Protocol POST verb behaves like GET for
- * Note: non-commit objects (in that it just returns the
- * Note: requested object), but for commit objects POST
- * Note: *also* returns all trees referenced by the commit.
- * Note:
- * Note: Since the goal of this test is to confirm that
- * Note: gvfs-helper can request and receive a packfile
- * Note: *at all*, I'm not going to blur the issue and
- * Note: support the extra semantics for commit objects.
  */
 static enum worker_result get_packfile_from_oids(
 	struct oidset *oids,
@@ -905,21 +902,99 @@ done:
 	return wr;
 }
 
+/*
+ * The GVFS Protocol POST verb behaves like GET for non-commit objects
+ * (in that it just returns the requested object), but for commit
+ * objects POST *also* returns all trees referenced by the commit.
+ *
+ * The goal of this test is to confirm that:
+ * [] `gvfs-helper post` can request and receive a packfile at all.
+ * [] `gvfs-helper post` can handle getting either a packfile or a
+ *                       loose object.
+ *
+ * Therefore, I'm not going to blur the issue and support the custom
+ * semantics for commit objects.
+ *
+ * If one of the OIDs is a commit, `git pack-objects` will completely
+ * walk the trees and blobs for it and we get that for free.  This is
+ * good enough for our testing.
+ *
+ * TODO A proper solution would separate the commit objects and do a
+ * TODO `rev-list --filter=blobs:none` for them (or use the internal
+ * TODO list-objects API) and a regular enumeration for the non-commit
+ * TODO objects.  And build an new oidset with union of those and then
+ * TODO call pack-objects on it instead.
+ * TODO
+ * TODO But that's too much trouble for now.
+ *
+ * For now, we just need to know if the post asks for a single object,
+ * is it a commit or non-commit.  That is sufficient to know whether
+ * we should send a packfile or loose object.
+*/
+static enum worker_result classify_oids_in_post(
+	struct oidset *oids, int nr_oids, int *need_packfile)
+{
+	struct oidset_iter iter;
+	struct object_id *oid;
+	enum object_type type;
+	struct object_info oi = OBJECT_INFO_INIT;
+	unsigned flags = 0;
+
+	if (nr_oids > 1) {
+		*need_packfile = 1;
+		return WR_OK;
+	}
+
+	/* disable missing-object faulting */
+	flags |= OBJECT_INFO_FOR_PREFETCH;
+	flags |= OBJECT_INFO_LOOKUP_REPLACE;
+
+	oi.typep = &type;
+
+	oidset_iter_init(oids, &iter);
+	while ((oid = oidset_iter_next(&iter))) {
+		if (!odb_read_object_info_extended(the_repository->objects, oid, &oi, flags) &&
+		    type == OBJ_COMMIT) {
+			*need_packfile = 1;
+			return WR_OK;
+		}
+	}
+
+	*need_packfile = 0;
+	return WR_OK;
+}
+
 static enum worker_result do__gvfs_objects__post(struct req *req)
 {
 	struct oidset oids = OIDSET_INIT;
 	struct strbuf packfile = STRBUF_INIT;
 	enum worker_result wr;
+	int nr_oids = 0;
+	int need_packfile = 0;
 
-	wr = read_json_post_body(req, &oids);
+	wr = read_json_post_body(req, &oids, &nr_oids);
 	if (wr & WR_STOP_THE_MUSIC)
 		goto done;
 
-	wr = get_packfile_from_oids(&oids, &packfile);
+	wr = classify_oids_in_post(&oids, nr_oids, &need_packfile);
 	if (wr & WR_STOP_THE_MUSIC)
 		goto done;
 
-	wr = send_packfile_from_buffer(&packfile);
+	if (!need_packfile) {
+		struct oidset_iter iter;
+		struct object_id *oid;
+
+		oidset_iter_init(&oids, &iter);
+		oid = oidset_iter_next(&iter);
+
+		wr = send_loose_object(oid, 1);
+	} else {
+		wr = get_packfile_from_oids(&oids, &packfile);
+		if (wr & WR_STOP_THE_MUSIC)
+			goto done;
+
+		wr = send_packfile_from_buffer(&packfile);
+	}
 
 done:
 	oidset_clear(&oids);

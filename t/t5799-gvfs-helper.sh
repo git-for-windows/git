@@ -59,6 +59,7 @@ OIDS_FILE="$PWD"/oid_list.txt
 OIDS_CT_FILE="$PWD"/oid_ct_list.txt
 OIDS_BLOBS_FILE="$PWD"/oids_blobs_file.txt
 OID_ONE_BLOB_FILE="$PWD"/oid_one_blob_file.txt
+OID_ONE_COMMIT_FILE="$PWD"/oid_one_commit_file.txt
 
 # Get a list of available OIDs in repo_src so that we can try to fetch
 # them and so that we don't have to hard-code a list of known OIDs.
@@ -99,6 +100,11 @@ get_list_of_commit_and_tree_oids () {
 			return 1
 		fi
 	fi
+	return 0
+}
+
+get_one_commit_oid () {
+	git -C "$REPO_SRC" rev-parse HEAD >"$OID_ONE_COMMIT_FILE"
 	return 0
 }
 
@@ -161,7 +167,8 @@ test_expect_success 'setup repos' '
 	#
 	get_list_of_oids 30 &&
 	get_list_of_commit_and_tree_oids 30 &&
-	get_list_of_blobs_oids
+	get_list_of_blobs_oids &&
+	get_one_commit_oid
 '
 
 stop_gvfs_protocol_server () {
@@ -508,6 +515,73 @@ test_expect_success 'basic: POST origin blobs' '
 	verify_received_packfile_count 1 &&
 
 	verify_objects_in_shared_cache "$OIDS_BLOBS_FILE" &&
+	verify_connection_count 1
+'
+
+# Request a single blob via POST.  Per the GVFS Protocol, the server
+# should implicitly send a loose object for it.  Confirm that.
+#
+test_expect_success 'basic: POST-request a single blob' '
+	test_when_finished "per_test_cleanup" &&
+	start_gvfs_protocol_server &&
+
+	# Connect to the origin server (w/o auth) and request a single
+	# blob via POST.
+	#
+	git -C "$REPO_T1" gvfs-helper \
+		--cache-server=disable \
+		--remote=origin \
+		--no-progress \
+		post \
+		<"$OID_ONE_BLOB_FILE" >OUT.output &&
+
+	# Stop the server to prevent the verification steps from faulting-in
+	# any missing objects.
+	#
+	stop_gvfs_protocol_server &&
+
+	# gvfs-helper prints a "loose <oid>" message for each received
+	# loose object.
+	#
+	sed "s/loose //" <OUT.output | sort >OUT.actual &&
+	test_cmp "$OID_ONE_BLOB_FILE" OUT.actual &&
+
+	verify_connection_count 1
+'
+
+# Request a single commit via POST.  Per the GVFS Protocol, the server
+# should implicitly send us a packfile containing the commit and the
+# trees it references.  Confirm that properly handled the receipt of
+# the packfile.  (Here, we are testing that asking for a single object
+# yields a packfile rather than a loose object.)
+#
+# We DO NOT verify that the packfile contains commits/trees and no blobs
+# because our test helper doesn't implement the filtering.
+#
+test_expect_success 'basic: POST-request a single commit' '
+	test_when_finished "per_test_cleanup" &&
+	start_gvfs_protocol_server &&
+
+	# Connect to the origin server (w/o auth) and request a single
+	# commit via POST.
+	#
+	git -C "$REPO_T1" gvfs-helper \
+		--cache-server=disable \
+		--remote=origin \
+		--no-progress \
+		post \
+		<"$OID_ONE_COMMIT_FILE" >OUT.output &&
+
+	# Stop the server to prevent the verification steps from faulting-in
+	# any missing objects.
+	#
+	stop_gvfs_protocol_server &&
+
+	# gvfs-helper prints a "packfile <path>" message for each received
+	# packfile.
+	#
+	verify_received_packfile_count 1 &&
+
 	verify_connection_count 1
 '
 
