@@ -811,6 +811,9 @@ core.gvfs::
 		flag just blocks them from occurring at all.
 --
 
+core.useGvfsHelper::
+	TODO
+
 core.sparseCheckout::
 	Enable "sparse checkout" feature. See linkgit:git-sparse-checkout[1]
 	for more information.

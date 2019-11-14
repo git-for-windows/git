@@ -1,0 +1,5 @@
+gvfs.cache-server::
+	TODO
+
+gvfs.sharedcache::
+	TODO

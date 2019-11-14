@@ -6,4 +6,5 @@
 /git-upload-pack
 /scalar
 /test-fake-ssh
+/test-gvfs-protocol
 /test-tool

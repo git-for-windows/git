@@ -6,6 +6,7 @@
 #include "environment.h"
 #include "gettext.h"
 #include "gvfs.h"
+#include "gvfs-helper-client.h"
 #include "hex.h"
 #include "hook.h"
 #include "khash.h"
@@ -90,6 +91,8 @@ int odb_mkstemp(struct object_database *odb,
 	return xmkstemp_mode(temp_filename->buf, mode);
 }
 
+static int gvfs_matched_shared_cache_to_alternate;
+
 /*
  * Return non-zero iff the path is usable as an alternate object database.
  */
@@ -97,7 +100,54 @@ static int alt_odb_usable(struct object_database *o,
 			  struct strbuf *path,
 			  const char *normalized_objdir, khiter_t *pos)
 {
+	extern struct strbuf gvfs_shared_cache_pathname;
 	int r;
+
+	if (!strbuf_cmp(path, &gvfs_shared_cache_pathname)) {
+		/*
+		 * `gvfs.sharedCache` is the preferred alternate that we
+		 * will use with `gvfs-helper.exe` to dynamically fetch
+		 * missing objects.  It is set during git_default_config().
+		 *
+		 * Make sure the directory exists on disk before we let the
+		 * stock code discredit it.
+		 */
+		struct strbuf buf_pack_foo = STRBUF_INIT;
+		enum scld_error scld;
+
+		/*
+		 * Force create the "<odb>" and "<odb>/pack" directories, if
+		 * not present on disk.  Append an extra bogus directory to
+		 * get safe_create_leading_directories() to see "<odb>/pack"
+		 * as a leading directory of something deeper (which it
+		 * won't create).
+		 */
+		strbuf_addf(&buf_pack_foo, "%s/pack/foo", path->buf);
+
+		scld = safe_create_leading_directories(o->repo, buf_pack_foo.buf);
+		if (scld != SCLD_OK && scld != SCLD_EXISTS) {
+			error_errno(_("could not create shared-cache ODB '%s'"),
+				    gvfs_shared_cache_pathname.buf);
+
+			strbuf_release(&buf_pack_foo);
+
+			/*
+			 * Pretend no shared-cache was requested and
+			 * effectively fallback to ".git/objects" for
+			 * fetching missing objects.
+			 */
+			strbuf_release(&gvfs_shared_cache_pathname);
+			return 0;
+		}
+
+		/*
+		 * We know that there is an alternate (either from
+		 * .git/objects/info/alternates or from a memory-only
+		 * entry) associated with the shared-cache directory.
+		 */
+		gvfs_matched_shared_cache_to_alternate++;
+		strbuf_release(&buf_pack_foo);
+	}
 
 	/* Detect cases where alternate disappeared */
 	if (!is_directory(path->buf)) {
@@ -599,12 +649,40 @@ int odb_for_each_alternate(struct object_database *odb,
 
 void odb_prepare_alternates(struct object_database *odb)
 {
+	extern struct strbuf gvfs_shared_cache_pathname;
 	if (odb->loaded_alternates)
 		return;
 
 	link_alt_odb_entries(odb, odb->alternate_db, PATH_SEP, NULL, 0);
 
 	read_info_alternates(odb, odb->sources->path, 0);
+
+	if (gvfs_shared_cache_pathname.len &&
+	    !gvfs_matched_shared_cache_to_alternate) {
+		/*
+		 * There is no entry in .git/objects/info/alternates for
+		 * the requested shared-cache directory.  Therefore, the
+		 * odb-list does not contain this directory.
+		 *
+		 * Force this directory into the odb-list as an in-memory
+		 * alternate.  Implicitly create the directory on disk, if
+		 * necessary.
+		 *
+		 * See GIT_ALTERNATE_OBJECT_DIRECTORIES for another example
+		 * of this kind of usage.
+		 *
+		 * Note: This has the net-effect of allowing Git to treat
+		 * `gvfs.sharedCache` as an unofficial alternate.  This
+		 * usage should be discouraged for compatbility reasons
+		 * with other tools in the overall Git ecosystem (that
+		 * won't know about this trick).  It would be much better
+		 * for us to update .git/objects/info/alternates instead.
+		 * The code here is considered a backstop.
+		 */
+		link_alt_odb_entries(odb, gvfs_shared_cache_pathname.buf,
+				     '\n', NULL, 0);
+	}
+
 	odb->loaded_alternates = 1;
 }
 
@@ -787,7 +865,7 @@ static int do_oid_object_info_extended(struct object_database *odb,
 	const struct object_id *real = oid;
 	int already_retried = 0;
 	int tried_hook = 0;
-
+	int tried_gvfs_helper = 0;
 
 	if (flags & OBJECT_INFO_LOOKUP_REPLACE)
 		real = lookup_replace_object(odb->repo, oid);
@@ -816,6 +894,8 @@ retry:
 	}
 
 	while (1) {
+		extern int core_use_gvfs_helper;
+
 		if (find_pack_entry(odb->repo, real, &e))
 			break;
 
@@ -823,13 +903,41 @@ retry:
 		if (!loose_object_info(odb->repo, real, oi, flags))
 			return 0;
 
+		if (core_use_gvfs_helper && !tried_gvfs_helper) {
+			enum gh_client__created ghc;
+
+			if (flags & OBJECT_INFO_SKIP_FETCH_OBJECT)
+				return -1;
+
+			gh_client__get_immediate(real, &ghc);
+			tried_gvfs_helper = 1;
+
+			/*
+			 * Retry the lookup IIF `gvfs-helper` created one
+			 * or more new packfiles or loose objects.
+			 */
+			if (ghc != GHC__CREATED__NOTHING)
+				continue;
+
+			/*
+			 * If `gvfs-helper` fails, we just want to return -1.
+			 * But allow the other providers to have a shot at it.
+			 * (At least until we have a chance to consolidate
+			 * them.)
+			 */
+		}
+
 		/* Not a loose object; someone else may have just packed it. */
 		if (!(flags & OBJECT_INFO_QUICK)) {
 			odb_reprepare(odb->repo->objects);
 			if (find_pack_entry(odb->repo, real, &e))
 				break;
 			if (gvfs_virtualize_objects(odb->repo) && !tried_hook) {
+				// TODO Assert or at least trace2 if gvfs-helper
+				// TODO was tried and failed and then read-object-hook
+				// TODO is successful at getting this object.
 				tried_hook = 1;
+				// TODO BUG? Should 'oid' be 'real' ?
 				if (!read_object_process(odb->repo, oid))
 					goto retry;
 			}

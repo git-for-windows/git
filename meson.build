@@ -353,6 +353,7 @@ libgit_sources = [
   'graph.c',
   'grep.c',
   'gvfs.c',
+  'gvfs-helper-client.c',
   'hash-lookup.c',
   'hash.c',
   'hashmap.c',
@@ -1874,6 +1875,13 @@ if curl.found()
     )
   endif
 
+  test_dependencies += executable('git-gvfs-helper',
+    sources: 'gvfs-helper.c',
+    dependencies: [libgit_curl],
+    install: true,
+    install_dir: get_option('libexecdir') / 'git-core',
+  )
+
   foreach alias : [ 'git-remote-https', 'git-remote-ftp', 'git-remote-ftps' ]
     test_dependencies += executable(alias,
       sources: 'remote-curl.c',
@@ -1908,6 +1916,7 @@ endforeach
 
 foreach symlink : [
   'git',
+  'git-gvfs-helper',
   'git-receive-pack',
   'git-shell',
   'git-upload-archive',

@@ -1846,6 +1846,13 @@ struct oidtree *odb_loose_cache(struct odb_source *source,
 	return source->loose_objects_cache;
 }
 
+void odb_loose_cache_add_new_oid(struct odb_source *source,
+				 const struct object_id *oid)
+{
+	struct oidtree *cache = odb_loose_cache(source, oid);
+	append_loose_object(oid, NULL, cache);
+}
+
 void odb_clear_loose_cache(struct odb_source *source)
 {
 	oidtree_clear(source->loose_objects_cache);
