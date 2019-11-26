@@ -1890,6 +1890,7 @@ cleanup:
 
 static void my_finalize_packfile(struct gh__request_params *params,
 				 struct gh__response_status *status,
+				 int b_keep,
 				 const struct strbuf *temp_path_pack,
 				 const struct strbuf *temp_path_idx,
 				 struct strbuf *final_path_pack,
@@ -1907,6 +1908,21 @@ static void my_finalize_packfile(struct gh__request_params *params,
 			    final_path_pack->buf);
 		status->ec = GH__ERROR_CODE__COULD_NOT_INSTALL_PACKFILE;
 		return;
+	}
+
+	if (b_keep) {
+		struct strbuf keep = STRBUF_INIT;
+		int fd_keep;
+
+		strbuf_addbuf(&keep, final_path_pack);
+		strbuf_strip_suffix(&keep, ".pack");
+		strbuf_addstr(&keep, ".keep");
+
+		fd_keep = xopen(keep.buf, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+		if (fd_keep >= 0)
+			close(fd_keep);
+
+		strbuf_release(&keep);
 	}
 
 	if (params->result_list) {
@@ -1961,7 +1977,7 @@ static void install_packfile(struct gh__request_params *params,
 	create_final_packfile_pathnames("vfs", packfile_checksum.buf, NULL,
 					&final_path_pack, &final_path_idx,
 					&final_filename);
-	my_finalize_packfile(params, status,
+	my_finalize_packfile(params, status, 0,
 			     &temp_path_pack, &temp_path_idx,
 			     &final_path_pack, &final_path_idx,
 			     &final_filename);
@@ -2057,6 +2073,12 @@ struct ph {
 
 /*
  * Extract the next packfile from the multipack.
+ * Install {.pack, .idx, .keep} set.
+ *
+ * Mark each successfully installed prefetch pack as .keep it as installed
+ * in case we have errors decoding/indexing later packs within the received
+ * multipart file.  (A later pass can delete the unnecessary .keep files
+ * from this and any previous invocations.)
  */
 static void extract_packfile_from_multipack(
 	struct gh__request_params *params,
@@ -2153,7 +2175,7 @@ static void extract_packfile_from_multipack(
 
 	} else {
 		/*
-		 * Server send the .idx immediately after the .pack in the
+		 * Server sent the .idx immediately after the .pack in the
 		 * data stream.  I'm tempted to verify it, but that defeats
 		 * the purpose of having it cached...
 		 */
@@ -2176,7 +2198,7 @@ static void extract_packfile_from_multipack(
 					&final_filename);
 	strbuf_release(&buf_timestamp);
 
-	my_finalize_packfile(params, status,
+	my_finalize_packfile(params, status, 1,
 			     &temp_path_pack, &temp_path_idx,
 			     &final_path_pack, &final_path_idx,
 			     &final_filename);
@@ -2189,6 +2211,56 @@ done:
 	strbuf_release(&final_path_pack);
 	strbuf_release(&final_path_idx);
 	strbuf_release(&final_filename);
+}
+
+struct keep_files_data {
+	timestamp_t max_timestamp;
+	int pos_of_max;
+	struct string_list *keep_files;
+};
+
+static void cb_keep_files(const char *full_path, size_t full_path_len UNUSED,
+			  const char *file_path, void *void_data)
+{
+	struct keep_files_data *data = void_data;
+	const char *val;
+	timestamp_t t;
+
+	/*
+	 * We expect prefetch packfiles named like:
+	 *
+	 *     prefetch-<seconds>-<checksum>.keep
+	 */
+	if (!skip_prefix(file_path, "prefetch-", &val))
+		return;
+	if (!ends_with(val, ".keep"))
+		return;
+
+	t = strtol(val, NULL, 10);
+	if (t > data->max_timestamp) {
+		data->pos_of_max = data->keep_files->nr;
+		data->max_timestamp = t;
+	}
+
+	string_list_append(data->keep_files, full_path);
+}
+
+static void delete_stale_keep_files(
+	struct gh__request_params *params UNUSED,
+	struct gh__response_status *status UNUSED)
+{
+	struct string_list keep_files = STRING_LIST_INIT_DUP;
+	struct keep_files_data data = { 0, 0, &keep_files };
+	size_t k;
+
+	for_each_file_in_pack_dir(gh__global.buf_odb_path.buf,
+				  cb_keep_files, &data);
+	for (k = 0; k < keep_files.nr; k++) {
+		if ((ssize_t)k != data.pos_of_max)
+			unlink(keep_files.items[k].string);
+	}
+
+	string_list_clear(&keep_files, 0);
 }
 
 /*
@@ -2209,6 +2281,7 @@ static void install_prefetch(struct gh__request_params *params,
 	unsigned short np;
 	unsigned short k;
 	int fd = -1;
+	int nr_installed = 0;
 
 	struct strbuf temp_path_mp = STRBUF_INIT;
 
@@ -2253,8 +2326,12 @@ static void install_prefetch(struct gh__request_params *params,
 		display_progress(params->progress, k + 1);
 		if (status->ec != GH__ERROR_CODE__OK)
 			break;
+		nr_installed++;
 	}
 	stop_progress(&params->progress);
+
+	if (nr_installed)
+		delete_stale_keep_files(params, status);
 
 cleanup:
 	if (fd != -1)

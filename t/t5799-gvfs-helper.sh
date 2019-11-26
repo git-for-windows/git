@@ -390,6 +390,30 @@ verify_received_packfile_count () {
 	return 0
 }
 
+# Verify that we have exactly 1 prefetch .keep file.
+# Optionally, verify that it has the given timestamp.
+#
+verify_prefetch_keeps () {
+	count=$(( $(ls -1 "$SHARED_CACHE_T1"/pack/prefetch-*.keep | wc -l) ))
+	if test $count -ne 1
+	then
+		echo "verify_prefetch_keep_file_count: found $count, expected 1."
+		return 1
+	fi
+
+	if test $# -eq 1
+	then
+		count=$(( $(ls -1 "$SHARED_CACHE_T1"/pack/prefetch-$1-*.keep | wc -l) ))
+		if test $count -ne 1
+		then
+			echo "verify_prefetch_keep_file_count: did not find expected keep file."
+			return 1
+		fi
+	fi
+
+	return 0
+}
+
 per_test_cleanup () {
 	stop_gvfs_protocol_server
 
@@ -643,6 +667,7 @@ test_expect_success 'basic: PREFETCH w/o arg gets all' '
 	# packfile.
 	#
 	verify_received_packfile_count 3 &&
+	verify_prefetch_keeps 1200000000 &&
 
 	stop_gvfs_protocol_server &&
 	verify_connection_count 1
@@ -664,6 +689,7 @@ test_expect_success 'basic: PREFETCH w/ arg' '
 	# packfile.
 	#
 	verify_received_packfile_count 2 &&
+	verify_prefetch_keeps 1200000000 &&
 
 	stop_gvfs_protocol_server &&
 	verify_connection_count 1
@@ -686,6 +712,7 @@ test_expect_success 'basic: PREFETCH mayhem no_prefetch_idx' '
 	# packfile.
 	#
 	verify_received_packfile_count 2 &&
+	verify_prefetch_keeps 1200000000 &&
 
 	stop_gvfs_protocol_server &&
 	verify_connection_count 1
@@ -707,6 +734,7 @@ test_expect_success 'basic: PREFETCH up-to-date' '
 	# packfile.
 	#
 	verify_received_packfile_count 2 &&
+	verify_prefetch_keeps 1200000000 &&
 
 	# Ask again for any packfiles newer than what we have cached locally.
 	#
@@ -720,6 +748,7 @@ test_expect_success 'basic: PREFETCH up-to-date' '
 	# packfile.
 	#
 	verify_received_packfile_count 0 &&
+	verify_prefetch_keeps 1200000000 &&
 
 	stop_gvfs_protocol_server &&
 	verify_connection_count 2
