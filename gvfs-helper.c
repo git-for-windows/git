@@ -2464,25 +2464,25 @@ static void install_result(struct gh__request_params *params,
 			install_prefetch(params, status);
 			return;
 		}
-	}
+	} else {
+		if (!strcmp(status->content_type.buf, "application/x-git-packfile")) {
+			assert(params->b_is_post);
+			assert(params->objects_mode == GH__OBJECTS_MODE__POST);
 
-	if (!strcmp(status->content_type.buf, "application/x-git-packfile")) {
-		assert(params->b_is_post);
-		assert(params->objects_mode == GH__OBJECTS_MODE__POST);
+			install_packfile(params, status);
+			return;
+		}
 
-		install_packfile(params, status);
-		return;
-	}
-
-	if (!strcmp(status->content_type.buf,
-		    "application/x-git-loose-object")) {
-		/*
-		 * We get these for "gvfs/objects" GET and POST requests.
-		 *
-		 * Note that this content type is singular, not plural.
-		 */
-		install_loose(params, status);
-		return;
+		if (!strcmp(status->content_type.buf,
+			"application/x-git-loose-object")) {
+			/*
+			* We get these for "gvfs/objects" GET and POST requests.
+			*
+			* Note that this content type is singular, not plural.
+			*/
+			install_loose(params, status);
+			return;
+		}
 	}
 
 	strbuf_addf(&status->error_message,
