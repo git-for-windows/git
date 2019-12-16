@@ -2047,16 +2047,16 @@ static int my_copy_fd_len_tail(int fd_in, int fd_out, ssize_t nr_bytes_total,
 {
 	memset(buf_tail, 0, tail_len);
 
-	if (nr_bytes_total < tail_len)
-		return my_copy_fd_len(fd_in, fd_out, nr_bytes_total);
-
-	if (my_copy_fd_len(fd_in, fd_out, (nr_bytes_total - tail_len)) < 0)
+	if (my_copy_fd_len(fd_in, fd_out, nr_bytes_total) < 0)
 		return -1;
+
+	if (nr_bytes_total < tail_len)
+		return 0;
+
+	/* Reset the position to read the tail */
+	lseek(fd_in, -tail_len, SEEK_CUR);
 
 	if (xread(fd_in, (char *)buf_tail, tail_len) != tail_len)
-		return -1;
-
-	if (write_in_full(fd_out, buf_tail, tail_len) < 0)
 		return -1;
 
 	return 0;
