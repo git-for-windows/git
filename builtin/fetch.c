@@ -21,6 +21,8 @@
 #include "string-list.h"
 #include "remote.h"
 #include "transport.h"
+#include "gvfs.h"
+#include "gvfs-helper-client.h"
 #include "run-command.h"
 #include "parse-options.h"
 #include "sigchain.h"
@@ -2301,7 +2303,7 @@ static int fetch_one(struct remote *remote, int argc, const char **argv,
 int cmd_fetch(int argc,
 	      const char **argv,
 	      const char *prefix,
-	      struct repository *repo UNUSED)
+	      struct repository *repo)
 {
 	struct fetch_config config = {
 		.display_format = DISPLAY_FORMAT_FULL,
@@ -2571,6 +2573,9 @@ int cmd_fetch(int argc,
 		}
 	}
 	string_list_remove_duplicates(&list, 0);
+
+	if (gvfs_config_is_set(repo, GVFS_PREFETCH_DURING_FETCH))
+		gh_client__prefetch(0, NULL);
 
 	if (negotiate_only) {
 		struct oidset acked_commits = OIDSET_INIT;
