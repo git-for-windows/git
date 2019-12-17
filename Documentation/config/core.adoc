@@ -809,6 +809,10 @@ core.gvfs::
 		is first accessed and brought down to the client. Git.exe can't
 		currently tell the first access vs subsequent accesses so this
 		flag just blocks them from occurring at all.
+	GVFS_PREFETCH_DURING_FETCH::
+		Bit value 128
+		While performing a `git fetch` command, use the gvfs-helper to
+		perform a "prefetch" of commits and trees.
 --
 
 core.useGvfsHelper::

@@ -11,7 +11,9 @@
 #include "strbuf.h"
 #include "string-list.h"
 #include "trace2.h"
+#include "copy.h"
 #include "object.h"
+#include "object-file.h"
 #include "odb.h"
 #include "replace-object.h"
 #include "repository.h"
@@ -22,6 +24,7 @@
 #include "date.h"
 #include "wrapper.h"
 #include "git-zlib.h"
+#include "packfile.h"
 
 #define TR2_CAT "test-gvfs-protocol"
 
@@ -551,9 +554,6 @@ static enum worker_result send_loose_object(const struct object_id *oid,
 		return send_http_error(1, 404, "Not Found", -1, WR_MAYHEM);
 	}
 
-	trace2_printf("%s: OBJECT type=%d len=%ld '%.40s'", TR2_CAT,
-		      type, size, (const char *)content);
-
 	/*
 	 * We are blending several somewhat independent concepts here:
 	 *
@@ -872,7 +872,6 @@ static enum worker_result get_packfile_from_oids(
 		goto done;
 	}
 
-	trace2_printf("%s: pack-objects returned %d bytes", TR2_CAT, buf_packfile->len);
 	wr = WR_OK;
 
 done:
@@ -1016,6 +1015,305 @@ static enum worker_result do__gvfs_objects__post(struct req *req)
 done:
 	oidset_clear(&oids);
 	strbuf_release(&packfile);
+
+	return wr;
+}
+
+/*
+ * bswap.h only defines big endian functions.
+ * The GVFS Protocol defines fields in little endian.
+ */
+static inline uint64_t my_get_le64(uint64_t le_val)
+{
+#if GIT_BYTE_ORDER == GIT_LITTLE_ENDIAN
+	return le_val;
+#else
+	return default_bswap64(le_val);
+#endif
+}
+
+static inline uint16_t my_get_le16(uint16_t le_val)
+{
+#if GIT_BYTE_ORDER == GIT_LITTLE_ENDIAN
+	return le_val;
+#else
+	return default_bswap16(le_val);
+#endif
+}
+
+/*
+ * GVFS Protocol headers for the multipack format
+ * All integer values are little-endian on the wire.
+ *
+ * Note: technically, the protocol defines the `ph` fields as signed, but
+ * that makes a mess of the bswap routines and we're not going to overflow
+ * them for a very long time.
+ */
+
+static unsigned char v1_h[6] = { 'G', 'P', 'R', 'E', ' ', 0x01 };
+
+struct ph {
+	uint64_t timestamp;
+	uint64_t len_pack;
+	uint64_t len_idx;
+};
+
+/*
+ * Accumulate a list of commits-and-trees packfiles we have in the local ODB.
+ * The test script should have pre-created a set of "ct-<epoch>.pack" and .idx
+ * files for us.  We serve these as is and DO NOT try to dynamically create
+ * new commits/trees packfiles (like the cache-server does).  We are only
+ * testing if/whether gvfs-helper.exe can receive one or more packfiles and
+ * idx files over the protocol.
+ */
+struct ct_pack_item {
+	struct ph ph;
+	struct strbuf path_pack;
+	struct strbuf path_idx;
+};
+
+static void ct_pack_item__free(struct ct_pack_item *item)
+{
+	if (!item)
+		return;
+	strbuf_release(&item->path_pack);
+	strbuf_release(&item->path_idx);
+	free(item);
+}
+
+struct ct_pack_data {
+	struct ct_pack_item **items;
+	size_t nr, alloc;
+};
+
+static void ct_pack_data__release(struct ct_pack_data *data)
+{
+	size_t k;
+
+	if (!data)
+		return;
+
+	for (k = 0; k < data->nr; k++)
+		ct_pack_item__free(data->items[k]);
+
+	FREE_AND_NULL(data->items);
+	data->nr = 0;
+	data->alloc = 0;
+}
+
+static void cb_ct_pack(const char *full_path, size_t full_path_len UNUSED,
+		       const char *file_path, void *void_data)
+{
+	struct ct_pack_data *data = void_data;
+	struct ct_pack_item *item = NULL;
+	struct stat st;
+	const char *v;
+
+	/*
+	 * We only want "ct-<epoch>.pack" files.  The test script creates
+	 * cached commits-and-trees packfiles with this prefix to avoid
+	 * confusion with prefetch packfiles received by gvfs-helper.
+	 */
+	if (!ends_with(file_path, ".pack"))
+		return;
+	if (!skip_prefix(file_path, "ct-", &v))
+		return;
+
+	item = (struct ct_pack_item *)xcalloc(1, sizeof(*item));
+	strbuf_init(&item->path_pack, 0);
+	strbuf_addstr(&item->path_pack, full_path);
+
+	strbuf_init(&item->path_idx, 0);
+	strbuf_addstr(&item->path_idx, full_path);
+	strbuf_strip_suffix(&item->path_idx, ".pack");
+	strbuf_addstr(&item->path_idx, ".idx");
+
+	item->ph.timestamp = (uint64_t)strtoul(v, NULL, 10);
+
+	lstat(item->path_pack.buf, &st);
+	item->ph.len_pack = (uint64_t)st.st_size;
+
+	if (string_list_has_string(&mayhem_list, "no_prefetch_idx"))
+		item->ph.len_idx = maximum_unsigned_value_of_type(uint64_t);
+	else if (lstat(item->path_idx.buf, &st) < 0)
+		item->ph.len_idx = maximum_unsigned_value_of_type(uint64_t);
+	else
+		item->ph.len_idx = (uint64_t)st.st_size;
+
+	ALLOC_GROW(data->items, data->nr + 1, data->alloc);
+	data->items[data->nr++] = item;
+}
+
+/*
+ * Sort by increasing EPOCH time.
+ */
+static int ct_pack_sort_compare(const void *_a, const void *_b)
+{
+	const struct ct_pack_item *a = *(const struct ct_pack_item **)_a;
+	const struct ct_pack_item *b = *(const struct ct_pack_item **)_b;
+	return (a->ph.timestamp < b->ph.timestamp) ? -1 : (a->ph.timestamp != b->ph.timestamp);
+}
+
+static enum worker_result send_ct_item(const struct ct_pack_item *item)
+{
+	struct ph ph_le;
+	int fd_pack = -1;
+	int fd_idx = -1;
+	enum worker_result wr = WR_OK;
+
+	/* send per-packfile header. all fields are little-endian on the wire. */
+	ph_le.timestamp = my_get_le64(item->ph.timestamp);
+	ph_le.len_pack = my_get_le64(item->ph.len_pack);
+	ph_le.len_idx = my_get_le64(item->ph.len_idx);
+
+	if (write_in_full(1, &ph_le, sizeof(ph_le)) < 0) {
+		logerror("unable to write ph_le");
+		wr = WR_IO_ERROR;
+		goto done;
+	}
+
+	trace2_printf("%s: sending prefetch pack '%s'", TR2_CAT, item->path_pack.buf);
+
+	fd_pack = git_open_cloexec(item->path_pack.buf, O_RDONLY);
+	if (fd_pack == -1 || copy_fd(fd_pack, 1)) {
+		logerror("could not send packfile");
+		wr = WR_IO_ERROR;
+		goto done;
+	}
+
+	if (item->ph.len_idx != maximum_unsigned_value_of_type(uint64_t)) {
+		trace2_printf("%s: sending prefetch idx '%s'", TR2_CAT, item->path_idx.buf);
+
+		fd_idx = git_open_cloexec(item->path_idx.buf, O_RDONLY);
+		if (fd_idx == -1 || copy_fd(fd_idx, 1)) {
+			logerror("could not send idx");
+			wr = WR_IO_ERROR;
+			goto done;
+		}
+	}
+
+done:
+	if (fd_pack != -1)
+		close(fd_pack);
+	if (fd_idx != -1)
+		close(fd_idx);
+	return wr;
+}
+
+/*
+ * The GVFS Protocol defines the lastTimeStamp parameter as the value
+ * of the last prefetch pack that the client has.  Therefore, we only
+ * want to send newer ones.
+ */
+static int want_ct_pack(const struct ct_pack_item *item, timestamp_t last_timestamp)
+{
+	return item->ph.timestamp > last_timestamp;
+}
+
+static enum worker_result send_multipack(struct ct_pack_data *data,
+					 timestamp_t last_timestamp)
+{
+	struct strbuf response_header = STRBUF_INIT;
+	struct strbuf uuid = STRBUF_INIT;
+	enum worker_result wr;
+	size_t content_len = 0;
+	unsigned short np = 0;
+	unsigned short np_le;
+	size_t k;
+
+	/*
+	 * Precompute the content-length so that we don't have to deal with
+	 * chunking it.
+	 */
+	content_len += sizeof(v1_h) + sizeof(np);
+	for (k = 0; k < data->nr; k++) {
+		struct ct_pack_item *item = data->items[k];
+
+		if (!want_ct_pack(item, last_timestamp))
+			continue;
+
+		np++;
+		content_len += sizeof(struct ph);
+		content_len += item->ph.len_pack;
+		if (item->ph.len_idx != maximum_unsigned_value_of_type(uint64_t))
+			content_len += item->ph.len_idx;
+	}
+
+	strbuf_addstr(&response_header, "HTTP/1.1 200 OK\r\n");
+	strbuf_addstr(&response_header, "Cache-Control: private\r\n");
+	strbuf_addstr(&response_header,
+		      "Content-Type: application/x-gvfs-timestamped-packfiles-indexes\r\n");
+	strbuf_addf(  &response_header,	"Content-Length: %d\r\n", (int)content_len);
+	strbuf_addf(  &response_header,	"Server: test-gvfs-protocol/%s\r\n", git_version_string);
+	strbuf_addf(  &response_header, "Date: %s\r\n", show_date(time(NULL), 0, DATE_MODE(RFC2822)));
+	gen_fake_uuid(&uuid);
+	strbuf_addf(  &response_header, "X-VSS-E2EID: %s\r\n", uuid.buf);
+	strbuf_addstr(&response_header, "\r\n");
+
+	if (write_in_full(1, response_header.buf, response_header.len) < 0) {
+		logerror("unable to write response header");
+		wr = WR_IO_ERROR;
+		goto done;
+	}
+
+	/* send protocol version header */
+	if (write_in_full(1, v1_h, sizeof(v1_h)) < 0) {
+		logerror("unabled to write v1_h");
+		wr = WR_IO_ERROR;
+		goto done;
+	}
+
+	/* send number of packfiles */
+	np_le = my_get_le16(np);
+	if (write_in_full(1, &np_le, sizeof(np_le)) < 0) {
+		logerror("unable to write np");
+		wr = WR_IO_ERROR;
+		goto done;
+	}
+
+	for (k = 0; k < data->nr; k++) {
+		if (!want_ct_pack(data->items[k], last_timestamp))
+			continue;
+
+		wr = send_ct_item(data->items[k]);
+		if (wr != WR_OK)
+			goto done;
+	}
+
+	wr = WR_OK;
+
+done:
+	strbuf_release(&uuid);
+	strbuf_release(&response_header);
+
+	return wr;
+}
+
+static enum worker_result do__gvfs_prefetch__get(struct req *req)
+{
+	struct ct_pack_data data;
+	timestamp_t last_timestamp = 0;
+	enum worker_result wr;
+
+	memset(&data, 0, sizeof(data));
+
+	if (req->quest_args.len) {
+		const char *key = strstr(req->quest_args.buf, "lastPackTimestamp=");
+		if (key) {
+			const char *val;
+			if (skip_prefix(key, "lastPackTimestamp=", &val)) {
+				last_timestamp = strtol(val, NULL, 10);
+			}
+		}
+	}
+	trace2_printf("%s: prefetch/since %"PRItime, TR2_CAT, last_timestamp);
+
+	for_each_file_in_pack_dir(repo_get_object_directory(the_repository), cb_ct_pack, &data);
+	QSORT(data.items, data.nr, ct_pack_sort_compare);
+
+	wr = send_multipack(&data, last_timestamp);
+
+	ct_pack_data__release(&data);
 
 	return wr;
 }
@@ -1174,6 +1472,11 @@ static enum worker_result req__read(struct req *req, int fd)
 	 * We let our caller read/chunk it in as appropriate.
 	 */
 done:
+
+#if 0
+	/*
+	 * This is useful for debugging the request, but very noisy.
+	 */
 	if (trace2_is_enabled()) {
 		struct string_list_item *item;
 		trace2_printf("%s: %s", TR2_CAT, req->start_line.buf);
@@ -1188,6 +1491,7 @@ done:
 		for_each_string_list_item(item, &req->header_list)
 			trace2_printf("%s: Hdrs: %s", TR2_CAT, item->string);
 	}
+#endif
 
 	strbuf_release(&h);
 
@@ -1236,6 +1540,12 @@ static enum worker_result dispatch(struct req *req)
 
 		if (!strcmp(method, "GET"))
 			return do__gvfs_config__get(req);
+	}
+
+	if (!strcmp(req->gvfs_api.buf, "gvfs/prefetch")) {
+
+		if (!strcmp(method, "GET"))
+			return do__gvfs_prefetch__get(req);
 	}
 
 	return send_http_error(1, 501, "Not Implemented", -1,

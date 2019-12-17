@@ -24,8 +24,8 @@ test_set_port GIT_TEST_GVFS_PROTOCOL_PORT
 #        actually use it).  We are only testing explicit object
 #        fetching using gvfs-helper.exe in isolation.
 #
-REPO_SRC="$PWD"/repo_src
-REPO_T1="$PWD"/repo_t1
+REPO_SRC="$(pwd)"/repo_src
+REPO_T1="$(pwd)"/repo_t1
 
 # Setup some loopback URLs where test-gvfs-protocol.exe will be
 # listening.  We will spawn it directly inside the repo_src directory,
@@ -44,22 +44,22 @@ HOST_PORT=127.0.0.1:$GIT_TEST_GVFS_PROTOCOL_PORT
 ORIGIN_URL=http://$HOST_PORT/servertype/origin
 CACHE_URL=http://$HOST_PORT/servertype/cache
 
-SHARED_CACHE_T1="$PWD"/shared_cache_t1
+SHARED_CACHE_T1="$(pwd)"/shared_cache_t1
 
 # The pid-file is created by test-gvfs-protocol.exe when it starts.
 # The server will shut down if/when we delete it.  (This is a little
 # easier than killing it by PID.)
 #
-PID_FILE="$PWD"/pid-file.pid
-SERVER_LOG="$PWD"/OUT.server.log
+PID_FILE="$(pwd)"/pid-file.pid
+SERVER_LOG="$(pwd)"/OUT.server.log
 
 PATH="$GIT_BUILD_DIR/t/helper/:$PATH" && export PATH
 
-OIDS_FILE="$PWD"/oid_list.txt
-OIDS_CT_FILE="$PWD"/oid_ct_list.txt
-OIDS_BLOBS_FILE="$PWD"/oids_blobs_file.txt
-OID_ONE_BLOB_FILE="$PWD"/oid_one_blob_file.txt
-OID_ONE_COMMIT_FILE="$PWD"/oid_one_commit_file.txt
+OIDS_FILE="$(pwd)"/oid_list.txt
+OIDS_CT_FILE="$(pwd)"/oid_ct_list.txt
+OIDS_BLOBS_FILE="$(pwd)"/oids_blobs_file.txt
+OID_ONE_BLOB_FILE="$(pwd)"/oid_one_blob_file.txt
+OID_ONE_COMMIT_FILE="$(pwd)"/oid_one_commit_file.txt
 
 # Get a list of available OIDs in repo_src so that we can try to fetch
 # them and so that we don't have to hard-code a list of known OIDs.
@@ -108,6 +108,30 @@ get_one_commit_oid () {
 	return 0
 }
 
+# Create a commits-and-trees packfile for use with "prefetch"
+# using the given range of commits.
+#
+create_commits_and_trees_packfile () {
+	if test $# -eq 2
+	then
+		epoch=$1
+		revs=$2
+	else
+		echo "create_commits_and_trees_packfile: Need 2 args"
+		return 1
+	fi
+
+	pack_file="$REPO_SRC"/.git/objects/pack/ct-$epoch.pack
+	idx_file="$REPO_SRC"/.git/objects/pack/ct-$epoch.idx
+
+	git -C "$REPO_SRC" pack-objects --stdout --revs --filter=blob:none \
+		>"$pack_file" <<-EOF
+		$revs
+	EOF
+	git -C "$REPO_SRC" index-pack -o "$idx_file" "$pack_file"
+	return 0
+}
+
 test_expect_success 'setup repos' '
 	test_create_repo "$REPO_SRC" &&
 	git -C "$REPO_SRC" branch -M main &&
@@ -115,9 +139,16 @@ test_expect_success 'setup repos' '
 	# test_commit_bulk() does magic to create a packfile containing
 	# the new commits.
 	#
+	# We create branches in repo_src, but also remember the branch OIDs
+	# in files so that we can refer to them in repo_t1, which will not
+	# have the commits locally (because we do not clone or fetch).
+	#
 	test_commit_bulk -C "$REPO_SRC" --filename="batch_a.%s.t" 9 &&
+	git -C "$REPO_SRC" branch B1 &&
 	git -C "$REPO_SRC" rev-parse refs/heads/main >m1.branch &&
+	#
 	test_commit_bulk -C "$REPO_SRC" --filename="batch_b.%s.t" 9 &&
+	git -C "$REPO_SRC" branch B2 &&
 	git -C "$REPO_SRC" rev-parse refs/heads/main >m2.branch &&
 	#
 	# test_commit() creates commits, trees, tags, and blobs and leave
@@ -134,7 +165,15 @@ test_expect_success 'setup repos' '
 	test_commit -C "$REPO_SRC" file7.txt &&
 	test_commit -C "$REPO_SRC" file8.txt &&
 	test_commit -C "$REPO_SRC" file9.txt &&
+	git -C "$REPO_SRC" branch B3 &&
 	git -C "$REPO_SRC" rev-parse refs/heads/main >m3.branch &&
+	#
+	# Create some commits-and-trees-only packfiles for testing prefetch.
+	# Set arbitrary EPOCH times to make it easier to test fetch-since.
+	#
+	create_commits_and_trees_packfile 1000000000 B1 &&
+	create_commits_and_trees_packfile 1100000000 B1..B2 &&
+	create_commits_and_trees_packfile 1200000000 B2..B3 &&
 	#
 	# gvfs-helper.exe writes downloaded objects to a shared-cache directory
 	# rather than the ODB inside the .git directory.
@@ -160,10 +199,10 @@ test_expect_success 'setup repos' '
 	EOF
 	cat <<-EOF >creds.sh &&
 		#!/bin/sh
-		cat "$PWD"/creds.txt
+		cat "$(pwd)"/creds.txt
 	EOF
 	chmod 755 creds.sh &&
-	git -C "$REPO_T1" config --local credential.helper "!f() { cat \"$PWD\"/creds.txt; }; f" &&
+	git -C "$REPO_T1" config --local credential.helper "!f() { cat \"$(pwd)\"/creds.txt; }; f" &&
 	#
 	# Create some test data sets.
 	#
@@ -333,6 +372,10 @@ verify_objects_in_shared_cache () {
 	return 0
 }
 
+# gvfs-helper prints a "packfile <path>" message for each received
+# packfile to stdout.  Verify that we received the expected number
+# of packfiles.
+#
 verify_received_packfile_count () {
 	if test $# -eq 1
 	then
@@ -346,6 +389,43 @@ verify_received_packfile_count () {
 	if test $actual_nr -ne $expected_nr
 	then
 		echo "verify_received_packfile_count: expected $expected_nr; actual $actual_nr"
+		return 1
+	fi
+	return 0
+}
+
+# Verify that we have exactly 1 prefetch .keep file.
+# Optionally, verify that it has the given timestamp.
+#
+verify_prefetch_keeps () {
+	count=$(( $(ls -1 "$SHARED_CACHE_T1"/pack/prefetch-*.keep | wc -l) ))
+	if test $count -ne 1
+	then
+		echo "verify_prefetch_keep_file_count: found $count, expected 1."
+		return 1
+	fi
+
+	if test $# -eq 1
+	then
+		count=$(( $(ls -1 "$SHARED_CACHE_T1"/pack/prefetch-$1-*.keep | wc -l) ))
+		if test $count -ne 1
+		then
+			echo "verify_prefetch_keep_file_count: did not find expected keep file."
+			return 1
+		fi
+	fi
+
+	return 0
+}
+
+# Verify that the number of vfs- packfile present in the shared-cache
+# matches our expectations.
+#
+verify_vfs_packfile_count () {
+	count=$(( $(ls -1 "$SHARED_CACHE_T1"/pack/vfs-*.pack | wc -l) ))
+	if test $count -ne $1
+	then
+		echo "verify_vfs_packfile_count: expected $1; actual $count"
 		return 1
 	fi
 	return 0
@@ -554,8 +634,8 @@ test_expect_success 'basic: POST-request a single blob' '
 # Request a single commit via POST.  Per the GVFS Protocol, the server
 # should implicitly send us a packfile containing the commit and the
 # trees it references.  Confirm that properly handled the receipt of
-# the packfile.  (Here, we are testing that asking for a single object
-# yields a packfile rather than a loose object.)
+# the packfile.  (Here, we are testing that asking for a single commit
+# via POST yields a packfile rather than a loose object.)
 #
 # We DO NOT verify that the packfile contains commits/trees and no blobs
 # because our test helper doesn't implement the filtering.
@@ -585,6 +665,110 @@ test_expect_success 'basic: POST-request a single commit' '
 	verify_received_packfile_count 1 &&
 
 	verify_connection_count 1
+'
+
+test_expect_success 'basic: PREFETCH w/o arg gets all' '
+	test_when_finished "per_test_cleanup" &&
+	start_gvfs_protocol_server &&
+
+	# Without a "since" argument gives us all "ct-*.pack" since the EPOCH
+	# because we do not have any prefetch packs locally.
+	#
+	git -C "$REPO_T1" gvfs-helper \
+		--cache-server=disable \
+		--remote=origin \
+		--no-progress \
+		prefetch >OUT.output &&
+
+	# gvfs-helper prints a "packfile <path>" message for each received
+	# packfile.
+	#
+	verify_received_packfile_count 3 &&
+	verify_prefetch_keeps 1200000000 &&
+
+	stop_gvfs_protocol_server &&
+	verify_connection_count 1
+'
+
+test_expect_success 'basic: PREFETCH w/ arg' '
+	test_when_finished "per_test_cleanup" &&
+	start_gvfs_protocol_server &&
+
+	# Ask for cached packfiles NEWER THAN the given time.
+	#
+	git -C "$REPO_T1" gvfs-helper \
+		--cache-server=disable \
+		--remote=origin \
+		--no-progress \
+		prefetch --since="1000000000" >OUT.output &&
+
+	# gvfs-helper prints a "packfile <path>" message for each received
+	# packfile.
+	#
+	verify_received_packfile_count 2 &&
+	verify_prefetch_keeps 1200000000 &&
+
+	stop_gvfs_protocol_server &&
+	verify_connection_count 1
+'
+
+test_expect_success 'basic: PREFETCH mayhem no_prefetch_idx' '
+	test_when_finished "per_test_cleanup" &&
+	start_gvfs_protocol_server_with_mayhem no_prefetch_idx &&
+
+	# Request prefetch packs, but tell server to not send any
+	# idx files and force gvfs-helper to compute them.
+	#
+	git -C "$REPO_T1" gvfs-helper \
+		--cache-server=disable \
+		--remote=origin \
+		--no-progress \
+		prefetch --since="1000000000" >OUT.output &&
+
+	# gvfs-helper prints a "packfile <path>" message for each received
+	# packfile.
+	#
+	verify_received_packfile_count 2 &&
+	verify_prefetch_keeps 1200000000 &&
+
+	stop_gvfs_protocol_server &&
+	verify_connection_count 1
+'
+
+test_expect_success 'basic: PREFETCH up-to-date' '
+	test_when_finished "per_test_cleanup" &&
+	start_gvfs_protocol_server &&
+
+	# Ask for cached packfiles NEWER THAN the given time.
+	#
+	git -C "$REPO_T1" gvfs-helper \
+		--cache-server=disable \
+		--remote=origin \
+		--no-progress \
+		prefetch --since="1000000000" >OUT.output &&
+
+	# gvfs-helper prints a "packfile <path>" message for each received
+	# packfile.
+	#
+	verify_received_packfile_count 2 &&
+	verify_prefetch_keeps 1200000000 &&
+
+	# Ask again for any packfiles newer than what we have cached locally.
+	#
+	git -C "$REPO_T1" gvfs-helper \
+		--cache-server=disable \
+		--remote=origin \
+		--no-progress \
+		prefetch >OUT.output &&
+
+	# gvfs-helper prints a "packfile <path>" message for each received
+	# packfile.
+	#
+	verify_received_packfile_count 0 &&
+	verify_prefetch_keeps 1200000000 &&
+
+	stop_gvfs_protocol_server &&
+	verify_connection_count 2
 '
 
 #################################################################
@@ -982,44 +1166,6 @@ test_expect_success 'HTTP GET Auth on Cache Server' '
 # magically fetched whenever required.
 #################################################################
 
-test_expect_success 'integration: explicit commit/trees, implicit blobs: log file' '
-	test_when_finished "per_test_cleanup" &&
-	start_gvfs_protocol_server &&
-
-	# We have a very empty repo.  Seed it with all of the commits
-	# and trees.  The purpose of this test is to demand-load the
-	# needed blobs only, so we prefetch the commits and trees.
-	#
-	git -C "$REPO_T1" gvfs-helper \
-		--cache-server=disable \
-		--remote=origin \
-		get \
-		<"$OIDS_CT_FILE" >OUT.output &&
-
-	# Confirm that we do not have the blobs locally.
-	# With gvfs-helper turned off, we should fail.
-	#
-	test_must_fail \
-		git -C "$REPO_T1" -c core.useGVFSHelper=false \
-			log $(cat m3.brach) -- file9.txt \
-			>OUT.output 2>OUT.stderr &&
-
-	# Turn on gvfs-helper and retry.  This should implicitly fetch
-	# any needed blobs.
-	#
-	git -C "$REPO_T1" -c core.useGVFSHelper=true \
-		log $(cat m3.branch) -- file9.txt \
-		>OUT.output 2>OUT.stderr &&
-
-	# Verify that gvfs-helper wrote the fetched the blobs to the
-	# local ODB, such that a second attempt with gvfs-helper
-	# turned off should succeed.
-	#
-	git -C "$REPO_T1" -c core.useGVFSHelper=false \
-		log $(cat m3.branch) -- file9.txt \
-		>OUT.output 2>OUT.stderr
-'
-
 test_expect_success 'integration: explicit commit/trees, implicit blobs: diff 2 commits' '
 	test_when_finished "per_test_cleanup" &&
 	start_gvfs_protocol_server &&
@@ -1067,6 +1213,103 @@ test_expect_success 'integration: fully implicit: diff 2 commits' '
 	git -C "$REPO_T1" -c core.useGVFSHelper=true \
 		diff $(cat m1.branch)..$(cat m3.branch) \
 		>OUT.output 2>OUT.stderr
+'
+
+#################################################################
+# Duplicate packfile tests.
+#
+# If we request a fixed set of blobs, we should get a unique packfile
+# of the form "vfs-<sha>.{pack,idx}".  It we request that same set
+# again, the server should create and send the exact same packfile.
+# True web servers might build the custom packfile in random order,
+# but our test web server should give us consistent results.
+#
+# Verify that we can handle the duplicate pack and idx file properly.
+#################################################################
+
+test_expect_success 'duplicate: vfs- packfile' '
+	test_when_finished "per_test_cleanup" &&
+	start_gvfs_protocol_server &&
+
+	git -C "$REPO_T1" gvfs-helper \
+		--cache-server=disable \
+		--remote=origin \
+		--no-progress \
+		post \
+		<"$OIDS_BLOBS_FILE" >OUT.output 2>OUT.stderr &&
+	verify_received_packfile_count 1 &&
+	verify_vfs_packfile_count 1 &&
+
+	# Re-fetch the same packfile.  We do not care if it replaces
+	# first one or if it silently fails to overwrite the existing
+	# one.  We just confirm that afterwards we only have 1 packfile.
+	#
+	git -C "$REPO_T1" gvfs-helper \
+		--cache-server=disable \
+		--remote=origin \
+		--no-progress \
+		post \
+		<"$OIDS_BLOBS_FILE" >OUT.output 2>OUT.stderr &&
+	verify_received_packfile_count 1 &&
+	verify_vfs_packfile_count 1 &&
+
+	stop_gvfs_protocol_server
+'
+
+# Return the absolute pathname of the first received packfile.
+#
+first_received_packfile_pathname () {
+	fn=$(sed -n '/^packfile/p' <OUT.output | head -1 | sed -n 's/^packfile \(.*\)/\1/p')
+	echo "$SHARED_CACHE_T1"/pack/"$fn"
+	return 0
+}
+
+test_expect_success 'duplicate and busy: vfs- packfile' '
+	test_when_finished "per_test_cleanup" &&
+	start_gvfs_protocol_server &&
+
+	git -C "$REPO_T1" gvfs-helper \
+		--cache-server=disable \
+		--remote=origin \
+		--no-progress \
+		post \
+		<"$OIDS_BLOBS_FILE" \
+		>OUT.output \
+		2>OUT.stderr &&
+	verify_received_packfile_count 1 &&
+	verify_vfs_packfile_count 1 &&
+
+	# Re-fetch the same packfile, but hold the existing packfile
+	# open for writing on an obscure (and randomly-chosen) file
+	# descriptor.
+	#
+	# This should cause the replacement-install to fail (at least
+	# on Windows) with an EBUSY or EPERM or something.
+	#
+	# Verify that that error is eaten.  We do not care if the
+	# replacement is retried or if gvfs-helper simply discards the
+	# second instance.  We just confirm that afterwards we only
+	# have 1 packfile on disk and that the command "lies" and reports
+	# that it created the existing packfile.  (We want the lie because
+	# in normal usage, gh-client has already built the packed-git list
+	# in memory and is using gvfs-helper to fetch missing objects;
+	# gh-client does not care who does the fetch, but it needs to
+	# update its packed-git list and restart the object lookup.)
+	#
+	PACK=$(first_received_packfile_pathname) &&
+	git -C "$REPO_T1" gvfs-helper \
+		--cache-server=disable \
+		--remote=origin \
+		--no-progress \
+		post \
+		<"$OIDS_BLOBS_FILE" \
+		>OUT.output \
+		2>OUT.stderr \
+		9>>"$PACK" &&
+	verify_received_packfile_count 1 &&
+	verify_vfs_packfile_count 1 &&
+
+	stop_gvfs_protocol_server
 '
 
 #################################################################

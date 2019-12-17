@@ -28,13 +28,14 @@ static struct hashmap gh_server__subprocess_map;
 static struct odb_source *gh_client__chosen_odb;
 
 /*
- * The "objects" capability has 2 verbs: "get" and "post".
+ * The "objects" capability has verbs: "get" and "post" and "prefetch".
  */
 #define CAP_OBJECTS      (1u<<1)
 #define CAP_OBJECTS_NAME "objects"
 
 #define CAP_OBJECTS__VERB_GET1_NAME "get"
 #define CAP_OBJECTS__VERB_POST_NAME "post"
+#define CAP_OBJECTS__VERB_PREFETCH_NAME "prefetch"
 
 static int gh_client__start_fn(struct subprocess_entry *subprocess)
 {
@@ -134,6 +135,44 @@ static int gh_client__send__objects_get(struct child_process *process,
 }
 
 /*
+ * Send a request to gvfs-helper to prefetch packfiles from either the
+ * cache-server or the main Git server using "/gvfs/prefetch".
+ *
+ *     objects.prefetch LF
+ *     [<seconds-since_epoch> LF]
+ *     <flush>
+ */
+static int gh_client__send__objects_prefetch(struct child_process *process,
+					     timestamp_t seconds_since_epoch)
+{
+	int err;
+
+	/*
+	 * We assume that all of the packet_ routines call error()
+	 * so that we don't have to.
+	 */
+
+	err = packet_write_fmt_gently(
+		process->in,
+		(CAP_OBJECTS_NAME "." CAP_OBJECTS__VERB_PREFETCH_NAME "\n"));
+	if (err)
+		return err;
+
+	if (seconds_since_epoch) {
+		err = packet_write_fmt_gently(process->in, "%" PRItime "\n",
+					      seconds_since_epoch);
+		if (err)
+			return err;
+	}
+
+	err = packet_flush_gently(process->in);
+	if (err)
+		return err;
+
+	return 0;
+}
+
+/*
  * Update the loose object cache to include the newly created
  * object.
  */
@@ -181,7 +220,7 @@ static void gh_client__update_packed_git(const char *line)
 }
 
 /*
- * Both CAP_OBJECTS verbs return the same format response:
+ * CAP_OBJECTS verbs return the same format response:
  *
  *    <odb>
  *    <data>*
@@ -221,6 +260,8 @@ static int gh_client__objects__receive_response(
 	const char *v1;
 	char *line;
 	int len;
+	int nr_loose = 0;
+	int nr_packfile = 0;
 	int err = 0;
 
 	while (1) {
@@ -239,13 +280,13 @@ static int gh_client__objects__receive_response(
 		else if (starts_with(line, "packfile")) {
 			gh_client__update_packed_git(line);
 			ghc |= GHC__CREATED__PACKFILE;
-			*p_nr_packfile += 1;
+			nr_packfile++;
 		}
 
 		else if (starts_with(line, "loose")) {
 			gh_client__update_loose_cache(line);
 			ghc |= GHC__CREATED__LOOSE;
-			*p_nr_loose += 1;
+			nr_loose++;
 		}
 
 		else if (starts_with(line, "ok"))
@@ -259,6 +300,8 @@ static int gh_client__objects__receive_response(
 	}
 
 	*p_ghc = ghc;
+	*p_nr_loose = nr_loose;
+	*p_nr_packfile = nr_packfile;
 
 	return err;
 }
@@ -315,7 +358,7 @@ static struct gh_server__process *gh_client__find_long_running_process(
 	/*
 	 * Find an existing long-running process with the above command
 	 * line -or- create a new long-running process for this and
-	 * subsequent 'get' requests.
+	 * subsequent requests.
 	 */
 	if (!gh_server__subprocess_map_initialized) {
 		gh_server__subprocess_map_initialized = 1;
@@ -352,10 +395,14 @@ static struct gh_server__process *gh_client__find_long_running_process(
 
 void gh_client__queue_oid(const struct object_id *oid)
 {
-	// TODO consider removing this trace2.  it is useful for interactive
-	// TODO debugging, but may generate way too much noise for a data
-	// TODO event.
-	trace2_printf("gh_client__queue_oid: %s", oid_to_hex(oid));
+	/*
+	 * Keep this trace as a printf only, so that it goes to the
+	 * perf log, but not the event log.  It is useful for interactive
+	 * debugging, but generates way too much (unuseful) noise for the
+	 * database.
+	 */
+	if (trace2_is_enabled())
+		trace2_printf("gh_client__queue_oid: %s", oid_to_hex(oid));
 
 	if (!oidset_insert(&gh_client__oidset_queued, oid))
 		gh_client__oidset_count++;
@@ -436,10 +483,14 @@ int gh_client__get_immediate(const struct object_id *oid,
 	int nr_packfile = 0;
 	int err = 0;
 
-	// TODO consider removing this trace2.  it is useful for interactive
-	// TODO debugging, but may generate way too much noise for a data
-	// TODO event.
-	trace2_printf("gh_client__get_immediate: %s", oid_to_hex(oid));
+	/*
+	 * Keep this trace as a printf only, so that it goes to the
+	 * perf log, but not the event log.  It is useful for interactive
+	 * debugging, but generates way too much (unuseful) noise for the
+	 * database.
+	 */
+	if (trace2_is_enabled())
+		trace2_printf("gh_client__get_immediate: %s", oid_to_hex(oid));
 
 	entry = gh_client__find_long_running_process(CAP_OBJECTS);
 	if (!entry)
@@ -465,6 +516,58 @@ int gh_client__get_immediate(const struct object_id *oid,
 	}
 
 	trace2_region_leave("gh-client", "objects/get", the_repository);
+
+	return err;
+}
+
+/*
+ * Ask gvfs-helper to prefetch commits-and-trees packfiles since a
+ * given timestamp.
+ *
+ * If seconds_since_epoch is zero, gvfs-helper will scan the ODB for
+ * the last received prefetch and ask for ones newer than that.
+ */
+int gh_client__prefetch(timestamp_t seconds_since_epoch,
+			int *nr_packfiles_received)
+{
+	struct gh_server__process *entry;
+	struct child_process *process;
+	enum gh_client__created ghc;
+	int nr_loose = 0;
+	int nr_packfile = 0;
+	int err = 0;
+
+	entry = gh_client__find_long_running_process(CAP_OBJECTS);
+	if (!entry)
+		return -1;
+
+	trace2_region_enter("gh-client", "objects/prefetch", the_repository);
+	trace2_data_intmax("gh-client", the_repository, "prefetch/since",
+			   seconds_since_epoch);
+
+	process = &entry->subprocess.process;
+
+	sigchain_push(SIGPIPE, SIG_IGN);
+
+	err = gh_client__send__objects_prefetch(process, seconds_since_epoch);
+	if (!err)
+		err = gh_client__objects__receive_response(
+			process, &ghc, &nr_loose, &nr_packfile);
+
+	sigchain_pop(SIGPIPE);
+
+	if (err) {
+		subprocess_stop(&gh_server__subprocess_map,
+				(struct subprocess_entry *)entry);
+		FREE_AND_NULL(entry);
+	}
+
+	trace2_data_intmax("gh-client", the_repository,
+			   "prefetch/packfile_count", nr_packfile);
+	trace2_region_leave("gh-client", "objects/prefetch", the_repository);
+
+	if (nr_packfiles_received)
+		*nr_packfiles_received = nr_packfile;
 
 	return err;
 }

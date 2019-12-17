@@ -66,4 +66,22 @@ void gh_client__queue_oid_array(const struct object_id *oids, int oid_nr);
  */
 int gh_client__drain_queue(enum gh_client__created *p_ghc);
 
+/*
+ * Ask `gvfs-helper server` to fetch any "prefetch packs"
+ * available on the server more recent than the requested time.
+ *
+ * If seconds_since_epoch is zero, gvfs-helper will scan the ODB for
+ * the last received prefetch and ask for ones newer than that.
+ *
+ * A long-running background process is used to subsequent requests
+ * (either prefetch or regular immediate/queued requests) more efficient.
+ *
+ * One or more packfiles will be created in the shared-cache ODB.
+ *
+ * Returns 0 on success, -1 on error.  Optionally also returns the
+ * number of prefetch packs received.
+ */
+int gh_client__prefetch(timestamp_t seconds_since_epoch,
+			int *nr_packfiles_received);
+
 #endif /* GVFS_HELPER_CLIENT_H */
