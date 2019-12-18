@@ -1897,12 +1897,36 @@ static void my_finalize_packfile(struct gh__request_params *params,
 				 struct strbuf *final_path_idx,
 				 struct strbuf *final_filename)
 {
+	/*
+	 * Install the .pack and .idx into the ODB pack directory.
+	 *
+	 * We might be racing with other instances of gvfs-helper if
+	 * we, in parallel, both downloaded the exact same packfile
+	 * (with the same checksum SHA) and try to install it at the
+	 * same time.  This might happen on Windows where the loser
+	 * can get an EBUSY or EPERM trying to move/rename the
+	 * tempfile into the pack dir, for example.
+	 *
+	 * So, we always install the .pack before the .idx for
+	 * consistency.  And only if *WE* created the .pack and .idx
+	 * files, do we create the matching .keep (when requested).
+	 *
+	 * If we get an error and the target files already exist, we
+	 * silently eat the error.  Note that finalize_object_file()
+	 * has already munged errno (and it has various creation
+	 * strategies), so we don't bother looking at it.
+	 */
 	if (finalize_object_file(the_repository, temp_path_pack->buf, final_path_pack->buf) ||
 	    finalize_object_file(the_repository, temp_path_idx->buf, final_path_idx->buf)) {
 		unlink(temp_path_pack->buf);
 		unlink(temp_path_idx->buf);
-		unlink(final_path_pack->buf);
-		unlink(final_path_idx->buf);
+
+		if (file_exists(final_path_pack->buf) &&
+		    file_exists(final_path_idx->buf)) {
+			trace2_printf("%s: assuming ok for %s", TR2_CAT, final_path_pack->buf);
+			goto assume_ok;
+		}
+
 		strbuf_addf(&status->error_message,
 			    "could not install packfile '%s'",
 			    final_path_pack->buf);
@@ -1925,6 +1949,7 @@ static void my_finalize_packfile(struct gh__request_params *params,
 		strbuf_release(&keep);
 	}
 
+assume_ok:
 	if (params->result_list) {
 		struct strbuf result_msg = STRBUF_INIT;
 

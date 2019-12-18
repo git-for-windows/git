@@ -372,6 +372,10 @@ verify_objects_in_shared_cache () {
 	return 0
 }
 
+# gvfs-helper prints a "packfile <path>" message for each received
+# packfile to stdout.  Verify that we received the expected number
+# of packfiles.
+#
 verify_received_packfile_count () {
 	if test $# -eq 1
 	then
@@ -411,6 +415,19 @@ verify_prefetch_keeps () {
 		fi
 	fi
 
+	return 0
+}
+
+# Verify that the number of vfs- packfile present in the shared-cache
+# matches our expectations.
+#
+verify_vfs_packfile_count () {
+	count=$(( $(ls -1 "$SHARED_CACHE_T1"/pack/vfs-*.pack | wc -l) ))
+	if test $count -ne $1
+	then
+		echo "verify_vfs_packfile_count: expected $1; actual $count"
+		return 1
+	fi
 	return 0
 }
 
@@ -1196,6 +1213,103 @@ test_expect_success 'integration: fully implicit: diff 2 commits' '
 	git -C "$REPO_T1" -c core.useGVFSHelper=true \
 		diff $(cat m1.branch)..$(cat m3.branch) \
 		>OUT.output 2>OUT.stderr
+'
+
+#################################################################
+# Duplicate packfile tests.
+#
+# If we request a fixed set of blobs, we should get a unique packfile
+# of the form "vfs-<sha>.{pack,idx}".  It we request that same set
+# again, the server should create and send the exact same packfile.
+# True web servers might build the custom packfile in random order,
+# but our test web server should give us consistent results.
+#
+# Verify that we can handle the duplicate pack and idx file properly.
+#################################################################
+
+test_expect_success 'duplicate: vfs- packfile' '
+	test_when_finished "per_test_cleanup" &&
+	start_gvfs_protocol_server &&
+
+	git -C "$REPO_T1" gvfs-helper \
+		--cache-server=disable \
+		--remote=origin \
+		--no-progress \
+		post \
+		<"$OIDS_BLOBS_FILE" >OUT.output 2>OUT.stderr &&
+	verify_received_packfile_count 1 &&
+	verify_vfs_packfile_count 1 &&
+
+	# Re-fetch the same packfile.  We do not care if it replaces
+	# first one or if it silently fails to overwrite the existing
+	# one.  We just confirm that afterwards we only have 1 packfile.
+	#
+	git -C "$REPO_T1" gvfs-helper \
+		--cache-server=disable \
+		--remote=origin \
+		--no-progress \
+		post \
+		<"$OIDS_BLOBS_FILE" >OUT.output 2>OUT.stderr &&
+	verify_received_packfile_count 1 &&
+	verify_vfs_packfile_count 1 &&
+
+	stop_gvfs_protocol_server
+'
+
+# Return the absolute pathname of the first received packfile.
+#
+first_received_packfile_pathname () {
+	fn=$(sed -n '/^packfile/p' <OUT.output | head -1 | sed -n 's/^packfile \(.*\)/\1/p')
+	echo "$SHARED_CACHE_T1"/pack/"$fn"
+	return 0
+}
+
+test_expect_success 'duplicate and busy: vfs- packfile' '
+	test_when_finished "per_test_cleanup" &&
+	start_gvfs_protocol_server &&
+
+	git -C "$REPO_T1" gvfs-helper \
+		--cache-server=disable \
+		--remote=origin \
+		--no-progress \
+		post \
+		<"$OIDS_BLOBS_FILE" \
+		>OUT.output \
+		2>OUT.stderr &&
+	verify_received_packfile_count 1 &&
+	verify_vfs_packfile_count 1 &&
+
+	# Re-fetch the same packfile, but hold the existing packfile
+	# open for writing on an obscure (and randomly-chosen) file
+	# descriptor.
+	#
+	# This should cause the replacement-install to fail (at least
+	# on Windows) with an EBUSY or EPERM or something.
+	#
+	# Verify that that error is eaten.  We do not care if the
+	# replacement is retried or if gvfs-helper simply discards the
+	# second instance.  We just confirm that afterwards we only
+	# have 1 packfile on disk and that the command "lies" and reports
+	# that it created the existing packfile.  (We want the lie because
+	# in normal usage, gh-client has already built the packed-git list
+	# in memory and is using gvfs-helper to fetch missing objects;
+	# gh-client does not care who does the fetch, but it needs to
+	# update its packed-git list and restart the object lookup.)
+	#
+	PACK=$(first_received_packfile_pathname) &&
+	git -C "$REPO_T1" gvfs-helper \
+		--cache-server=disable \
+		--remote=origin \
+		--no-progress \
+		post \
+		<"$OIDS_BLOBS_FILE" \
+		>OUT.output \
+		2>OUT.stderr \
+		9>>"$PACK" &&
+	verify_received_packfile_count 1 &&
+	verify_vfs_packfile_count 1 &&
+
+	stop_gvfs_protocol_server
 '
 
 #################################################################
