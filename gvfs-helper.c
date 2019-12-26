@@ -1675,6 +1675,7 @@ static void my_create_tempfile(
 	struct strbuf buf = STRBUF_INIT;
 	int len_tp;
 	enum scld_error scld;
+	int retries;
 
 	gh__response_status__zero(status);
 
@@ -1723,7 +1724,15 @@ static void my_create_tempfile(
 		goto cleanup;
 	}
 
+	retries = 0;
 	*t1 = create_tempfile(buf.buf);
+	while (!*t1 && retries < 5) {
+		retries++;
+		strbuf_setlen(&buf, len_tp);
+		strbuf_addf(&buf, "%s-%d.%s", basename.buf, retries, suffix1);
+		*t1 = create_tempfile(buf.buf);
+	}
+
 	if (!*t1) {
 		strbuf_addf(&status->error_message,
 			    "could not create tempfile: '%s'",
@@ -1745,6 +1754,13 @@ static void my_create_tempfile(
 		strbuf_addf(  &buf, "%s.%s", basename.buf, suffix2);
 
 		*t2 = create_tempfile(buf.buf);
+		while (!*t2 && retries < 5) {
+			retries++;
+			strbuf_setlen(&buf, len_tp);
+			strbuf_addf(&buf, "%s-%d.%s", basename.buf, retries, suffix2);
+			*t2 = create_tempfile(buf.buf);
+		}
+
 		if (!*t2) {
 			strbuf_addf(&status->error_message,
 				    "could not create tempfile: '%s'",
