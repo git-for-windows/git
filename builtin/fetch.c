@@ -23,6 +23,7 @@
 #include "transport.h"
 #include "gvfs.h"
 #include "gvfs-helper-client.h"
+#include "packfile.h"
 #include "run-command.h"
 #include "parse-options.h"
 #include "sigchain.h"
@@ -1124,6 +1125,13 @@ static int store_updated_refs(struct display_state *display_state,
 
 		opt.exclude_hidden_refs_section = "fetch";
 		rm = ref_map;
+
+		/*
+		 * Before checking connectivity, be really sure we have the
+		 * latest pack-files loaded into memory.
+		 */
+		odb_reprepare(the_repository->objects);
+
 		if (check_connected(iterate_ref_map, &rm, &opt)) {
 			rc = error(_("%s did not send all necessary objects"),
 				   display_state->url);
