@@ -43,6 +43,7 @@
 #include "commit-graph.h"
 #include "pretty.h"
 #include "trailer.h"
+#include "trace2.h"
 
 static const char * const builtin_commit_usage[] = {
 	N_("git commit [-a | --interactive | --patch] [-s] [-v] [-u[<mode>]] [--amend]\n"
@@ -1776,6 +1777,22 @@ struct repository *repo UNUSED)
 	 */
 	try_deserialize = (!do_serialize &&
 			   (do_implicit_deserialize || do_explicit_deserialize));
+
+	/*
+	 * Disable deserialize when verbose is set because it causes us to
+	 * print diffs for each modified file, but that requires us to have
+	 * the index loaded and we don't want to do that (at least not now for
+	 * this seldom used feature).  My fear is that would further tangle
+	 * the merge conflict with upstream.
+	 *
+	 * TODO Reconsider this in the future.
+	 */
+	if (try_deserialize && verbose) {
+		trace2_data_string("status", the_repository, "deserialize/reject",
+				   "args/verbose");
+		try_deserialize = 0;
+	}
+
 	if (try_deserialize)
 		goto skip_init;
 
