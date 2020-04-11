@@ -400,4 +400,43 @@ EOF
 
 '
 
+test_expect_success 'ensure deserialize -v does not crash' '
+
+	git init -b main verbose_test &&
+	touch verbose_test/a &&
+	touch verbose_test/b &&
+	touch verbose_test/c &&
+	git -C verbose_test add a b c &&
+	git -C verbose_test commit -m abc &&
+
+	echo green >>verbose_test/a &&
+	git -C verbose_test add a &&
+	echo red_1 >>verbose_test/b &&
+	echo red_2 >verbose_test/dirt &&
+
+	git -C verbose_test status    >output.ref &&
+	git -C verbose_test status -v >output.ref_v &&
+
+	git -C verbose_test --no-optional-locks status --serialize=../verbose_test.dat      >output.ser.long &&
+	git -C verbose_test --no-optional-locks status --serialize=../verbose_test.dat_v -v >output.ser.long_v &&
+
+	# Verify that serialization does not affect the status output itself.
+	test_cmp output.ref   output.ser.long &&
+	test_cmp output.ref_v output.ser.long_v &&
+
+	GIT_TRACE2_PERF="$(pwd)"/verbose_test.log \
+	git -C verbose_test status --deserialize=../verbose_test.dat >output.des.long &&
+
+	# Verify that normal deserialize was actually used and produces the same result.
+	test_cmp output.ser.long output.des.long &&
+	grep -q "deserialize/result:ok" verbose_test.log &&
+
+	GIT_TRACE2_PERF="$(pwd)"/verbose_test.log_v \
+	git -C verbose_test status --deserialize=../verbose_test.dat_v -v >output.des.long_v &&
+
+	# Verify that vebose mode produces the same result because verbose was rejected.
+	test_cmp output.ser.long_v output.des.long_v &&
+	grep -q "deserialize/reject:args/verbose" verbose_test.log_v
+'
+
 test_done
