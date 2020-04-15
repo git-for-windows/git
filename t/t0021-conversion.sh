@@ -348,6 +348,10 @@ test_expect_success "filter: smudge filters blocked when under GVFS" '
 	test_config filter.empty-in-repo.smudge "echo smudged && cat" &&
 	test_config core.gvfs 64 &&
 
+	test_must_fail git checkout &&
+
+	# ensure the local core.gvfs setting overwrites the global setting
+	git config --global core.gvfs false &&
 	test_must_fail git checkout
 '
 
