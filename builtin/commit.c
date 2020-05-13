@@ -231,12 +231,18 @@ static int opt_parse_deserialize(const struct option *opt UNUSED, const char *ar
 			free(deserialize_path);
 			deserialize_path = xstrdup(arg);
 		}
-		if (deserialize_path && *deserialize_path
-		    && (access(deserialize_path, R_OK) != 0))
-			die("cannot find serialization file '%s'",
-			    deserialize_path);
-
-		do_explicit_deserialize = 1;
+		if (!deserialize_path || !*deserialize_path)
+			do_explicit_deserialize = 1; /* read stdin */
+		else if (access(deserialize_path, R_OK) == 0)
+			do_explicit_deserialize = 1; /* can read from this file */
+		else {
+			/*
+			 * otherwise, silently fallback to the normal
+			 * collection scan
+			 */
+			do_implicit_deserialize = 0;
+			do_explicit_deserialize = 0;
+		}
 	}
 
 	return 0;

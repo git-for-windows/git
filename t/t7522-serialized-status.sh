@@ -439,4 +439,20 @@ test_expect_success 'ensure deserialize -v does not crash' '
 	grep -q "deserialize/reject:args/verbose" verbose_test.log_v
 '
 
+test_expect_success 'fallback when implicit' '
+	git init -b main implicit_fallback_test &&
+	git -C implicit_fallback_test -c status.deserializepath=foobar status
+'
+
+test_expect_success 'fallback when explicit' '
+	git init -b main explicit_fallback_test &&
+	git -C explicit_fallback_test status --deserialize=foobar
+'
+
+test_expect_success 'deserialize from stdin' '
+	git init -b main stdin_test &&
+	git -C stdin_test status --serialize >serialized_status.dat &&
+	cat serialize_status.dat | git -C stdin_test status --deserialize
+'
+
 test_done
