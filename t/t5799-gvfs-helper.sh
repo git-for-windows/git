@@ -1069,4 +1069,36 @@ test_expect_success 'integration: fully implicit: diff 2 commits' '
 		>OUT.output 2>OUT.stderr
 '
 
+#################################################################
+# Ensure that the SHA of the blob we received matches the SHA of
+# the blob we requested.
+#################################################################
+
+# Request a loose blob from the server.  Verify that we received
+# content matches the requested SHA.
+#
+test_expect_success 'catch corrupted loose object' '
+#	test_when_finished "per_test_cleanup" &&
+	start_gvfs_protocol_server_with_mayhem corrupt_loose &&
+
+	test_must_fail \
+		git -C "$REPO_T1" gvfs-helper \
+			--cache-server=trust \
+			--remote=origin \
+			get \
+			<"$OID_ONE_BLOB_FILE" >OUT.output 2>OUT.stderr &&
+
+	stop_gvfs_protocol_server &&
+
+	# Verify corruption detected.
+	# Verify valid blob not included in response to client.
+
+	grep "hash failed for received loose object" OUT.stderr &&
+
+	# Verify that we did not write the corrupted blob to the ODB.
+
+	! verify_objects_in_shared_cache "$OID_ONE_BLOB_FILE" &&
+	git -C "$REPO_T1" fsck
+'
+
 test_done

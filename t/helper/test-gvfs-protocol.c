@@ -518,6 +518,8 @@ static enum worker_result send_loose_object(const struct object_id *oid,
 	unsigned long size;
 	enum object_type type;
 	struct object_info oi = OBJECT_INFO_INIT;
+	int mayhem__corrupt_loose = string_list_has_string(&mayhem_list,
+							   "corrupt_loose");
 
 	/*
 	 * Since `test-gvfs-protocol` is mocking a real GVFS server (cache or
@@ -639,7 +641,22 @@ static enum worker_result send_loose_object(const struct object_id *oid,
 	do {
 		enum worker_result wr;
 		unsigned char *in0 = stream.next_in;
+
+		/*
+		 * Corrupt a byte in the buffer we compress, but undo it
+		 * before we compute the SHA on the portion of the raw
+		 * buffer included in the chunk we compressed.
+		 */
+		if (mayhem__corrupt_loose) {
+			logmayhem("corrupt_loose");
+			*in0 = *in0 ^ 0xff;
+		}
+
 		ret = git_deflate(&stream, Z_FINISH);
+
+		if (mayhem__corrupt_loose)
+			*in0 = *in0 ^ 0xff;
+
 		the_hash_algo->update_fn(&c, in0, stream.next_in - in0);
 
 		/* [5] */
