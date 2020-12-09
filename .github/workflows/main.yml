@@ -195,8 +195,11 @@ jobs:
       NO_PERL: 1
       GIT_CONFIG_PARAMETERS: "'user.name=CI' 'user.email=ci@git'"
     runs-on: windows-latest
+    strategy:
+      matrix:
+        arch: [x64, arm64]
     concurrency:
-      group: vs-build-${{ github.ref }}
+      group: vs-build-${{ github.ref }}-${{ matrix.arch }}
       cancel-in-progress: ${{ needs.ci-config.outputs.skip_concurrent == 'yes' }}
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -215,16 +218,16 @@ jobs:
       uses: microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57 # v3
     - name: copy dlls to root
       shell: cmd
-      run: compat\vcbuild\vcpkg_copy_dlls.bat release
+      run: compat\vcbuild\vcpkg_copy_dlls.bat release ${{ matrix.arch }}-windows
     - name: generate Visual Studio solution
       shell: bash
       run: |
-        cmake `pwd`/contrib/buildsystems/ -DCMAKE_PREFIX_PATH=`pwd`/compat/vcbuild/vcpkg/installed/x64-windows \
-        -DNO_GETTEXT=YesPlease -DPERL_TESTS=OFF -DPYTHON_TESTS=OFF -DCURL_NO_CURL_CMAKE=ON
+        cmake `pwd`/contrib/buildsystems/ -DCMAKE_PREFIX_PATH=`pwd`/compat/vcbuild/vcpkg/installed/${{ matrix.arch }}-windows \
+        -DNO_GETTEXT=YesPlease -DPERL_TESTS=OFF -DPYTHON_TESTS=OFF -DCURL_NO_CURL_CMAKE=ON -DCMAKE_GENERATOR_PLATFORM=${{ matrix.arch }} -DVCPKG_ARCH=${{ matrix.arch }}-windows
     - name: MSBuild
       run: |
         $sln = if (Test-Path git.slnx) { 'git.slnx' } else { 'git.sln' }
-        msbuild $sln -property:Configuration=Release -property:Platform=x64 -maxCpuCount:4
+        msbuild $sln -property:Configuration=Release -property:Platform=${{ matrix.arch }} -maxCpuCount:4
     - name: bundle artifact tar
       shell: bash
       env:
@@ -238,7 +241,7 @@ jobs:
     - name: upload tracked files and build artifacts
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
       with:
-        name: vs-artifacts
+        name: vs-artifacts-${{ matrix.arch }}
         path: artifacts
   vs-test:
     name: win+VS test
@@ -256,7 +259,7 @@ jobs:
     - name: download tracked files and build artifacts
       uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
       with:
-        name: vs-artifacts
+        name: vs-artifacts-x64
         path: ${{github.workspace}}
     - name: extract tracked files and build artifacts
       shell: bash
