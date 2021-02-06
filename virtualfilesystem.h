@@ -7,6 +7,13 @@
 void apply_virtualfilesystem(struct index_state *istate);
 
 /*
+ * Clear the specified flags for all entries in the virtual file system
+ * that match the specified select mask. Returns the number of entries
+ * processed.
+ */
+int clear_ce_flags_virtualfilesystem(struct index_state *istate, int select_mask, int clear_mask);
+
+/*
  * Return 1 if the requested item is found in the virtual file system,
  * 0 for not found and -1 for undecided.
  */
