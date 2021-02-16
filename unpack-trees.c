@@ -1723,14 +1723,6 @@ static int clear_ce_flags_1(struct index_state *istate,
 			continue;
 		}
 
-		/* if it's not in the virtual file system, exit early */
-		if (core_virtualfilesystem) {
-			if (is_included_in_virtualfilesystem(ce->name, ce->ce_namelen) > 0)
-				ce->ce_flags &= ~clear_mask;
-			cache++;
-			continue;
-		}
-
 		if (prefix->len && strncmp(ce->name, prefix->buf, prefix->len))
 			break;
 
@@ -1808,12 +1800,19 @@ static int clear_ce_flags(struct index_state *istate,
 	xsnprintf(label, sizeof(label), "clear_ce_flags/0x%08lx_0x%08lx",
 		  (unsigned long)select_mask, (unsigned long)clear_mask);
 	trace2_region_enter("unpack_trees", label, the_repository);
-	rval = clear_ce_flags_1(istate,
-				istate->cache,
-				istate->cache_nr,
-				&prefix,
-				select_mask, clear_mask,
-				pl, 0, 0);
+	if (core_virtualfilesystem) {
+		rval = clear_ce_flags_virtualfilesystem(istate,
+							select_mask,
+							clear_mask);
+	} else {
+		rval = clear_ce_flags_1(istate,
+					istate->cache,
+					istate->cache_nr,
+					&prefix,
+					select_mask, clear_mask,
+					pl, 0, 0);
+	}
+
 	trace2_region_leave("unpack_trees", label, the_repository);
 
 	stop_progress(&istate->progress);

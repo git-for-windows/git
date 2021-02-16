@@ -252,93 +252,133 @@ int is_excluded_from_virtualfilesystem(const char *pathname, int pathlen, int dt
 	return -1;
 }
 
-/*
- * Update the CE_SKIP_WORKTREE bits based on the virtual file system.
- */
-void apply_virtualfilesystem(struct index_state *istate)
+struct apply_virtual_filesystem_stats {
+	int nr_unknown;
+	int nr_vfs_dirs;
+	int nr_vfs_rows;
+	int nr_bulk_skip;
+	int nr_explicit_skip;
+};
+
+static void clear_ce_flags_virtualfilesystem_1(struct index_state *istate, int select_mask, int clear_mask,
+					       struct apply_virtual_filesystem_stats *stats)
 {
 	char *buf, *entry;
 	size_t i;
-	int nr_unknown = 0;
-	int nr_vfs_dirs = 0;
-	int nr_vfs_rows = 0;
-	int nr_bulk_skip = 0;
-	int nr_explicit_skip = 0;
-
-	if (!repo_config_get_virtualfilesystem(istate->repo))
-		return;
-
-	trace2_region_enter("vfs", "apply", the_repository);
 
 	if (!virtual_filesystem_data.len)
 		get_virtual_filesystem_data(istate->repo, &virtual_filesystem_data);
 
-	/* set CE_SKIP_WORKTREE bit on all entries */
-	for (i = 0; i < istate->cache_nr; i++)
-		istate->cache[i]->ce_flags |= CE_SKIP_WORKTREE;
-
-	/* clear CE_SKIP_WORKTREE bit for everything in the virtual file system */
+	/* clear specified flag bits for everything in the virtual file system */
 	entry = buf = virtual_filesystem_data.buf;
 	for (i = 0; i < virtual_filesystem_data.len; i++) {
 		if (buf[i] == '\0') {
+			struct cache_entry *ce;
 			ssize_t pos, len;
 
-			nr_vfs_rows++;
+			stats->nr_vfs_rows++;
 
 			len = buf + i - entry;
 
 			/* look for a directory wild card (ie "dir1/") */
 			if (buf[i - 1] == '/') {
-				nr_vfs_dirs++;
+				stats->nr_vfs_dirs++;
 				if (ignore_case)
 					adjust_dirname_case(istate, entry);
 				pos = index_name_pos(istate, entry, len);
 				if (pos < 0) {
-					pos = -pos - 1;
-					while ((size_t)pos < istate->cache_nr && !fspathncmp(istate->cache[pos]->name, entry, len)) {
-						if (istate->cache[pos]->ce_flags & CE_SKIP_WORKTREE)
-							nr_bulk_skip++;
-						istate->cache[pos]->ce_flags &= ~CE_SKIP_WORKTREE;
-						pos++;
+					for (pos = -pos - 1; (size_t)pos < istate->cache_nr; pos++) {
+						ce = istate->cache[pos];
+						if (fspathncmp(ce->name, entry, len))
+							break;
+
+						if (select_mask && !(ce->ce_flags & select_mask))
+							continue;
+
+						if (ce->ce_flags & clear_mask)
+							stats->nr_bulk_skip++;
+						ce->ce_flags &= ~clear_mask;
 					}
 				}
 			} else {
 				if (ignore_case) {
-					struct cache_entry *ce = index_file_exists(istate, entry, len, ignore_case);
-					if (ce) {
-						if (ce->ce_flags & CE_SKIP_WORKTREE)
-							nr_explicit_skip++;
-						ce->ce_flags &= ~CE_SKIP_WORKTREE;
-					}
-					else {
-						nr_unknown++;
-					}
+					ce = index_file_exists(istate, entry, len, ignore_case);
 				} else {
 					int pos = index_name_pos(istate, entry, len);
-					if (pos >= 0) {
-						if (istate->cache[pos]->ce_flags & CE_SKIP_WORKTREE)
-							nr_explicit_skip++;
-						istate->cache[pos]->ce_flags &= ~CE_SKIP_WORKTREE;
-					}
-					else {
-						nr_unknown++;
-					}
+
+					ce = NULL;
+					if (pos >= 0)
+						ce = istate->cache[pos];
+				}
+
+				if (ce) {
+					do {
+						if (!select_mask || (ce->ce_flags & select_mask)) {
+							if (ce->ce_flags & clear_mask)
+								stats->nr_explicit_skip++;
+							ce->ce_flags &= ~clear_mask;
+						}
+
+						/*
+						 * There may be aliases with different cases of the same
+						 * name that also need to be modified.
+						 */
+						if (ignore_case)
+							ce = index_file_next_match(istate, ce, ignore_case);
+						else
+							break;
+
+					} while (ce);
+				} else {
+					stats->nr_unknown++;
 				}
 			}
 
 			entry += len + 1;
 		}
 	}
+}
 
-	if (nr_vfs_rows > 0) {
-		trace2_data_intmax("vfs", the_repository, "apply/tracked", nr_bulk_skip + nr_explicit_skip);
+/*
+ * Clear the specified flags for all entries in the virtual file system
+ * that match the specified select mask. Returns the number of entries
+ * processed.
+ */
+int clear_ce_flags_virtualfilesystem(struct index_state *istate, int select_mask, int clear_mask)
+{
+	struct apply_virtual_filesystem_stats stats = {0};
 
-		trace2_data_intmax("vfs", the_repository, "apply/vfs_rows", nr_vfs_rows);
-		trace2_data_intmax("vfs", the_repository, "apply/vfs_dirs", nr_vfs_dirs);
+	clear_ce_flags_virtualfilesystem_1(istate, select_mask, clear_mask, &stats);
+	return istate->cache_nr;
+}
 
-		trace2_data_intmax("vfs", the_repository, "apply/nr_unknown", nr_unknown);
-		trace2_data_intmax("vfs", the_repository, "apply/nr_bulk_skip", nr_bulk_skip);
-		trace2_data_intmax("vfs", the_repository, "apply/nr_explicit_skip", nr_explicit_skip);
+/*
+ * Update the CE_SKIP_WORKTREE bits based on the virtual file system.
+ */
+void apply_virtualfilesystem(struct index_state *istate)
+{
+	size_t i;
+	struct apply_virtual_filesystem_stats stats = {0};
+
+	if (!repo_config_get_virtualfilesystem(istate->repo))
+		return;
+
+	trace2_region_enter("vfs", "apply", the_repository);
+
+	/* set CE_SKIP_WORKTREE bit on all entries */
+	for (i = 0; i < istate->cache_nr; i++)
+		istate->cache[i]->ce_flags |= CE_SKIP_WORKTREE;
+
+	clear_ce_flags_virtualfilesystem_1(istate, 0, CE_SKIP_WORKTREE, &stats);
+	if (stats.nr_vfs_rows > 0) {
+		trace2_data_intmax("vfs", the_repository, "apply/tracked", stats.nr_bulk_skip + stats.nr_explicit_skip);
+
+		trace2_data_intmax("vfs", the_repository, "apply/vfs_rows", stats.nr_vfs_rows);
+		trace2_data_intmax("vfs", the_repository, "apply/vfs_dirs", stats.nr_vfs_dirs);
+
+		trace2_data_intmax("vfs", the_repository, "apply/nr_unknown", stats.nr_unknown);
+		trace2_data_intmax("vfs", the_repository, "apply/nr_bulk_skip", stats.nr_bulk_skip);
+		trace2_data_intmax("vfs", the_repository, "apply/nr_explicit_skip", stats.nr_explicit_skip);
 	}
 
 	trace2_region_leave("vfs", "apply", the_repository);
