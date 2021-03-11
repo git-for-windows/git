@@ -1240,6 +1240,7 @@ int normalize_path_copy_len(char *dst, const char *src, int *prefix_len);
 int normalize_path_copy(char *dst, const char *src);
 int longest_ancestor_length(const char *path, struct string_list *prefixes);
 char *strip_path_suffix(const char *path, const char *suffix);
+int is_mount_point_via_stat(struct strbuf *path);
 int daemon_avoid_alias(const char *path);
 
 /*
@@ -1657,6 +1658,7 @@ int has_symlink_leading_path(const char *name, int len);
 int threaded_has_symlink_leading_path(struct cache_def *, const char *, int);
 int check_leading_path(const char *name, int len);
 int has_dirs_only_path(const char *name, int len, int prefix_len);
+void invalidate_lstat_cache(void);
 void schedule_dir_for_removal(const char *name, int len);
 void remove_scheduled_dirs(void);
 

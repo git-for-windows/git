@@ -417,6 +417,9 @@ static int check_updates(struct unpack_trees_options *o,
 
 	progress = get_progress(o, index);
 
+	/* Start with clean cache to avoid using any possibly outdated info. */
+	invalidate_lstat_cache();
+
 	git_attr_set_direction(GIT_ATTR_CHECKOUT);
 
 	if (should_update_submodules())
@@ -1543,7 +1546,9 @@ static void mark_new_skip_worktree(struct pattern_list *pl,
 	 * 2. Widen worktree according to sparse-checkout file.
 	 * Matched entries will have skip_wt_flag cleared (i.e. "in")
 	 */
+	enable_fscache(istate->cache_nr);
 	clear_ce_flags(istate, select_flag, skip_wt_flag, pl, show_progress);
+	disable_fscache();
 }
 
 static void populate_from_existing_patterns(struct unpack_trees_options *o,
@@ -1611,8 +1616,8 @@ int unpack_trees(unsigned len, struct tree_desc *t, struct unpack_trees_options 
 	o->merge_size = len;
 	mark_all_ce_unused(o->src_index);
 
-	if (o->src_index->fsmonitor_last_update)
-		o->result.fsmonitor_last_update = o->src_index->fsmonitor_last_update;
+	o->result.fsmonitor_last_update =
+		xstrdup_or_null(o->src_index->fsmonitor_last_update);
 
 	/*
 	 * Sparse checkout loop #1: set NEW_SKIP_WORKTREE on existing entries
