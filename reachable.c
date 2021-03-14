@@ -80,8 +80,6 @@ static void add_recent_object(const struct object_id *oid,
 	 * commits and tags to have been parsed.
 	 */
 	type = oid_object_info(the_repository, oid, NULL);
-	if (type < 0)
-		die("unable to get object info for %s", oid_to_hex(oid));
 
 	switch (type) {
 	case OBJ_TAG:
@@ -93,6 +91,9 @@ static void add_recent_object(const struct object_id *oid,
 		break;
 	case OBJ_BLOB:
 		obj = (struct object *)lookup_blob(the_repository, oid);
+		break;
+	case OBJ_BAD:
+		die("unable to get object info for %s", oid_to_hex(oid));
 		break;
 	default:
 		die("unknown object type for %s: %s",

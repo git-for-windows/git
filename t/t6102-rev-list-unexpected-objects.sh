@@ -31,7 +31,8 @@ test_expect_success 'setup unexpected non-tree entry' '
 '
 
 test_expect_success 'traverse unexpected non-tree entry (lone)' '
-	test_must_fail git rev-list --objects $broken_tree
+	test_must_fail git rev-list --objects $broken_tree >output 2>&1 &&
+	test_i18ngrep "not a tree" output
 '
 
 test_expect_success 'traverse unexpected non-tree entry (seen)' '
@@ -122,6 +123,116 @@ test_expect_failure 'traverse unexpected non-blob tag (lone)' '
 test_expect_success 'traverse unexpected non-blob tag (seen)' '
 	test_must_fail git rev-list --objects $commit $tag >output 2>&1 &&
 	test_i18ngrep "not a blob" output
+'
+
+test_expect_success 'setup unexpected non-tag tag' '
+	test_when_finished "git tag -d tag-commit tag-tag" &&
+
+	git tag -a -m"tagged commit" tag-commit $commit &&
+	tag_commit=$(git rev-parse tag-commit) &&
+	git tag -a -m"tagged tag" tag-tag tag-commit &&
+	tag_tag=$(git rev-parse tag-tag) &&
+
+	git cat-file tag tag-tag >good-tag-tag &&
+	git cat-file tag tag-commit >good-commit-tag &&
+
+	sed -e "s/$tag_commit/$commit/" <good-tag-tag >broken-tag-tag-commit &&
+	sed -e "s/$tag_commit/$tree/" <good-tag-tag >broken-tag-tag-tree &&
+	sed -e "s/$tag_commit/$blob/" <good-tag-tag >broken-tag-tag-blob &&
+
+	sed -e "s/$commit/$tag_commit/" <good-commit-tag >broken-commit-tag-tag &&
+	sed -e "s/$commit/$tree/" <good-commit-tag >broken-commit-tag-tree &&
+	sed -e "s/$commit/$blob/" <good-commit-tag >broken-commit-tag-blob &&
+
+	tag_tag_commit=$(git hash-object -w -t tag broken-tag-tag-commit) &&
+	tag_tag_tree=$(git hash-object -w -t tag broken-tag-tag-tree) &&
+	tag_tag_blob=$(git hash-object -w -t tag broken-tag-tag-blob) &&
+
+	commit_tag_tag=$(git hash-object -w -t tag broken-commit-tag-tag) &&
+	commit_tag_tree=$(git hash-object -w -t tag broken-commit-tag-tree) &&
+	commit_tag_blob=$(git hash-object -w -t tag broken-commit-tag-blob)
+'
+
+test_expect_success 'traverse unexpected incorrectly typed tag (to commit & tag)' '
+	test_must_fail git rev-list --objects $tag_tag_commit 2>err &&
+	cat >expected <<-EOF &&
+	error: object $commit is a commit, not a tag
+	fatal: bad object $commit
+	EOF
+	test_cmp expected err &&
+
+	test_must_fail git rev-list --objects $commit_tag_tag 2>err &&
+	cat >expected <<-EOF &&
+	error: object $tag_commit is a tag, not a commit
+	fatal: bad object $tag_commit
+	EOF
+	test_cmp expected err
+'
+
+test_expect_success 'traverse unexpected incorrectly typed tag (to tree)' '
+	test_must_fail git rev-list --objects $tag_tag_tree 2>err &&
+	cat >expected <<-EOF &&
+	error: object $tree is a tree, not a tag
+	fatal: bad object $tree
+	EOF
+	test_cmp expected err &&
+
+	test_must_fail git rev-list --objects $commit_tag_tree 2>err &&
+	cat >expected <<-EOF &&
+	error: object $tree is a tree, not a commit
+	fatal: bad object $tree
+	EOF
+	test_cmp expected err
+'
+
+test_expect_success 'traverse unexpected incorrectly typed tag (to blob)' '
+	test_must_fail git rev-list --objects $tag_tag_blob 2>err &&
+	cat >expected <<-EOF &&
+	error: object $blob is a blob, not a tag
+	fatal: bad object $blob
+	EOF
+	test_cmp expected err &&
+
+	test_must_fail git rev-list --objects $commit_tag_blob 2>err &&
+	cat >expected <<-EOF &&
+	error: object $blob is a blob, not a commit
+	fatal: bad object $blob
+	EOF
+	test_cmp expected err
+'
+
+test_expect_success 'traverse unexpected non-tag tag (tree seen to blob)' '
+	test_must_fail git rev-list --objects $tree $commit_tag_blob 2>err &&
+	cat >expected <<-EOF &&
+	error: object $blob is a blob, not a commit
+	fatal: bad object $blob
+	EOF
+	test_cmp expected err &&
+
+	test_must_fail git rev-list --objects $tree $tag_tag_blob 2>err &&
+	cat >expected <<-EOF &&
+	error: object $blob is a blob, not a tag
+	fatal: bad object $blob
+	EOF
+	test_cmp expected err
+'
+
+test_expect_success 'traverse unexpected non-tag tag (blob seen to blob)' '
+	test_must_fail git rev-list --objects $blob $commit_tag_blob 2>err &&
+	cat >expected <<-EOF &&
+	error: object $blob is a blob, not a commit
+	error: bad tag pointer to $blob in $commit_tag_blob
+	fatal: bad object $commit_tag_blob
+	EOF
+	test_cmp expected err &&
+
+	test_must_fail git rev-list --objects $blob $tag_tag_blob 2>err &&
+	cat >expected <<-EOF &&
+	error: object $blob is a blob, not a tag
+	error: bad tag pointer to $blob in $tag_tag_blob
+	fatal: bad object $tag_tag_blob
+	EOF
+	test_cmp expected err
 '
 
 test_done

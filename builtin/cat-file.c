@@ -133,7 +133,7 @@ static int cat_one_file(int opt, const char *exp_type, const char *obj_name,
 
 	case 'p':
 		type = oid_object_info(the_repository, &oid, NULL);
-		if (type < 0)
+		if (type == OBJ_BAD)
 			die("Not a valid object name %s", obj_name);
 
 		/* custom pretty-print here */

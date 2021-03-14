@@ -1269,7 +1269,7 @@ static int retry_bad_packed_offset(struct repository *r,
 				   struct packed_git *p,
 				   off_t obj_offset)
 {
-	int type;
+	enum object_type type;
 	uint32_t pos;
 	struct object_id oid;
 	if (offset_to_pack_pos(p, obj_offset, &pos) < 0)
@@ -1277,8 +1277,6 @@ static int retry_bad_packed_offset(struct repository *r,
 	nth_packed_object_id(&oid, p, pack_pos_to_index(p, pos));
 	mark_bad_packed_object(p, oid.hash);
 	type = oid_object_info(r, &oid, NULL);
-	if (type <= OBJ_NONE)
-		return OBJ_BAD;
 	return type;
 }
 

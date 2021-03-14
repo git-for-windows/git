@@ -218,8 +218,8 @@ static int mark_link(struct object *obj, enum object_type type,
 	if (!obj)
 		return -1;
 
-	if (type != OBJ_ANY && obj->type != type)
-		die(_("object type mismatch at %s"), oid_to_hex(&obj->oid));
+	if (type != OBJ_ANY)
+		oid_is_type_or_die(&obj->oid, obj->type, &type);
 
 	obj->flags |= FLAG_LINK;
 	return 0;
@@ -237,14 +237,11 @@ static unsigned check_object(struct object *obj)
 
 	if (!(obj->flags & FLAG_CHECKED)) {
 		unsigned long size;
-		int type = oid_object_info(the_repository, &obj->oid, &size);
-		if (type <= 0)
+		enum object_type type = oid_object_info(the_repository, &obj->oid, &size);
+		if (type == OBJ_BAD)
 			die(_("did not receive expected object %s"),
 			      oid_to_hex(&obj->oid));
-		if (type != obj->type)
-			die(_("object %s: expected type %s, found %s"),
-			    oid_to_hex(&obj->oid),
-			    type_name(obj->type), type_name(type));
+		oid_is_type_or_die(&obj->oid, obj->type, &type);
 		obj->flags |= FLAG_CHECKED;
 		return 1;
 	}
@@ -821,7 +818,7 @@ static void sha1_object(const void *data, struct object_entry *obj_entry,
 		unsigned long has_size;
 		read_lock();
 		has_type = oid_object_info(the_repository, oid, &has_size);
-		if (has_type < 0)
+		if (has_type == OBJ_BAD)
 			die(_("cannot read existing object info %s"), oid_to_hex(oid));
 		if (has_type != type || has_size != size)
 			die(_("SHA1 COLLISION FOUND WITH %s !"), oid_to_hex(oid));

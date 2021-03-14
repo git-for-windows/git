@@ -204,7 +204,11 @@ static int check_object(struct object *obj, enum object_type type,
 	if (!(obj->flags & FLAG_OPEN)) {
 		unsigned long size;
 		int type = oid_object_info(the_repository, &obj->oid, &size);
-		if (type != obj->type || type <= 0)
+		if (type == OBJ_BAD)
+			die(_("unable to get object type for %s"),
+			    oid_to_hex(&obj->oid));
+		if (type != obj->type)
+			/* todo to new function */
 			die("object of unexpected type");
 		obj->flags |= FLAG_WRITTEN;
 		return 0;

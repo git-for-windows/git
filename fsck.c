@@ -996,8 +996,8 @@ int fsck_tag_standalone(const struct object_id *oid, const char *buffer,
 		ret = report(options, oid, OBJ_TAG, FSCK_MSG_MISSING_TYPE, "invalid format - unexpected end after 'type' line");
 		goto done;
 	}
-	*tagged_type = type_from_string_gently(buffer, eol - buffer, 1);
-	if (*tagged_type < 0)
+	*tagged_type = type_from_string_gently(buffer, eol - buffer);
+	if (*tagged_type == OBJ_BAD)
 		ret = report(options, oid, OBJ_TAG, FSCK_MSG_BAD_TYPE, "invalid 'type' value");
 	if (ret)
 		goto done;

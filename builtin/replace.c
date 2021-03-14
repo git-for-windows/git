@@ -322,7 +322,7 @@ static int edit_and_replace(const char *object_ref, int force, int raw)
 		return error(_("not a valid object name: '%s'"), object_ref);
 
 	type = oid_object_info(the_repository, &old_oid, NULL);
-	if (type < 0)
+	if (type == OBJ_BAD)
 		return error(_("unable to get object type for %s"),
 			     oid_to_hex(&old_oid));
 

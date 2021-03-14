@@ -2247,7 +2247,7 @@ unsigned long oe_get_size_slow(struct packing_data *pack,
 
 	if (e->type_ != OBJ_OFS_DELTA && e->type_ != OBJ_REF_DELTA) {
 		packing_data_lock(&to_pack);
-		if (oid_object_info(the_repository, &e->idx.oid, &size) < 0)
+		if (oid_object_info(the_repository, &e->idx.oid, &size) == OBJ_BAD)
 			die(_("unable to get size of %s"),
 			    oid_to_hex(&e->idx.oid));
 		packing_data_unlock(&to_pack);
@@ -3407,7 +3407,7 @@ static int add_loose_object(const struct object_id *oid, const char *path,
 {
 	enum object_type type = oid_object_info(the_repository, oid, NULL);
 
-	if (type < 0) {
+	if (type == OBJ_BAD) {
 		warning(_("loose object at %s could not be examined"), path);
 		return 0;
 	}

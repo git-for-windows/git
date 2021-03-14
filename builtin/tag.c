@@ -260,7 +260,7 @@ static void create_tag(const struct object_id *object, const char *object_ref,
 	char *path = NULL;
 
 	type = oid_object_info(the_repository, object, NULL);
-	if (type <= OBJ_NONE)
+	if (type == OBJ_BAD)
 		die(_("bad object type."));
 
 	if (type == OBJ_TAG)

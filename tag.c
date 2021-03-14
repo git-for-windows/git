@@ -99,12 +99,24 @@ struct object *deref_tag_noverify(struct object *o)
 	return o;
 }
 
-struct tag *lookup_tag(struct repository *r, const struct object_id *oid)
+struct tag *lookup_tag_type(struct repository *r, const struct object_id *oid,
+			    enum object_type type)
 {
 	struct object *obj = lookup_object(r, oid);
 	if (!obj)
 		return create_object(r, oid, alloc_tag_node(r));
+	if (type != OBJ_NONE &&
+	    obj->type != OBJ_NONE) {
+		enum object_type want = OBJ_TAG;
+		if (oid_is_type_or_error(oid, obj->type, &want))
+			return NULL;
+	}
 	return object_as_type(obj, OBJ_TAG, 0);
+}
+
+struct tag *lookup_tag(struct repository *r, const struct object_id *oid)
+{
+	return lookup_tag_type(r, oid, OBJ_NONE);
 }
 
 static timestamp_t parse_tag_date(const char *buf, const char *tail)
