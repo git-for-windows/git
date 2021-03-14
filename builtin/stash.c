@@ -10,6 +10,7 @@
 #include "strvec.h"
 #include "run-command.h"
 #include "dir.h"
+#include "entry.h"
 #include "rerere.h"
 #include "revision.h"
 #include "log-tree.h"
