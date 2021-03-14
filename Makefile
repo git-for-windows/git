@@ -1213,11 +1213,32 @@ PTHREAD_CFLAGS =
 SPARSE_FLAGS ?=
 SP_EXTRA_FLAGS = -Wno-universal-initializer
 
+# For the 'coccicheck' target
+SPATCH_FLAGS = --all-includes --include-headers-for-types --patch .
+
 # For the 'coccicheck' target; setting SPATCH_BATCH_SIZE higher will
 # usually result in less CPU usage at the cost of higher peak memory.
 # Setting it to 0 will feed all files in a single spatch invocation.
-SPATCH_FLAGS = --all-includes --patch .
-SPATCH_BATCH_SIZE = 1
+SPATCH_BATCH_SIZE = 8
+
+# For the 'coccicheck' target; SPATCH_XARGS can be used to manually
+# tweak the xargs invocation. By default we invoke "xargs -n 1", and
+# "xargs -n 9999" under SPATCH_BATCH_SIZE=0.
+#
+# Setting SPATCH_XARGS overrides SPATCH_BATCH_SIZE. To get concurrency
+# when targeting a single contrib/coccinelle/%.patch use e.g. "-P" if
+# your xargs(1) supports it:
+#
+#    make contrib/coccinelle/strbuf.cocci.patch SPATCH_XARGS="xargs -P 8 -n 8"
+#
+# Or a combination -jN and "xargs -P":
+#
+#    make -j4 coccicheck SPATCH_XARGS="xargs -P 2 -n 8"
+ifeq (0,$(SPATCH_BATCH_SIZE))
+SPATCH_XARGS = xargs -n 9999
+else
+SPATCH_XARGS = xargs -n $(SPATCH_BATCH_SIZE)
+endif
 
 include config.mak.uname
 -include config.mak.autogen
@@ -2932,17 +2953,12 @@ check: config-list.h command-list.h
 		exit 1; \
 	fi
 
-FOUND_C_SOURCES = $(filter %.c,$(shell $(FIND_SOURCE_FILES)))
+FOUND_C_SOURCES = $(filter %.c %.h,$(shell $(FIND_SOURCE_FILES)))
 COCCI_SOURCES = $(filter-out $(THIRD_PARTY_SOURCES),$(FOUND_C_SOURCES))
 
 %.cocci.patch: %.cocci $(COCCI_SOURCES)
 	$(QUIET_SPATCH) \
-	if test $(SPATCH_BATCH_SIZE) = 0; then \
-		limit=; \
-	else \
-		limit='-n $(SPATCH_BATCH_SIZE)'; \
-	fi; \
-	if ! echo $(COCCI_SOURCES) | xargs $$limit \
+	if ! echo $(COCCI_SOURCES) | $(SPATCH_XARGS) \
 		$(SPATCH) --sp-file $< $(SPATCH_FLAGS) \
 		>$@+ 2>$@.log; \
 	then \
