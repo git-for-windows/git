@@ -31,6 +31,14 @@ midx_read_expect () {
 	test_cmp expect actual
 }
 
+midx_expect_object_offset () {
+	OID="$1"
+	OFFSET="$2"
+	OBJECT_DIR="$3"
+	test-tool read-midx --show-objects $OBJECT_DIR >actual &&
+	grep "^$OID $OFFSET" actual
+}
+
 test_expect_success 'setup' '
 	test_oid_cache <<-EOF
 	idxoff sha1:2999
@@ -234,6 +242,37 @@ test_expect_success 'warn on improper hash version' '
 	)
 '
 
+test_expect_success 'midx picks objects from preferred pack' '
+	test_when_finished rm -rf preferred.git &&
+	git init --bare preferred.git &&
+	(
+		cd preferred.git &&
+
+		a=$(echo "a" | git hash-object -w --stdin) &&
+		b=$(echo "b" | git hash-object -w --stdin) &&
+		c=$(echo "c" | git hash-object -w --stdin) &&
+
+		# Set up two packs, duplicating the object "B" at different
+		# offsets.
+		git pack-objects objects/pack/test-AB <<-EOF &&
+		$a
+		$b
+		EOF
+		bc=$(git pack-objects objects/pack/test-BC <<-EOF
+		$b
+		$c
+		EOF
+		) &&
+
+		git multi-pack-index --object-dir=objects \
+			write --preferred-pack=test-BC-$bc.idx 2>err &&
+		test_must_be_empty err &&
+
+		ofs=$(git show-index <objects/pack/test-BC-$bc.idx | grep $b |
+			cut -d" " -f1) &&
+		midx_expect_object_offset $b $ofs objects
+	)
+'
 
 test_expect_success 'verify multi-pack-index success' '
 	git multi-pack-index verify --object-dir=$objdir
