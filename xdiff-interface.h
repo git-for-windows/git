@@ -11,11 +11,31 @@
  */
 #define MAX_XDIFF_SIZE (1024UL * 1024 * 1023)
 
-typedef void (*xdiff_emit_line_fn)(void *, char *, unsigned long);
-typedef void (*xdiff_emit_hunk_fn)(void *data,
-				   long old_begin, long old_nr,
-				   long new_begin, long new_nr,
-				   const char *func, long funclen);
+/*
+ * The xdiff_emit_{line,hunk}_fn consumers can return -1 to abort
+ * early, or 0 to continue processing. Note that doing so is an
+ * all-or-nothing affair, as returning -1 will return all the way to
+ * the top-level, e.g. the xdi_diff_outf() call to generate the diff.
+ *
+ * Thus returning -1 from a hunk header callback means you won't be
+ * getting any more hunks, or diffs, and likewise returning from a
+ * line callback means you won't be getting anymore lines.
+ *
+ * We may extend the interface in the future to understand other more
+ * granular return values, but for now use it carefully, or consider
+ * e.g. using discard_hunk_line() if you say just don't care about
+ * hunk headers.
+ *
+ * Note that just returning -1 will make your early return
+ * indistinguishable from an error internal to xdiff. See "diff_grep"
+ * in diffcore-pickaxe.c for a trick to work around this, i.e. using
+ * the "consume_callback_data" to note the desired early return.
+ */
+typedef int (*xdiff_emit_line_fn)(void *, char *, unsigned long);
+typedef int (*xdiff_emit_hunk_fn)(void *data,
+				  long old_begin, long old_nr,
+				  long new_begin, long new_nr,
+				  const char *func, long funclen);
 
 int xdi_diff(mmfile_t *mf1, mmfile_t *mf2, xpparam_t const *xpp, xdemitconf_t const *xecfg, xdemitcb_t *ecb);
 int xdi_diff_outf(mmfile_t *mf1, mmfile_t *mf2,
@@ -36,9 +56,9 @@ extern int git_xmerge_style;
  * Can be used as a no-op hunk_fn for xdi_diff_outf(), since a NULL
  * one just sends the hunk line to the line_fn callback).
  */
-void discard_hunk_line(void *priv,
-		       long ob, long on, long nb, long nn,
-		       const char *func, long funclen);
+int discard_hunk_line(void *priv,
+		      long ob, long on, long nb, long nn,
+		      const char *func, long funclen);
 
 /*
  * Compare the strings l1 with l2 which are of size s1 and s2 respectively.

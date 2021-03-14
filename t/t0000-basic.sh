@@ -1324,4 +1324,23 @@ test_expect_success 'test_must_fail rejects a non-git command with env' '
 	grep -F "test_must_fail: only '"'"'git'"'"' is allowed" err
 '
 
+test_expect_success 'test_commit --no-tag fails with a <tag> argument' '
+	run_sub_test_lib_test_err \
+		test_commit-bug "test_commit-bug with --no-tag" <<-\EOF &&
+	test_expect_success "setup #1" "test_commit message1 file1 contents1"
+	test_expect_success "setup #2" "test_commit message2 file2 contents2 tag2"
+	test_expect_success "setup #3" "test_commit --no-tag message3 file3 contents3"
+	test_expect_success "setup #4" "test_commit --no-tag message4 file4 contents4 tag4"
+	test_done
+	EOF
+	check_sub_test_lib_test_err test_commit-bug \
+		<<-\EOF_OUT 3<<-\EOF_ERR
+	ok 1 - setup #1
+	ok 2 - setup #2
+	ok 3 - setup #3
+	EOF_OUT
+	error: bug in the test script: expect no <tag> parameter with --no-tag
+	EOF_ERR
+'
+
 test_done
