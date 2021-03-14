@@ -573,7 +573,7 @@ struct attr_check *attr_check_initl(const char *one, ...)
 	check = attr_check_alloc();
 	check->nr = cnt;
 	check->alloc = cnt;
-	check->items = xcalloc(cnt, sizeof(struct attr_check_item));
+	CALLOC_ARRAY(check->items, cnt);
 
 	check->items[0].attr = git_attr(one);
 	va_start(params, one);
@@ -674,7 +674,7 @@ static struct attr_stack *read_attr_from_array(const char **list)
 	const char *line;
 	int lineno = 0;
 
-	res = xcalloc(1, sizeof(*res));
+	CALLOC_ARRAY(res, 1);
 	while ((line = *(list++)) != NULL)
 		handle_attr_line(res, line, "[builtin]", ++lineno,
 				 READ_ATTR_MACRO_OK);
@@ -722,7 +722,7 @@ static struct attr_stack *read_attr_from_file(const char *path, unsigned flags)
 	}
 	fp = xfdopen(fd, "r");
 
-	res = xcalloc(1, sizeof(*res));
+	CALLOC_ARRAY(res, 1);
 	while (fgets(buf, sizeof(buf), fp)) {
 		char *bufp = buf;
 		if (!lineno)
@@ -748,7 +748,7 @@ static struct attr_stack *read_attr_from_index(const struct index_state *istate,
 	if (!buf)
 		return NULL;
 
-	res = xcalloc(1, sizeof(*res));
+	CALLOC_ARRAY(res, 1);
 	for (sp = buf; *sp; ) {
 		char *ep;
 		int more;
@@ -789,7 +789,7 @@ static struct attr_stack *read_attr(const struct index_state *istate,
 	}
 
 	if (!res)
-		res = xcalloc(1, sizeof(*res));
+		CALLOC_ARRAY(res, 1);
 	return res;
 }
 
@@ -890,7 +890,7 @@ static void bootstrap_attr_stack(const struct index_state *istate,
 	else
 		e = NULL;
 	if (!e)
-		e = xcalloc(1, sizeof(struct attr_stack));
+		CALLOC_ARRAY(e, 1);
 	push_stack(stack, e, NULL, 0);
 }
 

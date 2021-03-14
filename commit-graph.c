@@ -526,7 +526,7 @@ static struct commit_graph *load_commit_graph_chain(struct repository *r,
 		return NULL;
 
 	count = st.st_size / (the_hash_algo->hexsz + 1);
-	oids = xcalloc(count, sizeof(struct object_id));
+	CALLOC_ARRAY(oids, count);
 
 	prepare_alt_odb(r);
 
@@ -2247,7 +2247,7 @@ int write_commit_graph(struct object_directory *odb,
 	if (!commit_graph_compatible(r))
 		return 0;
 
-	ctx = xcalloc(1, sizeof(struct write_commit_graph_context));
+	CALLOC_ARRAY(ctx, 1);
 	ctx->r = r;
 	ctx->odb = odb;
 	ctx->append = flags & COMMIT_GRAPH_WRITE_APPEND ? 1 : 0;
