@@ -19,82 +19,94 @@ test_expect_success 'setup' '
 	commit=$(printf "%s\n" "Test" "" | git commit-tree "$tree") &&
 	git update-ref HEAD "$commit" &&
 
+	echo "This is a very, very long first line for the commit message to see if it is wrapped correctly" >message &&
+
+	sed "s/i/1234/g" <message >tmp &&
+	tr 1234 "\360\235\204\236" <tmp >message.2 &&
+
+	sed "s/i/1234/g" <message >tmp &&
+	tr 1234 "\370\235\204\236" <tmp >message.3 &&
+
+	echo "a								12	34	56	78" >message.4 &&
+	echo "Commit by someone else" >message.5 &&
+
 	echo 2 >a1 &&
-	git commit --quiet -m "This is a very, very long first line for the commit message to see if it is wrapped correctly" a1 &&
+	git commit --quiet -F message a1 &&
 
 	# test if the wrapping is still valid
 	# when replacing all is by treble clefs.
 	echo 3 >a1 &&
-	git commit --quiet -m "$(
-		echo "This is a very, very long first line for the commit message to see if it is wrapped correctly" |
-		sed "s/i/1234/g" |
-		tr 1234 "\360\235\204\236")" a1 &&
+	git commit --quiet -F message.2 a1 &&
 
 	# now fsck up the utf8
 	git config i18n.commitencoding non-utf-8 &&
 	echo 4 >a1 &&
-	git commit --quiet -m "$(
-		echo "This is a very, very long first line for the commit message to see if it is wrapped correctly" |
-		sed "s/i/1234/g" |
-		tr 1234 "\370\235\204\236")" a1 &&
+	git commit --quiet -F message.3 a1 &&
 
 	echo 5 >a1 &&
-	git commit --quiet -m "a								12	34	56	78" a1 &&
+	git commit --quiet -F message.4 a1 &&
 
 	echo 6 >a1 &&
-	git commit --quiet -m "Commit by someone else" \
+	git commit --quiet -F message.5  \
 		--author="Someone else <not!me>" a1 &&
 
-	cat >expect.template <<-\EOF
+	cat >expect.default <<-EOF
 	A U Thor (5):
-	      SUBJECT
-	      SUBJECT
-	      SUBJECT
-	      SUBJECT
-	      SUBJECT
+	      Test
+	      $(cat message)
+	      $(cat message.2)
+	      $(cat message.3)
+	      $(cat message.4)
 
 	Someone else (1):
-	      SUBJECT
+	      $(cat message.5)
 
 	EOF
 '
 
-fuzz() {
-	file=$1 &&
-	sed "
-			s/$OID_REGEX/OBJECT_NAME/g
-			s/$_x35/OBJID/g
-			s/^ \{6\}[CTa].*/      SUBJECT/g
-			s/^ \{8\}[^ ].*/        CONTINUATION/g
-		" <"$file" >"$file.fuzzy" &&
-	sed "/CONTINUATION/ d" <"$file.fuzzy"
-}
-
 test_expect_success 'default output format' '
 	git shortlog HEAD >log &&
-	fuzz log >log.predictable &&
-	test_cmp expect.template log.predictable
+	test_cmp expect.default log
 '
 
 test_expect_success 'pretty format' '
-	sed s/SUBJECT/OBJECT_NAME/ expect.template >expect &&
+	cat >expect <<-EOF &&
+	A U Thor (5):
+	      $(git rev-parse HEAD~5)
+	      $(git rev-parse HEAD~4)
+	      $(git rev-parse HEAD~3)
+	      $(git rev-parse HEAD~2)
+	      $(git rev-parse HEAD~1)
+
+	Someone else (1):
+	      $(git rev-parse HEAD~0)
+
+	EOF
 	git shortlog --format="%H" HEAD >log &&
-	fuzz log >log.predictable &&
-	test_cmp expect log.predictable
+	test_cmp expect log
 '
 
 test_expect_success '--abbrev' '
-	sed s/SUBJECT/OBJID/ expect.template >expect &&
+	cut -c 1-41 <expect >expect.abbrev &&
 	git shortlog --format="%h" --abbrev=35 HEAD >log &&
-	fuzz log >log.predictable &&
-	test_cmp expect log.predictable
+	test_cmp expect.abbrev log
 '
 
 test_expect_success 'output from user-defined format is re-wrapped' '
-	sed "s/SUBJECT/two lines/" expect.template >expect &&
+	cat >expect <<-EOF &&
+	A U Thor (5):
+	      two lines
+	      two lines
+	      two lines
+	      two lines
+	      two lines
+
+	Someone else (1):
+	      two lines
+
+	EOF
 	git shortlog --format="two%nlines" HEAD >log &&
-	fuzz log >log.predictable &&
-	test_cmp expect log.predictable
+	test_cmp expect log
 '
 
 test_expect_success !MINGW 'shortlog wrapping' '

@@ -84,7 +84,7 @@ test_expect_success 'output to keep user entertained during multi-pick' '
 	git reset --hard first &&
 	test_tick &&
 	git cherry-pick first..fourth >actual &&
-	sed -e "s/$_x05[0-9a-f][0-9a-f]/OBJID/" <actual >actual.fuzzy &&
+	sed -e "s/ [0-9a-f]*\\]/ OBJID]/" <actual >actual.fuzzy &&
 	test_line_count -ge 3 actual.fuzzy &&
 	test_cmp expected actual.fuzzy
 '
@@ -122,7 +122,7 @@ test_expect_success 'output during multi-pick indicates merge strategy' '
 	git reset --hard first &&
 	test_tick &&
 	git cherry-pick --strategy resolve first..fourth >actual &&
-	sed -e "s/$_x05[0-9a-f][0-9a-f]/OBJID/" <actual >actual.fuzzy &&
+	sed -e "s/ [0-9a-f]*\\]/ OBJID]/" <actual >actual.fuzzy &&
 	test_cmp expected actual.fuzzy
 '
 

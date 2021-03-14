@@ -187,7 +187,7 @@ EOF
 
 test_expect_success 'ls-tree --abbrev=5' '
 	git ls-tree --abbrev=5 $tree >current &&
-	sed -e "s/ $_x05[0-9a-f]*	/ X	/" <current >check &&
+	sed -e "s/ [0-9a-f]*	/ X	/" <current >check &&
 	cat >expected <<\EOF &&
 100644 blob X	1.txt
 100644 blob X	2.txt
