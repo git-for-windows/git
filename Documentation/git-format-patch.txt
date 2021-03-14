@@ -22,6 +22,7 @@ SYNOPSIS
 		   [--cover-from-description=<mode>]
 		   [--rfc] [--subject-prefix=<subject prefix>]
 		   [(--reroll-count|-v) <n>]
+		   [--previous-count=<n>]
 		   [--to=<email>] [--cc=<email>]
 		   [--[no-]cover-letter] [--quiet]
 		   [--[no-]encode-email-headers]
@@ -221,6 +222,15 @@ populated with placeholder text.
 	`--subject-prefix` option) has ` v<n>` appended to it.  E.g.
 	`--reroll-count=4` may produce `v4-0001-add-makefile.patch`
 	file that has "Subject: [PATCH v4 1/20] Add makefile" in it.
+	now can support non-integrated version number like `-v1.1`.
+
+--previous-count=<n>::
+	Under the premise that we have used `--reroll-count=<n>`,
+	we can use `--previous-count=<n>` to specify the previous
+	version number. E.g. When we use the `--range-diff` or
+	`--interdiff` option and combine with `-v2.3 --previous-count=2.2`,
+	"Interdiff against v2.2:" or "Range-diff against v2.2:"
+	will be output in the patch.
 
 --to=<email>::
 	Add a `To:` header to the email headers. This is in addition
