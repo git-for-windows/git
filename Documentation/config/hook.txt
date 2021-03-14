@@ -1,0 +1,27 @@
+hook.<command>.command::
+	A command to execute during the <command> hook event. This can be an
+	executable on your device, a oneliner for your shell, or the name of a
+	hookcmd. See linkgit:git-hook[1].
+
+hookcmd.<name>.command::
+	A command to execute during a hook for which <name> has been specified
+	as a command. This can be an executable on your device or a oneliner for
+	your shell. See linkgit:git-hook[1].
+
+hookcmd.<name>.skip::
+	Specify this boolean to remove a command from earlier in the execution
+	order. Useful if you want to make a single repo an exception to hook
+	configured at the system or global scope. If there is no hookcmd
+	specified for the command you want to skip, you can use the value of
+	`hook.<command>.command` as <name> as a shortcut. The "skip" setting
+	must be specified after the "hook.<command>.command" to have an effect.
+
+hook.runHookDir::
+	Controls how hooks contained in your hookdir are executed. Can be any of
+	"yes", "warn", "interactive", or "no". Defaults to "yes". See
+	linkgit:git-hook[1] and linkgit:git-config[1] "core.hooksPath").
+
+hook.jobs::
+	Specifies how many hooks can be run simultaneously during parallelized
+	hook execution. If unspecified, defaults to the number of processors on
+	the current system.

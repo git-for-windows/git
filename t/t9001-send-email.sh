@@ -2101,16 +2101,7 @@ test_expect_success $PREREQ 'invoke hook' '
 	mkdir -p .git/hooks &&
 
 	write_script .git/hooks/sendemail-validate <<-\EOF &&
-	# test that we have the correct environment variable, pwd, and
-	# argument
-	case "$GIT_DIR" in
-	*.git)
-		true
-		;;
-	*)
-		false
-		;;
-	esac &&
+	# test that we have the correct argument
 	test -f 0001-add-main.patch &&
 	grep "add main" "$1"
 	EOF

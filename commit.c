@@ -21,6 +21,7 @@
 #include "commit-reach.h"
 #include "run-command.h"
 #include "shallow.h"
+#include "hook.h"
 
 static struct commit_extra_header *read_commit_extra_header_lines(const char *buf, size_t len, const char **);
 
@@ -1695,25 +1696,34 @@ size_t ignore_non_trailer(const char *buf, size_t len)
 	return boc ? len - boc : len - cutoff;
 }
 
-int run_commit_hook(int editor_is_used, const char *index_file,
+int run_commit_hook(int editor_is_used, int parallelize, const char *index_file,
 		    const char *name, ...)
 {
-	struct strvec hook_env = STRVEC_INIT;
+	struct run_hooks_opt opt;
 	va_list args;
+	const char *arg;
 	int ret;
 
-	strvec_pushf(&hook_env, "GIT_INDEX_FILE=%s", index_file);
+	run_hooks_opt_init_sync(&opt);
+
+	if (parallelize)
+		opt.jobs = configured_hook_jobs();
+
+	strvec_pushf(&opt.env, "GIT_INDEX_FILE=%s", index_file);
 
 	/*
 	 * Let the hook know that no editor will be launched.
 	 */
 	if (!editor_is_used)
-		strvec_push(&hook_env, "GIT_EDITOR=:");
+		strvec_push(&opt.env, "GIT_EDITOR=:");
 
 	va_start(args, name);
-	ret = run_hook_ve(hook_env.v, name, args);
+	while ((arg = va_arg(args, const char *)))
+		strvec_push(&opt.args, arg);
 	va_end(args);
-	strvec_clear(&hook_env);
+
+	ret = run_hooks(name, &opt);
+	run_hooks_opt_clear(&opt);
 
 	return ret;
 }

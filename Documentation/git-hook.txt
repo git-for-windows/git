@@ -1,0 +1,161 @@
+git-hook(1)
+===========
+
+NAME
+----
+git-hook - Manage configured hooks
+
+SYNOPSIS
+--------
+[verse]
+'git hook' list <hook-name>
+'git hook' run [(-e|--env)=<var>...] [(-a|--arg)=<arg>...] [--to-stdin=<path>]
+	[(-j|--jobs) <n>] <hook-name>
+
+DESCRIPTION
+-----------
+You can list and run configured hooks with this command. Later, you will be able
+to add and modify hooks with this command.
+
+In general, when instructions suggest adding a script to
+`.git/hooks/<something>`, you can specify it in the config instead by running
+`git config --add hook.<something>.command <path-to-script>` - this way you can
+share the script between multiple repos. That is, `cp ~/my-script.sh
+~/project/.git/hooks/pre-commit` would become `git config --add
+hook.pre-commit.command ~/my-script.sh`.
+
+This command parses the default configuration files for sections `hook` and
+`hookcmd`. `hook` is used to describe the commands which will be run during a
+particular hook event; commands are run in the order Git encounters them during
+the configuration parse (see linkgit:git-config[1]). `hookcmd` is used to
+describe attributes of a specific command. If additional attributes don't need
+to be specified, a command to run can be specified directly in the `hook`
+section; if a `hookcmd` by that name isn't found, Git will attempt to run the
+provided value directly. For example:
+
+Global config
+----
+  [hook "post-commit"]
+    command = "linter"
+    command = "~/typocheck.sh"
+
+  [hookcmd "linter"]
+    command = "/bin/linter --c"
+----
+
+Local config
+----
+  [hook "prepare-commit-msg"]
+    command = "linter"
+  [hook "post-commit"]
+    command = "python ~/run-test-suite.py"
+----
+
+With these configs, you'd then see:
+
+----
+$ git hook list "post-commit"
+global: /bin/linter --c
+global: ~/typocheck.sh
+local: python ~/run-test-suite.py
+
+$ git hook list "prepare-commit-msg"
+local: /bin/linter --c
+----
+
+If there is a command you wish to run in most cases but have one or two
+exceptional repos where it should be skipped, you can use specify
+`hookcmd.<name>.skip`, for example:
+
+System config
+----
+  [hook "pre-commit"]
+    command = check-for-secrets
+
+  [hookcmd "check-for-secrets"]
+    command = /bin/secret-checker --aggressive
+----
+
+Local config
+----
+  [hookcmd "check-for-secrets"]
+    skip = true
+  # This works for inlined hook commands, too:
+  [hookcmd "~/typocheck.sh"]
+    skip = true
+----
+
+After these configs are added, the hook list becomes:
+
+----
+$ git hook list "post-commit"
+global: /bin/linter --c
+local: python ~/run-test-suite.py
+
+$ git hook list "pre-commit"
+no commands configured for hook 'pre-commit'
+----
+
+COMMANDS
+--------
+
+list `<hook-name>`::
+
+List the hooks which have been configured for `<hook-name>`. Hooks appear
+in the order they should be run, and print the config scope where the relevant
+`hook.<hook-name>.command` was specified, not the `hookcmd` (if applicable).
+This output is human-readable and the format is subject to change over time.
+
+run [(-e|--env)=<var>...] [(-a|--arg)=<arg>...] [--to-stdin=<path>] [(-j|--jobs)<n>] `<hook-name>`::
+
+Runs hooks configured for `<hook-name>`, in the same order displayed by `git
+hook list`. Hooks configured this way may be run prepended with `sh -c`, so
+paths containing special characters or spaces should be wrapped in single
+quotes: `command = '/my/path with spaces/script.sh' some args`.
+
+OPTIONS
+-------
+--run-hookdir::
+	Overrides the hook.runHookDir config. Must be 'yes', 'warn',
+	'interactive', or 'no'. Specifies how to handle hooks located in the Git
+	hook directory (core.hooksPath).
+
+-a::
+--arg::
+	Only valid for `run`.
++
+Specify arguments to pass to every hook that is run.
+
+-e::
+--env::
+	Only valid for `run`.
++
+Specify environment variables to set for every hook that is run.
+
+--to-stdin::
+	Only valid for `run`.
++
+Specify a file which will be streamed into stdin for every hook that is run.
+Each hook will receive the entire file from beginning to EOF.
+
+-j::
+--jobs::
+	Only valid for `run`.
++
+Specify how many hooks to run simultaneously. If this flag is not specified, use
+the value of the `hook.jobs` config. If the config is not specified, use the
+number of CPUs on the current system. Some hooks may be ineligible for
+parallelization: for example, 'commit-msg' intends hooks modify the commit
+message body and cannot be parallelized.
+
+CONFIGURATION
+-------------
+include::config/hook.txt[]
+
+HOOKS
+-----
+include::native-hooks.txt[]
+
+GIT
+---
+Part of the linkgit:git[1] suite
