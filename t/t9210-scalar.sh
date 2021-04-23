@@ -484,4 +484,38 @@ test_expect_success '`scalar delete` with existing repo' '
 	test_path_is_missing existing
 '
 
+test_expect_success 'scalar cache-server basics' '
+	repo=with-cache-server &&
+	git init $repo &&
+	scalar cache-server --get $repo >out &&
+	cat >expect <<-EOF &&
+	Using cache server: (undefined)
+	EOF
+	test_cmp expect out &&
+
+	scalar cache-server --set http://fake-server/url $repo &&
+	test_cmp_config -C $repo http://fake-server/url gvfs.cache-server &&
+	scalar delete $repo &&
+	test_path_is_missing $repo
+'
+
+test_expect_success 'scalar cache-server list URL' '
+	repo=with-real-gvfs &&
+	git init $repo &&
+	git -C $repo remote add origin http://$HOST_PORT/ &&
+	scalar cache-server --list origin $repo >out &&
+
+	cat >expect <<-EOF &&
+	#0: http://$HOST_PORT/servertype/cache
+	EOF
+
+	test_cmp expect out &&
+
+	test_must_fail scalar -C $repo cache-server --list 2>err &&
+	grep "requires a value" err &&
+
+	scalar delete $repo &&
+	test_path_is_missing $repo
+'
+
 test_done

@@ -24,6 +24,7 @@
 #include "wrapper.h"
 #include "trace2.h"
 #include "json-parser.h"
+#include "remote.h"
 #include "path.h"
 
 static int is_unattended(void) {
@@ -378,6 +379,21 @@ static int set_config(const char *fmt, ...)
 	return res;
 }
 
+static int list_cache_server_urls(struct json_iterator *it)
+{
+	const char *p;
+	char *q;
+	long l;
+
+	if (it->type == JSON_STRING &&
+	    skip_iprefix(it->key.buf, ".CacheServers[", &p) &&
+	    (l = strtol(p, &q, 10)) >= 0 && p != q &&
+	    !strcasecmp(q, "].Url"))
+		printf("#%ld: %s\n", l, it->string_value.buf);
+
+	return 0;
+}
+
 /* Find N for which .CacheServers[N].GlobalDefault == true */
 static int get_cache_server_index(struct json_iterator *it)
 {
@@ -448,6 +464,18 @@ static int supports_gvfs_protocol(const char *url, char **cache_server_url)
 			JSON_ITERATOR_INIT(out.buf, get_cache_server_index, &l);
 		struct cache_server_url_data data = { .url = NULL };
 
+		if (!cache_server_url) {
+			it.fn = list_cache_server_urls;
+			if (iterate_json(&it) < 0) {
+				reset_iterator(&it);
+				strbuf_release(&out);
+				return error("JSON parse error");
+			}
+			reset_iterator(&it);
+			strbuf_release(&out);
+			return 0;
+		}
+
 		if (iterate_json(&it) < 0) {
 			reset_iterator(&it);
 			strbuf_release(&out);
@@ -468,7 +496,9 @@ static int supports_gvfs_protocol(const char *url, char **cache_server_url)
 		return 1;
 	}
 	strbuf_release(&out);
-	return 0; /* error out quietly */
+	/* error out quietly, unless we wanted to list URLs */
+	return cache_server_url ?
+		0 : error(_("Could not access gvfs/config endpoint"));
 }
 
 static char *default_cache_root(const char *root)
@@ -1345,6 +1375,68 @@ static int cmd_version(int argc, const char **argv)
 	return 0;
 }
 
+static int cmd_cache_server(int argc, const char **argv)
+{
+	int get = 0;
+	const char *set = NULL, *list = NULL;
+	struct option options[] = {
+		OPT_CMDMODE(0, "get", &get,
+			    N_("get the configured cache-server URL"), 1),
+		OPT_STRING(0, "set", &set, N_("URL"),
+			   N_("configure the cache-server to use")),
+		OPT_STRING(0, "list", &list, N_("remote"),
+			   N_("list the possible cache-server URLs")),
+		OPT_END(),
+	};
+	const char * const usage[] = {
+		N_("scalar cache-server "
+		   "[--get | --set <url> | --list <remote>] [<enlistment>]"),
+		NULL
+	};
+	int res = 0;
+
+	argc = parse_options(argc, argv, NULL, options,
+			     usage, 0);
+
+	if (get + !!set + !!list > 1)
+		usage_msg_opt(_("--get/--set/--list are mutually exclusive"),
+			      usage, options);
+
+	setup_enlistment_directory(argc, argv, usage, options, NULL);
+
+	if (list) {
+		const char *name = list, *url = list;
+
+		if (!strchr(list, '/')) {
+			struct remote *remote;
+
+			/* Look up remote */
+			remote = remote_get(list);
+			if (!remote) {
+				error("no such remote: '%s'", name);
+				return 1;
+			}
+			if (!remote->url.nr) {
+				return error(_("remote '%s' has no URLs"),
+					     name);
+			}
+			url = remote->url.v[0];
+		}
+		res = supports_gvfs_protocol(url, NULL);
+	} else if (set) {
+		res = set_config("gvfs.cache-server=%s", set);
+	} else {
+		char *url = NULL;
+
+		printf("Using cache server: %s\n",
+		       repo_config_get_string(the_repository, "gvfs.cache-server", &url) ?
+		       "(undefined)" : url);
+		free(url);
+	}
+
+	return !!res;
+}
+
 static struct {
 	const char *name;
 	int (*fn)(int, const char **);
@@ -1359,6 +1451,7 @@ static struct {
 	{ "help", cmd_help },
 	{ "version", cmd_version },
 	{ "diagnose", cmd_diagnose },
+	{ "cache-server", cmd_cache_server },
 	{ NULL, NULL},
 };
 
