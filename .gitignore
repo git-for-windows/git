@@ -248,5 +248,6 @@ Release/
 /git.VC.db
 *.dSYM
 /contrib/buildsystems/out
+CMakeSettings.json
 /contrib/libgit-rs/target
 /contrib/libgit-rs/libgit-sys/target
