@@ -414,6 +414,13 @@ static int get_cache_server_url(struct json_iterator *it)
 	return 0;
 }
 
+static int can_url_support_gvfs(const char *url)
+{
+	return starts_with(url, "https://") ||
+		(git_env_bool("GIT_TEST_ALLOW_GVFS_VIA_HTTP", 0) &&
+		 starts_with(url, "http://"));
+}
+
 /*
  * If `cache_server_url` is `NULL`, print the list to `stdout`.
  *
@@ -424,6 +431,13 @@ static int supports_gvfs_protocol(const char *url, char **cache_server_url)
 {
 	struct child_process cp = CHILD_PROCESS_INIT;
 	struct strbuf out = STRBUF_INIT;
+
+	/*
+	 * The GVFS protocol is only supported via https://; For testing, we
+	 * also allow http://.
+	 */
+	if (!can_url_support_gvfs(url))
+		return 0;
 
 	cp.git_cmd = 1;
 	strvec_pushl(&cp.args, "-c", "http.version=HTTP/1.1",
@@ -503,19 +517,26 @@ static char *get_cache_key(const char *url)
 	struct strbuf out = STRBUF_INIT;
 	char *cache_key = NULL;
 
-	cp.git_cmd = 1;
-	strvec_pushl(&cp.args, "gvfs-helper", "--remote", url,
-		     "endpoint", "vsts/info", NULL);
-	if (!pipe_command(&cp, NULL, 0, &out, 512, NULL, 0)) {
-		char *id = NULL;
-		struct json_iterator it =
-			JSON_ITERATOR_INIT(out.buf, get_repository_id, &id);
+	/*
+	 * The GVFS protocol is only supported via https://; For testing, we
+	 * also allow http://.
+	 */
+	if (can_url_support_gvfs(url)) {
+		cp.git_cmd = 1;
+		strvec_pushl(&cp.args, "gvfs-helper", "--remote", url,
+			     "endpoint", "vsts/info", NULL);
+		if (!pipe_command(&cp, NULL, 0, &out, 512, NULL, 0)) {
+			char *id = NULL;
+			struct json_iterator it =
+				JSON_ITERATOR_INIT(out.buf, get_repository_id,
+						   &id);
 
-		if (iterate_json(&it) < 0)
-			warning("JSON parse error (%s)", out.buf);
-		else if (id)
-			cache_key = xstrfmt("id_%s", id);
-		free(id);
+			if (iterate_json(&it) < 0)
+				warning("JSON parse error (%s)", out.buf);
+			else if (id)
+				cache_key = xstrfmt("id_%s", id);
+			free(id);
+		}
 	}
 
 	if (!cache_key) {
