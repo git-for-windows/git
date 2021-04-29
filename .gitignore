@@ -179,6 +179,7 @@
 /git-unpack-file
 /git-unpack-objects
 /git-update-index
+/git-update-microsoft-git
 /git-update-ref
 /git-update-server-info
 /git-upload-archive

@@ -121,6 +121,7 @@ do
 	mktag | p4 | p4.py | pickaxe | remote-ftp | remote-ftps | \
 	remote-http | remote-https | replay | send-email | \
 	sh-i18n--envsubst | shell | show | stage | submodule | survey | svn | \
+	update-microsoft-git | \
 	upload-archive--writer | upload-pack | web--browse | whatchanged)
 		expect_outcome=expect_failure ;;
 	*)

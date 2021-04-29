@@ -151,6 +151,7 @@ manpages = {
   'git-unpack-file.adoc' : 1,
   'git-unpack-objects.adoc' : 1,
   'git-update-index.adoc' : 1,
+  'git-update-microsoft-git.adoc' : 1,
   'git-update-ref.adoc' : 1,
   'git-update-server-info.adoc' : 1,
   'git-upload-archive.adoc' : 1,
