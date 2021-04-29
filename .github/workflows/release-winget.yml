@@ -1,0 +1,85 @@
+name: "release-winget"
+on:
+  release:
+    types: [released]
+
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag name to release'
+        required: true
+
+permissions:
+  id-token: write # required for Azure login via OIDC
+
+env:
+  TAG_NAME: ${{ github.event.inputs.tag }}
+
+jobs:
+  release:
+    runs-on: windows-latest
+    environment: release
+    steps:
+      - name: Log into Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Publish manifest with winget-create
+        run: |
+          # Enabling stop on error and tracing
+          Set-PSDebug -Trace 2
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandErrorActionPreference = "Stop"
+
+          if ($env:TAG_NAME -eq "") {
+            # Get latest release
+            $github = Get-Content '${{ github.event_path }}' | ConvertFrom-Json
+
+            # Set the tag name environment variable
+            $env:TAG_NAME =  $github.release.tag_name
+
+            # Get download URLs
+            $asset_x64 = $github.release.assets | Where-Object -Property name -match '64-bit.exe$'
+            $asset_arm64 = $github.release.assets | Where-Object -Property name -match 'arm64.exe$'
+            $asset_x64_url = $asset_x64.browser_download_url
+            $asset_arm64_url = $asset_arm64.browser_download_url
+          } else {
+            # Get release object by its tag
+            $env:GH_TOKEN = ${{ toJson(secrets.GITHUB_TOKEN) }}
+            $github = (gh release view -R microsoft/git $env:TAG_NAME --json tagName,assets --jq '{tag_name: .tagName, assets: .assets}') | ConvertFrom-Json
+
+            # Get download URLs
+            $asset_x64 = $github.assets | Where-Object -Property name -match '64-bit.exe$'
+            $asset_arm64 = $github.assets | Where-Object -Property name -match 'arm64.exe$'
+            $asset_x64_url = $asset_x64.url
+            $asset_arm64_url = $asset_arm64.url
+          }
+
+          # Remove 'v' and 'vfs' from the version
+          $env:TAG_NAME -match 'v(.*?)vfs\.(.*)'
+          $version = $Matches[1] + $Matches[2]
+
+          # Download wingetcreate and create manifests
+          Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+          .\wingetcreate.exe update Microsoft.Git `
+              -v $version `
+              -o . `
+              -u "$($asset_x64_url)|x64|machine" `
+                 "$($asset_x64_url)|x64|user" `
+                 "$($asset_arm64_url)|arm64|machine" `
+                 "$($asset_arm64_url)|arm64|user"
+
+          # Download the token from Azure Key Vault and mask it in the logs
+          az keyvault secret download --name ${{ secrets.WINGET_TOKEN_SECRET_NAME }} --vault-name ${{ secrets.AZURE_VAULT }} --file token.txt
+          Write-Host -NoNewLine "::add-mask::$(Get-Content token.txt)"
+
+          # Submit the manifest to the winget-pkgs repository
+          $manifestDirectory = "$PWD\manifests\m\Microsoft\Git\$version"
+          $output = & .\wingetcreate.exe submit -t "$(Get-Content token.txt)" $manifestDirectory
+          Write-Host $output
+          $url = ($output | Select-String -Pattern 'https://\S+' | ForEach-Object { $_.Matches.Value })[0]
+          Write-Host "::notice::Submitted ${env:TAG_NAME} to winget as $url"
+        shell: powershell
