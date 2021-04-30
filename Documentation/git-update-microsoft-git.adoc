@@ -1,0 +1,24 @@
+git-update-microsoft-git(1)
+===========================
+
+NAME
+----
+git-update-microsoft-git - Update the installed version of Git
+
+
+SYNOPSIS
+--------
+[verse]
+'git update-microsoft-git'
+
+DESCRIPTION
+-----------
+This version of Git is based on the Microsoft fork of Git, which
+has custom capabilities focused on supporting monorepos. This
+command checks for the latest release of that fork and installs
+it on your machine.
+
+
+GIT
+---
+Part of the linkgit:git[1] suite

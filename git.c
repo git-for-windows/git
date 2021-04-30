@@ -743,6 +743,7 @@ static struct cmd_struct commands[] = {
 	{ "unpack-file", cmd_unpack_file, RUN_SETUP | NO_PARSEOPT },
 	{ "unpack-objects", cmd_unpack_objects, RUN_SETUP | NO_PARSEOPT },
 	{ "update-index", cmd_update_index, RUN_SETUP },
+	{ "update-microsoft-git", cmd_update_microsoft_git },
 	{ "update-ref", cmd_update_ref, RUN_SETUP },
 	{ "update-server-info", cmd_update_server_info, RUN_SETUP },
 	{ "upload-archive", cmd_upload_archive, NO_PARSEOPT },
