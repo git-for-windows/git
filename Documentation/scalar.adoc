@@ -9,7 +9,9 @@ SYNOPSIS
 --------
 [verse]
 scalar clone [--single-branch] [--branch <main-branch>] [--full-clone]
-	[--[no-]src] [--[no-]tags] [--[no-]maintenance] <url> [<enlistment>]
+	[--[no-]src] [--[no-]tags] [--[no-]maintenance]
+	[--[no-]src] [--local-cache-path <path>] [--cache-server-url <url>]
+	<url> [<enlistment>]
 scalar list
 scalar register [--[no-]maintenance] [<enlistment>]
 scalar unregister [<enlistment>]
@@ -106,6 +108,17 @@ cloning. If the HEAD at the remote did not point at any branch when
 	By default, `scalar clone` configures the enlistment to use Git's
 	background maintenance feature. Use the `--no-maintenance` to skip
 	this configuration.
+
+--local-cache-path <path>::
+	Override the path to the local cache root directory; Pre-fetched objects
+	are stored into a repository-dependent subdirectory of that path.
++
+The default is `<drive>:\.scalarCache` on Windows (on the same drive as the
+clone), and `~/.scalarCache` on macOS.
+
+--cache-server-url <url>::
+	Retrieve missing objects from the specified remote, which is expected to
+	understand the GVFS protocol.
 
 List
 ~~~~

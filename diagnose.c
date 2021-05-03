@@ -186,7 +186,7 @@ int create_diagnostics_archive(struct repository *r,
 	struct strvec archiver_args = STRVEC_INIT;
 	char **argv_copy = NULL;
 	int stdout_fd = -1, archiver_fd = -1;
-	char *cache_server_url = NULL;
+	char *cache_server_url = NULL, *shared_cache = NULL;
 	struct strbuf buf = STRBUF_INIT;
 	int res;
 	struct archive_dir archive_dirs[] = {
@@ -224,8 +224,10 @@ int create_diagnostics_archive(struct repository *r,
 	strbuf_addf(&buf, "Repository root: %s\n", r->worktree);
 
 	repo_config_get_string(r, "gvfs.cache-server", &cache_server_url);
-	strbuf_addf(&buf, "Cache Server: %s\n\n",
-		    cache_server_url ? cache_server_url : "None");
+	repo_config_get_string(r, "gvfs.sharedCache", &shared_cache);
+	strbuf_addf(&buf, "Cache Server: %s\nLocal Cache: %s\n\n",
+		    cache_server_url ? cache_server_url : "None",
+		    shared_cache ? shared_cache : "None");
 
 	get_disk_info(&buf);
 	write_or_die(stdout_fd, buf.buf, buf.len);
@@ -285,6 +287,7 @@ diagnose_cleanup:
 	strvec_clear(&archiver_args);
 	strbuf_release(&buf);
 	free(cache_server_url);
+	free(shared_cache);
 
 	return res;
 }
