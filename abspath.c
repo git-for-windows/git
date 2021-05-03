@@ -14,7 +14,7 @@ int is_directory(const char *path)
 }
 
 /* removes the last path component from 'path' except if 'path' is root */
-static void strip_last_component(struct strbuf *path)
+void strip_last_path_component(struct strbuf *path)
 {
 	size_t offset = offset_1st_component(path->buf);
 	size_t len = path->len;
@@ -119,7 +119,7 @@ static char *strbuf_realpath_1(struct strbuf *resolved, const char *path,
 			continue; /* '.' component */
 		} else if (next.len == 2 && !strcmp(next.buf, "..")) {
 			/* '..' component; strip the last path component */
-			strip_last_component(resolved);
+			strip_last_path_component(resolved);
 			continue;
 		}
 
@@ -171,7 +171,7 @@ static char *strbuf_realpath_1(struct strbuf *resolved, const char *path,
 				 * strip off the last component since it will
 				 * be replaced with the contents of the symlink
 				 */
-				strip_last_component(resolved);
+				strip_last_path_component(resolved);
 			}
 
 			/*

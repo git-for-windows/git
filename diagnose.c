@@ -12,6 +12,7 @@
 #include "parse-options.h"
 #include "repository.h"
 #include "write-or-die.h"
+#include "config.h"
 
 struct archive_dir {
 	const char *path;
@@ -69,6 +70,39 @@ static int dir_file_stats(struct odb_source *source, void *data)
 				  data);
 
 	return 0;
+}
+
+static void dir_stats(struct strbuf *buf, const char *path)
+{
+	DIR *dir = opendir(path);
+	struct dirent *e;
+	struct stat e_stat;
+	struct strbuf file_path = STRBUF_INIT;
+	size_t base_path_len;
+
+	if (!dir)
+		return;
+
+	strbuf_addstr(buf, "Contents of ");
+	strbuf_add_absolute_path(buf, path);
+	strbuf_addstr(buf, ":\n");
+
+	strbuf_add_absolute_path(&file_path, path);
+	strbuf_addch(&file_path, '/');
+	base_path_len = file_path.len;
+
+	while ((e = readdir(dir)) != NULL)
+		if (!is_dot_or_dotdot(e->d_name) && e->d_type == DT_REG) {
+			strbuf_setlen(&file_path, base_path_len);
+			strbuf_addstr(&file_path, e->d_name);
+			if (!stat(file_path.buf, &e_stat))
+				strbuf_addf(buf, "%-70s %16"PRIuMAX"\n",
+					    e->d_name,
+					    (uintmax_t)e_stat.st_size);
+		}
+
+	strbuf_release(&file_path);
+	closedir(dir);
 }
 
 static int count_files(struct strbuf *path)
@@ -185,7 +219,8 @@ int create_diagnostics_archive(struct repository *r,
 	struct strvec archiver_args = STRVEC_INIT;
 	char **argv_copy = NULL;
 	int stdout_fd = -1, archiver_fd = -1;
-	struct strbuf buf = STRBUF_INIT;
+	char *cache_server_url = NULL, *shared_cache = NULL;
+	struct strbuf buf = STRBUF_INIT, path = STRBUF_INIT;
 	int res;
 	struct archive_dir archive_dirs[] = {
 		{ ".git", 0 },
@@ -220,6 +255,13 @@ int create_diagnostics_archive(struct repository *r,
 	get_version_info(&buf, 1);
 
 	strbuf_addf(&buf, "Repository root: %s\n", r->worktree);
+
+	repo_config_get_string(r, "gvfs.cache-server", &cache_server_url);
+	repo_config_get_string(r, "gvfs.sharedCache", &shared_cache);
+	strbuf_addf(&buf, "Cache Server: %s\nLocal Cache: %s\n\n",
+		    cache_server_url ? cache_server_url : "None",
+		    shared_cache ? shared_cache : "None");
+
 	get_disk_info(&buf);
 	write_or_die(stdout_fd, buf.buf, buf.len);
 	strvec_pushf(&archiver_args,
@@ -250,6 +292,52 @@ int create_diagnostics_archive(struct repository *r,
 		}
 	}
 
+	if (shared_cache) {
+		size_t path_len;
+
+		strbuf_reset(&buf);
+		strbuf_addf(&path, "%s/pack", shared_cache);
+		strbuf_reset(&buf);
+		strbuf_addstr(&buf, "--add-virtual-file=packs-cached.txt:");
+		dir_stats(&buf, path.buf);
+		strvec_push(&archiver_args, buf.buf);
+
+		strbuf_reset(&buf);
+		strbuf_addstr(&buf, "--add-virtual-file=objects-cached.txt:");
+		loose_objs_stats(&buf, shared_cache);
+		strvec_push(&archiver_args, buf.buf);
+
+		strbuf_reset(&path);
+		strbuf_addf(&path, "%s/info", shared_cache);
+		path_len = path.len;
+
+		if (is_directory(path.buf)) {
+			DIR *dir = opendir(path.buf);
+			struct dirent *e;
+
+			while ((e = readdir(dir))) {
+				if (!strcmp(".", e->d_name) || !strcmp("..", e->d_name))
+					continue;
+				if (e->d_type == DT_DIR)
+					continue;
+
+				strbuf_reset(&buf);
+				strbuf_addf(&buf, "--add-virtual-file=info/%s:", e->d_name);
+
+				strbuf_setlen(&path, path_len);
+				strbuf_addch(&path, '/');
+				strbuf_addstr(&path, e->d_name);
+
+				if (strbuf_read_file(&buf, path.buf, 0) < 0) {
+					res = error_errno(_("could not read '%s'"), path.buf);
+					goto diagnose_cleanup;
+				}
+				strvec_push(&archiver_args, buf.buf); // CodeQL [SM01932] justification: CodeQL is wrong here because the value is read from a file via strbuf_read() which does NUL-terminate the string, something CodeQL fails to understand
+			}
+			closedir(dir);
+		}
+	}
+
 	strvec_pushl(&archiver_args, "--prefix=",
 		     oid_to_hex(r->hash_algo->empty_tree), "--", NULL);
 
@@ -277,6 +365,8 @@ diagnose_cleanup:
 	free(argv_copy);
 	strvec_clear(&archiver_args);
 	strbuf_release(&buf);
+	free(cache_server_url);
+	free(shared_cache);
 
 	return res;
 }

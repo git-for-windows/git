@@ -28,10 +28,14 @@ these features for that repo (except partial clone) and start running suggested
 maintenance in the background using
 [the `git maintenance` feature](https://git-scm.com/docs/git-maintenance).
 
-Repos cloned with the `scalar clone` command use partial clone to significantly
-reduce the amount of data required to get started using a repository. By
-delaying all blob downloads until they are required, Scalar allows you to work
-with very large repositories quickly.
+Repos cloned with the `scalar clone` command use partial clone or the
+[GVFS protocol](https://github.com/microsoft/VFSForGit/blob/HEAD/Protocol.md)
+to significantly reduce the amount of data required to get started
+using a repository. By delaying all blob downloads until they are required,
+Scalar allows you to work with very large repositories quickly. The GVFS
+protocol allows a network of _cache servers_ to serve objects with lower
+latency and higher throughput. The cache servers also reduce load on the
+central server.
 
 Documentation
 -------------
@@ -42,7 +46,7 @@ Documentation
 
 * [Troubleshooting](troubleshooting.md):
   Collect diagnostic information or update custom settings. Includes
-  `scalar diagnose`.
+  `scalar diagnose` and `scalar cache-server`.
 
 * [The Philosophy of Scalar](philosophy.md): Why does Scalar work the way
   it does, and how do we make decisions about its future?
