@@ -1,148 +1,225 @@
-Git for Windows
-===============
+`microsoft/git` and the Scalar CLI
+==================================
 
-[![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](CODE_OF_CONDUCT.md)
-[![Open in Visual Studio Code](https://img.shields.io/static/v1?logo=visualstudiocode&label=&message=Open%20in%20Visual%20Studio%20Code&labelColor=2c2c32&color=007acc&logoColor=007acc)](https://open.vscode.dev/git-for-windows/git)
-[![Build status](https://github.com/git-for-windows/git/workflows/CI/badge.svg)](https://github.com/git-for-windows/git/actions?query=branch%3Amain+event%3Apush)
-[![Join the chat at https://gitter.im/git-for-windows/git](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/git-for-windows/git?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+[![Open in Visual Studio Code](https://open.vscode.dev/badges/open-in-vscode.svg)](https://open.vscode.dev/microsoft/git)
+[![Build status](https://github.com/microsoft/git/workflows/CI/badge.svg)](https://github.com/microsoft/git/actions/workflows/main.yml)
 
-This is [Git for Windows](http://git-for-windows.github.io/), the Windows port
-of [Git](http://git-scm.com/).
+This is `microsoft/git`, a special Git distribution to support monorepo scenarios. If you are _not_
+working in a monorepo, you are likely searching for
+[Git for Windows](https://git-for-windows.github.io/) instead of this codebase.
 
-The Git for Windows project is run using a [governance
-model](http://git-for-windows.github.io/governance-model.html). If you
-encounter problems, you can report them as [GitHub
-issues](https://github.com/git-for-windows/git/issues), discuss them in Git
-for Windows' [Discussions](https://github.com/git-for-windows/git/discussions)
-or on the [Git mailing list](mailto:git@vger.kernel.org), and [contribute bug
-fixes](https://gitforwindows.org/how-to-participate).
+In addition to the Git command-line interface (CLI), `microsoft/git` includes the Scalar CLI to
+further enable working with extremely large repositories. Scalar is a tool to apply the latest
+recommendations and use the most advanced Git features. You can read
+[the Scalar CLI documentation](Documentation/scalar.adoc) or read our
+[Scalar user guide](contrib/scalar/docs/index.md) including
+[the philosophy of Scalar](contrib/scalar/docs/philosophy.md).
 
-To build Git for Windows, please either install [Git for Windows'
-SDK](https://gitforwindows.org/#download-sdk), start its `git-bash.exe`, `cd`
-to your Git worktree and run `make`, or open the Git worktree as a folder in
-Visual Studio.
+If you encounter problems with `microsoft/git`, please report them as
+[GitHub issues](https://github.com/microsoft/git/issues).
 
-To verify that your build works, use one of the following methods:
-
-- If you want to test the built executables within Git for Windows' SDK,
-  prepend `<worktree>/bin-wrappers` to the `PATH`.
-- Alternatively, run `make install` in the Git worktree.
-- If you need to test this in a full installer, run `sdk build
-  git-and-installer`.
-- You can also "install" Git into an existing portable Git via `make install
-  DESTDIR=<dir>` where `<dir>` refers to the top-level directory of the
-  portable Git. In this instance, you will want to prepend that portable Git's
-  `/cmd` directory to the `PATH`, or test by running that portable Git's
-  `git-bash.exe` or `git-cmd.exe`.
-- If you built using a recent Visual Studio, you can use the menu item
-  `Build>Install git` (you will want to click on `Project>CMake Settings for
-  Git` first, then click on `Edit JSON` and then point `installRoot` to the
-  `mingw64` directory of an already-unpacked portable Git).
-
-  As in the previous  bullet point, you will then prepend `/cmd` to the `PATH`
-  or run using the portable Git's `git-bash.exe` or `git-cmd.exe`.
-- If you want to run the built executables in-place, but in a CMD instead of
-  inside a Bash, you can run a snippet like this in the `git-bash.exe` window
-  where Git was built (ensure that the `EOF` line has no leading spaces), and
-  then paste into the CMD window what was put in the clipboard:
-
-  ```sh
-  clip.exe <<EOF
-  set GIT_EXEC_PATH=$(cygpath -aw .)
-  set PATH=$(cygpath -awp ".:contrib/scalar:/mingw64/bin:/usr/bin:$PATH")
-  set GIT_TEMPLATE_DIR=$(cygpath -aw templates/blt)
-  set GITPERLLIB=$(cygpath -aw perl/build/lib)
-  EOF
-  ```
-- If you want to run the built executables in-place, but outside of Git for
-  Windows' SDK, and without an option to set/override any environment
-  variables (e.g. in Visual Studio's debugger), you can call the Git executable
-  by its absolute path and use the `--exec-path` option, like so:
-
-  ```cmd
-  C:\git-sdk-64\usr\src\git\git.exe --exec-path=C:\git-sdk-64\usr\src\git help
-  ```
-
-  Note: for this to work, you have to hard-link (or copy) the `.dll` files from
-  the `/mingw64/bin` directory to the Git worktree, or add the `/mingw64/bin`
-  directory to the `PATH` somehow or other.
-
-To make sure that you are testing the correct binary, call `./git.exe version`
-in the Git worktree, and then call `git version` in a directory/window where
-you want to test Git, and verify that they refer to the same version (you may
-even want to pass the command-line option `--build-options` to look at the
-exact commit from which the Git version was built).
-
-Git - fast, scalable, distributed revision control system
+Why is this fork needed?
 =========================================================
 
-Git is a fast, scalable, distributed revision control system with an
-unusually rich command set that provides both high-level operations
-and full access to internals.
+Git is awesome - it's a fast, scalable, distributed version control system with an unusually rich
+command set that provides both high-level operations and full access to internals. What more could
+you ask for?
 
-Git is an Open Source project covered by the GNU General Public
-License version 2 (some parts of it are under different licenses,
-compatible with the GPLv2). It was originally written by Linus
-Torvalds with help of a group of hackers around the net.
+Well, because Git is a distributed version control system, each Git repository has a copy of all
+files in the entire history. As large repositories, aka _monorepos_ grow, Git can struggle to
+manage all that data. As Git commands like `status` and `fetch` get slower, developers stop waiting
+and start switching context. And context switches harm developer productivity.
 
-Please read the file [INSTALL][] for installation instructions.
+`microsoft/git` is focused on addressing these performance woes and making the monorepo developer
+experience first-class. The Scalar CLI packages all of these recommendations into a simple set of
+commands.
 
-Many Git online resources are accessible from <https://git-scm.com/>
-including full documentation and Git related tools.
+One major feature that Scalar recommends is [partial clone](https://github.blog/2020-12-21-get-up-to-speed-with-partial-clone-and-shallow-clone/),
+which reduces the amount of data transferred in order to work with a Git repository. While several
+services such as GitHub support partial clone, Azure Repos instead has an older version of this
+functionality called
+[the GVFS protocol](https://github.com/microsoft/VFSForGit/blob/HEAD/Protocol.md).
+The integration with the GVFS protocol present in `microsoft/git` is not appropriate to include in
+the core Git client because partial clone is the official version of that functionality.
 
-See [Documentation/gittutorial.adoc][] to get started, then see
-[Documentation/giteveryday.adoc][] for a useful minimum set of commands, and
-`Documentation/git-<commandname>.adoc` for documentation of each command.
-If git has been correctly installed, then the tutorial can also be
-read with `man gittutorial` or `git help tutorial`, and the
-documentation of each command with `man git-<commandname>` or `git help
-<commandname>`.
+Downloading and Installing
+=========================================================
 
-CVS users may also want to read [Documentation/gitcvs-migration.adoc][]
-(`man gitcvs-migration` or `git help cvs-migration` if git is
-installed).
+If you're working in a monorepo and want to take advantage of the performance boosts in
+`microsoft/git`, then you can download the latest version installer for your OS from the
+[Releases page](https://github.com/microsoft/git/releases). Alternatively, you can opt to install
+via the command line, using the below instructions for supported OSes:
 
-The user discussion and development of core Git take place on the Git
-mailing list -- everyone is welcome to post bug reports, feature
-requests, comments and patches to git@vger.kernel.org (read
-[Documentation/SubmittingPatches][] for instructions on patch submission
-and [Documentation/CodingGuidelines][]).
+## Windows
 
-Those wishing to help with error message, usage and informational message
-string translations (localization l10) should see [po/README.md][]
-(a `po` file is a Portable Object file that holds the translations).
+__Note:__ Winget is still in public preview, meaning you currently
+[need to take special installation steps](https://docs.microsoft.com/en-us/windows/package-manager/winget/#install-winget):
+Either manually install the `.appxbundle` available at the
+[preview version of App Installer](https://www.microsoft.com/p/app-installer/9nblggh4nns1?ocid=9nblggh4nns1_ORSEARCH_Bing&rtc=1&activetab=pivot:overviewtab),
+or participate in the
+[Windows Insider flight ring](https://insider.windows.com/https://insider.windows.com/)
+since `winget` is available by default on preview versions of Windows.
 
-To subscribe to the list, send an email to <git+subscribe@vger.kernel.org>
-(see https://subspace.kernel.org/subscribing.html for details). The mailing
-list archives are available at <https://lore.kernel.org/git/>,
-<https://marc.info/?l=git> and other archival sites.
-The core git mailing list is plain text (no HTML!).
+To install with Winget, run
 
-Issues which are security relevant should be disclosed privately to
-the Git Security mailing list <git-security@googlegroups.com>.
+```shell
+winget install --id microsoft.git
+```
 
-The maintainer frequently sends the "What's cooking" reports that
-list the current status of various development topics to the mailing
-list.  The discussion following them give a good reference for
-project status, development direction and remaining tasks.
+Double-check that you have the right version by running these commands,
+which should have the same output:
 
-The name "git" was given by Linus Torvalds when he wrote the very
-first version. He described the tool as "the stupid content tracker"
-and the name as (depending on your mood):
+```shell
+git version
+scalar version
+```
 
- - random three-letter combination that is pronounceable, and not
-   actually used by any common UNIX command.  The fact that it is a
-   mispronunciation of "get" may or may not be relevant.
- - stupid. contemptible and despicable. simple. Take your pick from the
-   dictionary of slang.
- - "global information tracker": you're in a good mood, and it actually
-   works for you. Angels sing, and a light suddenly fills the room.
- - "goddamn idiotic truckload of sh*t": when it breaks
+To upgrade `microsoft/git`, use the following Git command, which will download and install the latest
+release.
 
-[INSTALL]: INSTALL
-[Documentation/gittutorial.adoc]: Documentation/gittutorial.adoc
-[Documentation/giteveryday.adoc]: Documentation/giteveryday.adoc
-[Documentation/gitcvs-migration.adoc]: Documentation/gitcvs-migration.adoc
-[Documentation/SubmittingPatches]: Documentation/SubmittingPatches
-[Documentation/CodingGuidelines]: Documentation/CodingGuidelines
-[po/README.md]: po/README.md
+```shell
+git update-microsoft-git
+```
+
+You may also be alerted with a notification to upgrade, which presents a single-click process for
+running `git update-microsoft-git`.
+
+## macOS
+
+To install `microsoft/git` on macOS, first [be sure that Homebrew is installed](https://brew.sh/) then
+install the `microsoft-git` cask with these steps:
+
+```shell
+brew tap microsoft/git
+brew install --cask microsoft-git
+```
+
+Double-check that you have the right version by running these commands,
+which should have the same output:
+
+```shell
+git version
+scalar version
+```
+
+To upgrade microsoft/git, you can run the necessary `brew` commands:
+
+```shell
+brew update
+brew upgrade --cask microsoft-git
+```
+
+Or you can run the `git update-microsoft-git` command, which will run those brew commands for you.
+
+## Linux
+### Ubuntu/Debian distributions
+
+On newer distributions*, you can install using the most recent Debian package.
+To download and validate the signature of this package, run the following:
+
+```shell
+# Install needed packages
+sudo apt-get install -y curl debsig-verify
+
+# Download public key signature file
+curl -s https://api.github.com/repos/microsoft/git/releases/latest \
+| grep -E 'browser_download_url.*msft-git-public.asc' \
+| cut -d : -f 2,3 \
+| tr -d \" \
+| xargs -I 'url' curl -L -o msft-git-public.asc 'url'
+
+# De-armor public key signature file
+gpg --output msft-git-public.gpg --dearmor msft-git-public.asc
+
+# Note that the fingerprint of this key is "B8F12E25441124E1", which you can
+# determine by running:
+gpg --show-keys msft-git-public.asc | head -n 2 | tail -n 1 | tail -c 17
+
+# Copy de-armored public key to debsig keyring folder
+sudo mkdir /usr/share/debsig/keyrings/B8F12E25441124E1
+sudo mv msft-git-public.gpg /usr/share/debsig/keyrings/B8F12E25441124E1/
+
+# Create an appropriate policy file
+sudo mkdir /etc/debsig/policies/B8F12E25441124E1
+cat > generic.pol << EOL
+<?xml version="1.0"?>
+<!DOCTYPE Policy SYSTEM "https://www.debian.org/debsig/1.0/policy.dtd">
+<Policy xmlns="https://www.debian.org/debsig/1.0/">
+  <Origin Name="Microsoft Git" id="B8F12E25441124E1" Description="Microsoft Git public key"/>
+  <Selection>
+    <Required Type="origin" File="msft-git-public.gpg" id="B8F12E25441124E1"/>
+  </Selection>
+  <Verification MinOptional="0">
+    <Required Type="origin" File="msft-git-public.gpg" id="B8F12E25441124E1"/>
+  </Verification>
+</Policy>
+EOL
+
+sudo mv generic.pol /etc/debsig/policies/B8F12E25441124E1/generic.pol
+
+# Download Debian package
+curl -s https://api.github.com/repos/microsoft/git/releases/latest \
+| grep "browser_download_url.*deb" \
+| cut -d : -f 2,3 \
+| tr -d \" \
+| xargs -I 'url' curl -L -o msft-git.deb 'url'
+
+# Verify
+debsig-verify msft-git.deb
+
+# Install
+sudo dpkg -i msft-git.deb
+```
+
+Double-check that you have the right version by running these commands,
+which should have the same output:
+
+```shell
+git version
+scalar version
+```
+
+To upgrade, you will need to repeat these steps to reinstall.
+
+*Older distributions are missing some required dependencies. Even
+though the package may appear to install successfully, `microsoft/
+git` will not function as expected. If you are running `Ubuntu 20.04` or
+older, please follow the install from source instructions below
+instead of installing the debian package.
+
+### Installing From Source
+
+On older or other distros you will need to compile and install `microsoft/git` from source:
+
+```shell
+git clone https://github.com/microsoft/git microsoft-git
+cd microsoft-git
+make -j12 prefix=/usr/local
+sudo make -j12 prefix=/usr/local install
+```
+
+For more assistance building Git from source, see
+[the INSTALL file in the core Git project](https://github.com/git/git/blob/master/INSTALL).
+
+#### Common Debian based dependencies
+While the INSTALL file covers dependencies in detail, here is a shortlist of common required dependencies on older Debian/Ubuntu distros:
+
+```shell
+sudo apt-get update
+sudo apt-get install libz-dev libssl-dev libcurl4-gnutls-dev libexpat1-dev gettext cmake gcc
+```
+
+Contributing
+=========================================================
+
+This project welcomes contributions and suggestions.  Most contributions require you to agree to a
+Contributor License Agreement (CLA) declaring that you have the right to, and actually do, grant us
+the rights to use your contribution. For details, visit <https://cla.microsoft.com>.
+
+When you submit a pull request, a CLA-bot will automatically determine whether you need to provide
+a CLA and decorate the PR appropriately (e.g., label, comment). Simply follow the instructions
+provided by the bot. You will only need to do this once across all repos using our CLA.
+
+This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/).
+For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or
+contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
