@@ -7,6 +7,13 @@ test_description='test the `scalar` command'
 GIT_TEST_MAINT_SCHEDULER="crontab:test-tool crontab cron.txt,launchctl:true,schtasks:true"
 export GIT_TEST_MAINT_SCHEDULER
 
+# Do not write any files outside the trash directory
+Scalar_UNATTENDED=1
+export Scalar_UNATTENDED
+
+GIT_ASKPASS=true
+export GIT_ASKPASS
+
 test_expect_success 'scalar shows a usage' '
 	test_expect_code 129 scalar -h
 '
