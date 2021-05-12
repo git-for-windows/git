@@ -551,7 +551,8 @@ static char *get_cache_key(const char *url)
 	 * The GVFS protocol is only supported via https://; For testing, we
 	 * also allow http://.
 	 */
-	if (can_url_support_gvfs(url)) {
+	if (!git_env_bool("SCALAR_TEST_SKIP_VSTS_INFO", 0) &&
+	    can_url_support_gvfs(url)) {
 		cp.git_cmd = 1;
 		strvec_pushl(&cp.args, "gvfs-helper", "--remote", url,
 			     "endpoint", "vsts/info", NULL);
