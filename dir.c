@@ -3286,6 +3286,8 @@ static int cmp_icase(char a, char b)
 {
 	if (a == b)
 		return 0;
+	if (is_dir_sep(a))
+		return is_dir_sep(b) ? 0 : -1;
 	if (ignore_case)
 		return toupper(a) - toupper(b);
 	return a - b;
