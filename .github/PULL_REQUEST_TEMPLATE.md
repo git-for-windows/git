@@ -1,22 +1,10 @@
 Thanks for taking the time to contribute to Git!
 
-Those seeking to contribute to the Git for Windows fork should see
-http://gitforwindows.org/#contribute on how to contribute Windows specific
-enhancements.
+This fork contains changes specific to monorepo scenarios. If you are an
+external contributor, then please detail your reason for submitting to
+this fork:
 
-If your contribution is for the core Git functions and documentation
-please be aware that the Git community does not use the github.com issues
-or pull request mechanism for their contributions.
-
-Instead, we use the Git mailing list (git@vger.kernel.org) for code and
-documentation submissions, code reviews, and bug reports. The
-mailing list is plain text only (anything with HTML is sent directly
-to the spam folder).
-
-Nevertheless, you can use GitGitGadget (https://gitgitgadget.github.io/)
-to conveniently send your Pull Requests commits to our mailing list.
-
-For a single-commit pull request, please *leave the pull request description
-empty*: your commit message itself should describe your changes.
-
-Please read the "guidelines for contributing" linked above!
+* [ ] This is an early version of work already under review upstream.
+* [ ] This change only applies to interactions with Azure DevOps and the
+      GVFS Protocol.
+* [ ] This change only applies to the virtualization hook and VFS for Git.
