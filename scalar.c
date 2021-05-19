@@ -172,6 +172,7 @@ static int set_recommended_config(int reconfigure)
 		{ "core.safeCRLF", "false" },
 		{ "fetch.showForcedUpdates", "false" },
 		{ "pack.usePathWalk", "true" },
+		{ "core.configWriteLockTimeoutMS", "150" },
 		{ NULL, NULL },
 	};
 	int i;
@@ -219,6 +220,11 @@ static int set_recommended_config(int reconfigure)
  */
 static int toggle_maintenance(int enable)
 {
+	unsigned long ul;
+
+	if (repo_config_get_ulong(the_repository, "core.configWriteLockTimeoutMS", &ul))
+		git_config_push_parameter("core.configWriteLockTimeoutMS=150");
+
 	return run_git("maintenance",
 		       enable ? "start" : "unregister",
 		       enable ? NULL : "--force",
@@ -228,9 +234,13 @@ static int toggle_maintenance(int enable)
 static int add_or_remove_enlistment(int add)
 {
 	int res;
+	unsigned long ul;
 
 	if (!the_repository->worktree)
 		die(_("Scalar enlistments require a worktree"));
+
+	if (repo_config_get_ulong(the_repository, "core.configWriteLockTimeoutMS", &ul))
+		git_config_push_parameter("core.configWriteLockTimeoutMS=150");
 
 	res = run_git("config", "--global", "--get", "--fixed-value",
 		      "scalar.repo", the_repository->worktree, NULL);
