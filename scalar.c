@@ -1060,6 +1060,9 @@ int cmd_main(int argc, const char **argv)
 		argv++;
 		argc--;
 
+		if (!strcmp(argv[0], "config"))
+			argv[0] = "reconfigure";
+
 		for (i = 0; builtins[i].name; i++)
 			if (!strcmp(builtins[i].name, argv[0]))
 				return !!builtins[i].fn(argc, argv);
