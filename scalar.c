@@ -202,6 +202,23 @@ static int set_recommended_config(int reconfigure)
 	int i;
 	char *value;
 
+	/*
+	 * If a user has "core.usebuiltinfsmonitor" enabled, try to switch to
+	 * the new (non-deprecated) setting (core.fsmonitor).
+	 */
+	if (!repo_config_get_string(the_repository, "core.usebuiltinfsmonitor", &value)) {
+		char *dummy = NULL;
+		if (repo_config_get_string(the_repository, "core.fsmonitor", &dummy) &&
+		    repo_config_set_gently(the_repository, "core.fsmonitor", value) < 0)
+			return error(_("could not configure %s=%s"),
+				     "core.fsmonitor", value);
+		if (repo_config_set_gently(the_repository, "core.usebuiltinfsmonitor", NULL) < 0)
+			return error(_("could not configure %s=%s"),
+				     "core.useBuiltinFSMonitor", "NULL");
+		free(value);
+		free(dummy);
+	}
+
 	for (i = 0; config[i].key; i++) {
 		if (set_scalar_config(config + i, reconfigure))
 			return error(_("could not configure %s=%s"),
