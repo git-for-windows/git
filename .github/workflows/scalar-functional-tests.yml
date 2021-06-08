@@ -1,0 +1,231 @@
+name: Scalar Functional Tests
+
+env:
+  SCALAR_REPOSITORY: microsoft/scalar
+  SCALAR_REF: main
+  DEBUG_WITH_TMATE: false
+  SCALAR_TEST_SKIP_VSTS_INFO: true
+
+on:
+  push:
+    branches: [ vfs-*, tentative/vfs-* ]
+  pull_request:
+    branches: [ vfs-*, features/* ]
+
+jobs:
+  scalar:
+    name: "Scalar Functional Tests"
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # Order by runtime (in descending order)
+        os: [windows-2022, macos-15, ubuntu-22.04]
+        # Scalar.NET used to be tested using `features: [false, experimental]`
+        # But currently, Scalar/C ignores `feature.scalar` altogether, so let's
+        # save some electrons and run only one of them...
+        features: [ignored]
+        exclude:
+          # The built-in FSMonitor is not (yet) supported on Linux
+          - os: ubuntu-22.04
+            features: experimental
+    runs-on: ${{ matrix.os }}
+
+    env:
+      BUILD_FRAGMENT: bin/Release/netcoreapp3.1
+      GIT_FORCE_UNTRACKED_CACHE: 1
+
+    steps:
+      - name: Check out Git's source code
+        uses: actions/checkout@v4
+
+      - name: Setup build tools on Windows
+        if: runner.os == 'Windows'
+        uses: git-for-windows/setup-git-for-windows-sdk@v1
+
+      - name: Provide a minimal `install` on Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          test -x /usr/bin/install ||
+          tr % '\t' >/usr/bin/install <<-\EOF
+          #!/bin/sh
+
+          cmd=cp
+          while test $# != 0
+          do
+          %case "$1" in
+          %-d) cmd="mkdir -p";;
+          %-m) shift;; # ignore mode
+          %*) break;;
+          %esac
+          %shift
+          done
+
+          exec $cmd "$@"
+          EOF
+
+      - name: Install build dependencies for Git (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get -q -y install libssl-dev libcurl4-openssl-dev gettext
+
+      - name: Build and install Git
+        shell: bash
+        env:
+          NO_TCLTK: Yup
+        run: |
+          # We do require a VFS version
+          def_ver="$(sed -n 's/DEF_VER=\(.*vfs.*\)/\1/p' GIT-VERSION-GEN)"
+          test -n "$def_ver"
+
+          # Ensure that `git version` reflects DEF_VER
+          case "$(git describe --match "v[0-9]*vfs*" HEAD)" in
+          ${def_ver%%.vfs.*}.vfs.*) ;; # okay, we can use this
+          *) git -c user.name=ci -c user.email=ci@github tag -m for-testing ${def_ver}.NNN.g$(git rev-parse --short HEAD);;
+          esac
+
+          SUDO=
+          extra=
+          case "${{ runner.os }}" in
+          Windows)
+            extra=DESTDIR=/c/Progra~1/Git
+            cygpath -aw "/c/Program Files/Git/cmd" >>$GITHUB_PATH
+            ;;
+          Linux)
+            SUDO=sudo
+            extra=prefix=/usr
+            ;;
+          macOS)
+            SUDO=sudo
+            extra=prefix=/opt/homebrew
+            ;;
+          esac
+
+          $SUDO make -j5 $extra install
+
+      - name: Ensure that we use the built Git and Scalar
+        shell: bash
+        run: |
+          type -p git
+          git version
+          case "$(git version)" in *.vfs.*) echo Good;; *) exit 1;; esac
+          type -p scalar
+          scalar version
+          case "$(scalar version 2>&1)" in *.vfs.*) echo Good;; *) exit 1;; esac
+
+      - name: Check out Scalar's source code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Indicate full history so Nerdbank.GitVersioning works.
+          path: scalar
+          repository: ${{ env.SCALAR_REPOSITORY }}
+          ref: ${{ env.SCALAR_REF }}
+
+      - name: Target .NET 9
+        shell: bash
+        run:
+          csproj=scalar/Scalar.FunctionalTests/Scalar.FunctionalTests.csproj &&
+          sed 's/netcoreapp3\.1/net9.0/g' <$csproj >$csproj.new &&
+          mv $csproj.new $csproj &&
+
+          echo "BUILD_FRAGMENT=bin/Release/net9.0" >>$GITHUB_ENV &&
+
+          props=scalar/Directory.Build.props &&
+          sed 's/\(<RuntimeIdentifiers>\)[^<]*/\1osx-arm64/' <$props >$props.new &&
+          mv $props.new $props
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.306'
+
+      - name: Install dependencies
+        run: dotnet restore
+        working-directory: scalar
+        env:
+          DOTNET_NOLOGO: 1
+
+      - name: Build
+        working-directory: scalar
+        run: dotnet build --configuration Release --no-restore -p:UseAppHost=true # Force generation of executable on macOS.
+
+      - name: Setup platform (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          echo "BUILD_PLATFORM=${{ runner.os }}" >>$GITHUB_ENV
+          echo "TRACE2_BASENAME=Trace2.${{ github.run_id }}__${{ github.run_number }}__${{ matrix.os }}__${{ matrix.features }}" >>$GITHUB_ENV
+
+      - name: Setup platform (Mac)
+        if: runner.os == 'macOS'
+        run: |
+          echo 'BUILD_PLATFORM=Mac' >>$GITHUB_ENV
+          echo "TRACE2_BASENAME=Trace2.${{ github.run_id }}__${{ github.run_number }}__${{ matrix.os }}__${{ matrix.features }}" >>$GITHUB_ENV
+
+      - name: Setup platform (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          echo "BUILD_PLATFORM=${{ runner.os }}" >>$env:GITHUB_ENV
+          echo 'BUILD_FILE_EXT=.exe' >>$env:GITHUB_ENV
+          echo "TRACE2_BASENAME=Trace2.${{ github.run_id }}__${{ github.run_number }}__${{ matrix.os }}__${{ matrix.features }}" >>$env:GITHUB_ENV
+
+      - name: Configure feature.scalar
+        run: git config --global feature.scalar ${{ matrix.features }}
+
+      - id: functional_test
+        name: Functional test
+        timeout-minutes: 60
+        working-directory: scalar
+        shell: bash
+        run: |
+          export GIT_TRACE2_EVENT="$PWD/$TRACE2_BASENAME/Event"
+          export GIT_TRACE2_PERF="$PWD/$TRACE2_BASENAME/Perf"
+          export GIT_TRACE2_EVENT_BRIEF=true
+          export GIT_TRACE2_PERF_BRIEF=true
+          mkdir -p "$TRACE2_BASENAME"
+          mkdir -p "$TRACE2_BASENAME/Event"
+          mkdir -p "$TRACE2_BASENAME/Perf"
+          git version --build-options
+          cd ../out
+          Scalar.FunctionalTests/$BUILD_FRAGMENT/Scalar.FunctionalTests$BUILD_FILE_EXT --test-scalar-on-path --test-git-on-path --timeout=300000 --full-suite
+
+      - name: Force-stop FSMonitor daemons and Git processes (Windows)
+        if: runner.os == 'Windows' && (success() || failure())
+        shell: bash
+        run: |
+          set -x
+          wmic process get CommandLine,ExecutablePath,HandleCount,Name,ParentProcessID,ProcessID
+          wmic process where "CommandLine Like '%fsmonitor--daemon %run'" delete
+          wmic process where "ExecutablePath Like '%git.exe'" delete
+
+      - id: trace2_zip_unix
+        if: runner.os != 'Windows' && ( success() || failure() ) && ( steps.functional_test.conclusion == 'success' || steps.functional_test.conclusion == 'failure' )
+        name: Zip Trace2 Logs (Unix)
+        shell: bash
+        working-directory: scalar
+        run: zip -q -r $TRACE2_BASENAME.zip $TRACE2_BASENAME/
+
+      - id: trace2_zip_windows
+        if: runner.os == 'Windows' && ( success() || failure() ) && ( steps.functional_test.conclusion == 'success' || steps.functional_test.conclusion == 'failure' )
+        name: Zip Trace2 Logs (Windows)
+        working-directory: scalar
+        run: Compress-Archive -DestinationPath ${{ env.TRACE2_BASENAME }}.zip -Path ${{ env.TRACE2_BASENAME }}
+
+      - name: Archive Trace2 Logs
+        if: ( success() || failure() ) && ( steps.trace2_zip_unix.conclusion == 'success' || steps.trace2_zip_windows.conclusion == 'success' )
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.TRACE2_BASENAME }}.zip
+          path: scalar/${{ env.TRACE2_BASENAME }}.zip
+          retention-days: 3
+
+      # The GitHub Action `action-tmate` allows developers to connect to the running agent
+      # using SSH (it will be a `tmux` session; on Windows agents it will be inside the MSYS2
+      # environment in `C:\msys64`, therefore it can be slightly tricky to interact with
+      # Git for Windows, which runs a slightly incompatible MSYS2 runtime).
+      - name: action-tmate
+        if: env.DEBUG_WITH_TMATE == 'true' && failure()
+        uses: mxschmitt/action-tmate@v3
+        with:
+          limit-access-to-actor: true
