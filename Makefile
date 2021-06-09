@@ -2873,6 +2873,7 @@ GIT_OBJS += git.o
 .PHONY: git-objs
 git-objs: $(GIT_OBJS)
 
+SCALAR_OBJS := json-parser.o
 SCALAR_OBJS += scalar.o
 .PHONY: scalar-objs
 scalar-objs: $(SCALAR_OBJS)
@@ -3027,7 +3028,7 @@ $(REMOTE_CURL_PRIMARY): remote-curl.o http.o http-walker.o $(LAZYLOAD_LIBCURL_OB
 	$(QUIET_LINK)$(CC) $(ALL_CFLAGS) -o $@ $(ALL_LDFLAGS) $(filter %.o,$^) \
 		$(CURL_LIBCURL) $(EXPAT_LIBEXPAT) $(LIBS)
 
-scalar$X: scalar.o GIT-LDFLAGS $(GITLIBS)
+scalar$X: $(SCALAR_OBJS) GIT-LDFLAGS $(GITLIBS)
 	$(QUIET_LINK)$(CC) $(ALL_CFLAGS) -o $@ $(ALL_LDFLAGS) \
 		$(filter %.o,$^) $(LIBS)
 

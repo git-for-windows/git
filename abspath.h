@@ -10,6 +10,11 @@ char *real_pathdup(const char *path, int die_on_error);
 const char *absolute_path(const char *path);
 char *absolute_pathdup(const char *path);
 
+/**
+ * Remove the last path component from 'path' except if 'path' is root.
+ */
+void strip_last_path_component(struct strbuf *path);
+
 /*
  * Concatenate "prefix" (if len is non-zero) and "path", with no
  * connecting characters (so "prefix" should end with a "/").

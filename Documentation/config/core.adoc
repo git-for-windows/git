@@ -852,3 +852,12 @@ core.WSLCompat::
 	The default value is false. When set to true, Git will set the mode
 	bits of the file in the way of wsl, so that the executable flag of
 	files can be set or read correctly.
+
+core.configWriteLockTimeoutMS::
+	When processes try to write to the config concurrently, it is likely
+	that one process "wins" and the other process(es) fail to lock the
+	config file. By configuring a timeout larger than zero, Git can be
+	told to try to lock the config again a couple times within the
+	specified timeout. If the timeout is configure to zero (which is the
+	default), Git will fail immediately when the config is already
+	locked.

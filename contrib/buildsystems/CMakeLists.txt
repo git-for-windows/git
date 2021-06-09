@@ -792,7 +792,7 @@ target_link_libraries(git-sh-i18n--envsubst common-main)
 add_executable(git-shell ${CMAKE_SOURCE_DIR}/shell.c)
 target_link_libraries(git-shell common-main)
 
-add_executable(scalar ${CMAKE_SOURCE_DIR}/scalar.c)
+add_executable(scalar ${CMAKE_SOURCE_DIR}/scalar.c ${CMAKE_SOURCE_DIR}/json-parser.c)
 target_link_libraries(scalar common-main)
 
 if(CURL_FOUND)

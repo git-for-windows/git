@@ -9,7 +9,9 @@ SYNOPSIS
 --------
 [verse]
 scalar clone [--single-branch] [--branch <main-branch>] [--full-clone]
-	[--[no-]src] [--[no-]tags] [--[no-]maintenance] <url> [<enlistment>]
+	[--[no-]src] [--[no-]tags] [--[no-]maintenance]
+	[--[no-]src] [--local-cache-path <path>] [--cache-server-url <url>]
+	<url> [<enlistment>]
 scalar list
 scalar register [--[no-]maintenance] [<enlistment>]
 scalar unregister [<enlistment>]
@@ -17,6 +19,7 @@ scalar run ( all | config | commit-graph | fetch | loose-objects | pack-files ) 
 scalar reconfigure [--maintenance=(enable|disable|keep)] [ --all | <enlistment> ]
 scalar diagnose [<enlistment>]
 scalar delete <enlistment>
+scalar cache-server ( --get | --set <url> | --list [<remote>] ) [<enlistment>]
 
 DESCRIPTION
 -----------
@@ -107,6 +110,38 @@ cloning. If the HEAD at the remote did not point at any branch when
 	background maintenance feature. Use the `--no-maintenance` to skip
 	this configuration.
 
+--local-cache-path <path>::
+	Override the path to the local cache root directory; Pre-fetched objects
+	are stored into a repository-dependent subdirectory of that path.
++
+The default is `<drive>:\.scalarCache` on Windows (on the same drive as the
+clone), and `~/.scalarCache` on macOS.
+
+--cache-server-url <url>::
+	Retrieve missing objects from the specified remote, which is expected to
+	understand the GVFS protocol.
+
+--gvfs-protocol::
+--no-gvfs-protocol::
+	When cloning from a `<url>` with either `dev.azure.com` or
+	`visualstudio.com` in the name, `scalar clone` will attempt to use the GVFS
+	Protocol to access Git objects, specifically from a cache server when
+	available, and will fail to clone if there is an error over that protocol.
+
+	To enable the GVFS Protocol regardless of the origin `<url>`, use
+	`--gvfs-protocol`. This will cause `scalar clone` to fail when the origin
+	server fails to provide a valid response to the `gvfs/config` endpoint.
+
+	To disable the GVFS Protocol, use `--no-gvfs-protocol` and `scalar clone`
+	will only use the Git protocol, starting with a partial clone. This can be
+	helpful if your `<url>` points to Azure Repos but the repository does not
+	have GVFS cache servers enabled. It is likely more efficient to use its
+	partial clone functionality through the Git protocol.
+
+	Previous versions of `scalar clone` could fall back to a partial clone over
+	the Git protocol if there is any issue gathering GVFS configuration
+	information from the origin server.
+
 List
 ~~~~
 
@@ -196,6 +231,27 @@ Delete
 delete <enlistment>::
 	This subcommand lets you delete an existing Scalar enlistment from your
 	local file system, unregistering the repository.
+
+Cache-server
+~~~~~~~~~~~~
+
+cache-server ( --get | --set <url> | --list [<remote>] ) [<enlistment>]::
+    This command lets you query or set the GVFS-enabled cache server used
+    to fetch missing objects.
+
+--get::
+    This is the default command mode: query the currently-configured cache
+    server URL, if any.
+
+--list::
+    Access the `gvfs/info` endpoint of the specified remote (default:
+    `origin`) to figure out which cache servers are available, if any.
++
+In contrast to the `--get` command mode (which only accesses the local
+repository), this command mode triggers a request via the network that
+potentially requires authentication. If authentication is required, the
+configured credential helper is employed (see linkgit:git-credential[1]
+for details).
 
 SEE ALSO
 --------

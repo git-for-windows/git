@@ -7,18 +7,29 @@
 #include "git-compat-util.h"
 #include "abspath.h"
 #include "gettext.h"
+#include "hex.h"
 #include "parse-options.h"
 #include "config.h"
+#include "environment.h"
 #include "run-command.h"
 #include "simple-ipc.h"
 #include "fsmonitor-ipc.h"
 #include "fsmonitor-settings.h"
 #include "refs.h"
 #include "dir.h"
+#include "object-file.h"
 #include "packfile.h"
 #include "help.h"
 #include "setup.h"
+#include "wrapper.h"
 #include "trace2.h"
+#include "json-parser.h"
+#include "remote.h"
+#include "path.h"
+
+static int is_unattended(void) {
+	return git_env_bool("Scalar_UNATTENDED", 0);
+}
 
 static void setup_enlistment_directory(int argc, const char **argv,
 				       const char * const *usagestr,
@@ -46,6 +57,9 @@ static void setup_enlistment_directory(int argc, const char **argv,
 		die(_("need a working directory"));
 
 	strbuf_trim_trailing_dir_sep(&path);
+#ifdef GIT_WINDOWS_NATIVE
+	convert_slashes(path.buf);
+#endif
 
 	/* check if currently in enlistment root with src/ workdir */
 	len = path.len;
@@ -72,21 +86,47 @@ static void setup_enlistment_directory(int argc, const char **argv,
 	strbuf_release(&path);
 }
 
+static int git_retries = 3;
+
 LAST_ARG_MUST_BE_NULL
 static int run_git(const char *arg, ...)
 {
-	struct child_process cmd = CHILD_PROCESS_INIT;
 	va_list args;
 	const char *p;
+	struct strvec argv = STRVEC_INIT;
+	int res = 0, attempts;
 
 	va_start(args, arg);
-	strvec_push(&cmd.args, arg);
+	strvec_push(&argv, arg);
 	while ((p = va_arg(args, const char *)))
-		strvec_push(&cmd.args, p);
+		strvec_push(&argv, p);
 	va_end(args);
 
-	cmd.git_cmd = 1;
-	return run_command(&cmd);
+	for (attempts = 0, res = 1;
+	     res && attempts < git_retries;
+	     attempts++) {
+		struct child_process cmd = CHILD_PROCESS_INIT;
+
+		cmd.git_cmd = 1;
+		strvec_pushv(&cmd.args, argv.v);
+		res = run_command(&cmd);
+	}
+
+	strvec_clear(&argv);
+	return res;
+}
+
+static const char *ensure_absolute_path(const char *path, char **absolute)
+{
+	struct strbuf buf = STRBUF_INIT;
+
+	if (is_absolute_path(path))
+		return path;
+
+	strbuf_realpath_forgiving(&buf, path, 1);
+	free(*absolute);
+	*absolute = strbuf_detach(&buf, NULL);
+	return *absolute;
 }
 
 struct scalar_config {
@@ -127,23 +167,7 @@ static int set_recommended_config(int reconfigure)
 		{ "core.FSCache", "true", 1 },
 		{ "core.multiPackIndex", "true", 1 },
 		{ "core.preloadIndex", "true", 1 },
-#ifndef WIN32
 		{ "core.untrackedCache", "true", 1 },
-#else
-		/*
-		 * Unfortunately, Scalar's Functional Tests demonstrated
-		 * that the untracked cache feature is unreliable on Windows
-		 * (which is a bummer because that platform would benefit the
-		 * most from it). For some reason, freshly created files seem
-		 * not to update the directory's `lastModified` time
-		 * immediately, but the untracked cache would need to rely on
-		 * that.
-		 *
-		 * Therefore, with a sad heart, we disable this very useful
-		 * feature on Windows.
-		 */
-		{ "core.untrackedCache", "false", 1 },
-#endif
 		{ "core.logAllRefUpdates", "true", 1 },
 		{ "credential.https://dev.azure.com.useHttpPath", "true", 1 },
 		{ "credential.validate", "false", 1 }, /* GCM4W-only */
@@ -172,10 +196,28 @@ static int set_recommended_config(int reconfigure)
 		{ "core.safeCRLF", "false" },
 		{ "fetch.showForcedUpdates", "false" },
 		{ "pack.usePathWalk", "true" },
+		{ "core.configWriteLockTimeoutMS", "150" },
 		{ NULL, NULL },
 	};
 	int i;
 	char *value;
+
+	/*
+	 * If a user has "core.usebuiltinfsmonitor" enabled, try to switch to
+	 * the new (non-deprecated) setting (core.fsmonitor).
+	 */
+	if (!repo_config_get_string(the_repository, "core.usebuiltinfsmonitor", &value)) {
+		char *dummy = NULL;
+		if (repo_config_get_string(the_repository, "core.fsmonitor", &dummy) &&
+		    repo_config_set_gently(the_repository, "core.fsmonitor", value) < 0)
+			return error(_("could not configure %s=%s"),
+				     "core.fsmonitor", value);
+		if (repo_config_set_gently(the_repository, "core.usebuiltinfsmonitor", NULL) < 0)
+			return error(_("could not configure %s=%s"),
+				     "core.useBuiltinFSMonitor", "NULL");
+		free(value);
+		free(dummy);
+	}
 
 	for (i = 0; config[i].key; i++) {
 		if (set_scalar_config(config + i, reconfigure))
@@ -188,6 +230,33 @@ static int set_recommended_config(int reconfigure)
 		if (set_scalar_config(&fsmonitor, reconfigure))
 			return error(_("could not configure %s=%s"),
 				     fsmonitor.key, fsmonitor.value);
+	}
+
+	/*
+	 * Set HTTP/1.1 for Azure DevOps URLs
+	 * We check for dev.azure.com/ and .visualstudio.com/ patterns
+	 * which are sufficient to identify ADO URLs (including formats like
+	 * https://orgname@dev.azure.com/...)
+	 */
+	if (!repo_config_get_string(the_repository, "remote.origin.url", &value)) {
+		if (starts_with(value, "https://dev.azure.com/") ||
+		    strstr(value, "@dev.azure.com/") ||
+		    strstr(value, ".visualstudio.com/")) {
+			struct strbuf key = STRBUF_INIT;
+			strbuf_addf(&key, "http.%s.version", value);
+			FREE_AND_NULL(value);
+
+			if (reconfigure || repo_config_get_string(the_repository, key.buf, &value)) {
+				trace2_data_string("scalar", the_repository, key.buf, "created");
+				if (repo_config_set_gently(the_repository, key.buf, "HTTP/1.1") < 0) {
+					strbuf_release(&key);
+					return error(_("could not configure %s=%s"),
+						     key.buf, "HTTP/1.1");
+				}
+			}
+			strbuf_release(&key);
+		}
+		FREE_AND_NULL(value);
 	}
 
 	/*
@@ -219,6 +288,11 @@ static int set_recommended_config(int reconfigure)
  */
 static int toggle_maintenance(int enable)
 {
+	unsigned long ul;
+
+	if (repo_config_get_ulong(the_repository, "core.configWriteLockTimeoutMS", &ul))
+		git_config_push_parameter("core.configWriteLockTimeoutMS=150");
+
 	return run_git("maintenance",
 		       enable ? "start" : "unregister",
 		       enable ? NULL : "--force",
@@ -228,9 +302,13 @@ static int toggle_maintenance(int enable)
 static int add_or_remove_enlistment(int add)
 {
 	int res;
+	unsigned long ul;
 
 	if (!the_repository->worktree)
 		die(_("Scalar enlistments require a worktree"));
+
+	if (repo_config_get_ulong(the_repository, "core.configWriteLockTimeoutMS", &ul))
+		git_config_push_parameter("core.configWriteLockTimeoutMS=150");
 
 	res = run_git("config", "--global", "--get", "--fixed-value",
 		      "scalar.repo", the_repository->worktree, NULL);
@@ -329,6 +407,222 @@ static int set_config(const char *fmt, ...)
 	return res;
 }
 
+static int list_cache_server_urls(struct json_iterator *it)
+{
+	const char *p;
+	char *q;
+	long l;
+
+	if (it->type == JSON_STRING &&
+	    skip_iprefix(it->key.buf, ".CacheServers[", &p) &&
+	    (l = strtol(p, &q, 10)) >= 0 && p != q &&
+	    !strcasecmp(q, "].Url"))
+		printf("#%ld: %s\n", l, it->string_value.buf);
+
+	return 0;
+}
+
+/* Find N for which .CacheServers[N].GlobalDefault == true */
+static int get_cache_server_index(struct json_iterator *it)
+{
+	const char *p;
+	char *q;
+	long l;
+
+	if (it->type == JSON_TRUE &&
+	    skip_iprefix(it->key.buf, ".CacheServers[", &p) &&
+	    (l = strtol(p, &q, 10)) >= 0 && p != q &&
+	    !strcasecmp(q, "].GlobalDefault")) {
+		*(long *)it->fn_data = l;
+		return 1;
+	}
+
+	return 0;
+}
+
+struct cache_server_url_data {
+	char *key, *url;
+};
+
+/* Get .CacheServers[N].Url */
+static int get_cache_server_url(struct json_iterator *it)
+{
+	struct cache_server_url_data *data = it->fn_data;
+
+	if (it->type == JSON_STRING &&
+	    !strcasecmp(data->key, it->key.buf)) {
+		data->url = strbuf_detach(&it->string_value, NULL);
+		return 1;
+	}
+
+	return 0;
+}
+
+static int can_url_support_gvfs(const char *url)
+{
+	return starts_with(url, "https://") ||
+		(git_env_bool("GIT_TEST_ALLOW_GVFS_VIA_HTTP", 0) &&
+		 starts_with(url, "http://"));
+}
+
+/*
+ * If `cache_server_url` is `NULL`, print the list to `stdout`.
+ *
+ * Since `gvfs-helper` requires a Git directory, this _must_ be run in
+ * a worktree.
+ */
+static int supports_gvfs_protocol(const char *url, char **cache_server_url)
+{
+	struct child_process cp = CHILD_PROCESS_INIT;
+	struct strbuf out = STRBUF_INIT;
+
+	/*
+	 * The GVFS protocol is only supported via https://; For testing, we
+	 * also allow http://.
+	 */
+	if (!can_url_support_gvfs(url))
+		return 0;
+
+	cp.git_cmd = 1;
+	strvec_pushl(&cp.args, "-c", "http.version=HTTP/1.1",
+		     "gvfs-helper", "--remote", url, "config", NULL);
+	if (!pipe_command(&cp, NULL, 0, &out, 512, NULL, 0)) {
+		long l = 0;
+		struct json_iterator it =
+			JSON_ITERATOR_INIT(out.buf, get_cache_server_index, &l);
+		struct cache_server_url_data data = { .url = NULL };
+
+		if (!cache_server_url) {
+			it.fn = list_cache_server_urls;
+			if (iterate_json(&it) < 0) {
+				reset_iterator(&it);
+				strbuf_release(&out);
+				return error("JSON parse error");
+			}
+			reset_iterator(&it);
+			strbuf_release(&out);
+			return 0;
+		}
+
+		if (iterate_json(&it) < 0) {
+			reset_iterator(&it);
+			strbuf_release(&out);
+			return error("JSON parse error");
+		}
+		data.key = xstrfmt(".CacheServers[%ld].Url", l);
+		it.fn = get_cache_server_url;
+		it.fn_data = &data;
+		if (iterate_json(&it) < 0) {
+			reset_iterator(&it);
+			strbuf_release(&out);
+			return error("JSON parse error");
+		}
+		*cache_server_url = data.url;
+		free(data.key);
+		reset_iterator(&it);
+		strbuf_release(&out);
+		return 1;
+	}
+	strbuf_release(&out);
+	/* error out quietly, unless we wanted to list URLs */
+	return cache_server_url ?
+		0 : error(_("Could not access gvfs/config endpoint"));
+}
+
+static char *default_cache_root(const char *root)
+{
+	const char *env;
+
+	if (is_unattended()) {
+		struct strbuf path = STRBUF_INIT;
+		strbuf_addstr(&path, root);
+		strip_last_path_component(&path);
+		strbuf_addstr(&path, "/.scalarCache");
+		return strbuf_detach(&path, NULL);
+	}
+
+#ifdef WIN32
+	(void)env;
+	return xstrfmt("%.*s.scalarCache", offset_1st_component(root), root);
+#elif defined(__APPLE__)
+	if ((env = getenv("HOME")) && *env)
+		return xstrfmt("%s/.scalarCache", env);
+	return NULL;
+#else
+	if ((env = getenv("XDG_CACHE_HOME")) && *env)
+		return xstrfmt("%s/scalar", env);
+	if ((env = getenv("HOME")) && *env)
+		return xstrfmt("%s/.cache/scalar", env);
+	return NULL;
+#endif
+}
+
+static int get_repository_id(struct json_iterator *it)
+{
+	if (it->type == JSON_STRING &&
+	    !strcasecmp(".repository.id", it->key.buf)) {
+		*(char **)it->fn_data = strbuf_detach(&it->string_value, NULL);
+		return 1;
+	}
+
+	return 0;
+}
+
+/* Needs to run this in a worktree; gvfs-helper requires a Git repository */
+static char *get_cache_key(const char *url)
+{
+	struct child_process cp = CHILD_PROCESS_INIT;
+	struct strbuf out = STRBUF_INIT;
+	char *cache_key = NULL;
+
+	/*
+	 * The GVFS protocol is only supported via https://; For testing, we
+	 * also allow http://.
+	 */
+	if (!git_env_bool("SCALAR_TEST_SKIP_VSTS_INFO", 0) &&
+	    can_url_support_gvfs(url)) {
+		cp.git_cmd = 1;
+		strvec_pushl(&cp.args, "gvfs-helper", "--remote", url,
+			     "endpoint", "vsts/info", NULL);
+		if (!pipe_command(&cp, NULL, 0, &out, 512, NULL, 0)) {
+			char *id = NULL;
+			struct json_iterator it =
+				JSON_ITERATOR_INIT(out.buf, get_repository_id,
+						   &id);
+
+			if (iterate_json(&it) < 0)
+				warning("JSON parse error (%s)", out.buf);
+			else if (id)
+				cache_key = xstrfmt("id_%s", id);
+			free(id);
+		}
+	}
+
+	if (!cache_key) {
+		struct strbuf downcased = STRBUF_INIT;
+		int hash_algo_index = hash_algo_by_name("sha1");
+		const struct git_hash_algo *hash_algo = hash_algo_index < 0 ?
+			the_hash_algo : &hash_algos[hash_algo_index];
+		struct git_hash_ctx ctx;
+		unsigned char hash[GIT_MAX_RAWSZ];
+
+		strbuf_addstr(&downcased, url);
+		strbuf_tolower(&downcased);
+
+		hash_algo->init_fn(&ctx);
+		hash_algo->update_fn(&ctx, downcased.buf, downcased.len);
+		hash_algo->final_fn(hash, &ctx);
+
+		strbuf_release(&downcased);
+
+		cache_key = xstrfmt("url_%s",
+				    hash_to_hex_algop(hash, hash_algo));
+	}
+
+	strbuf_release(&out);
+	return cache_key;
+}
+
 static char *remote_default_branch(const char *url)
 {
 	struct child_process cp = CHILD_PROCESS_INIT;
@@ -423,12 +717,55 @@ void load_builtin_commands(const char *prefix UNUSED,
 	die("not implemented");
 }
 
+static int init_shared_object_cache(const char *url,
+				    const char *local_cache_root)
+{
+	struct strbuf buf = STRBUF_INIT;
+	int res = 0;
+	char *cache_key = NULL, *shared_cache_path = NULL, *alternates = NULL;
+
+	if (!(cache_key = get_cache_key(url))) {
+		res = error(_("could not determine cache key for '%s'"), url);
+		goto cleanup;
+	}
+
+	shared_cache_path = xstrfmt("%s/%s", local_cache_root, cache_key);
+	if (set_config("gvfs.sharedCache=%s", shared_cache_path)) {
+		res = error(_("could not configure shared cache"));
+		goto cleanup;
+	}
+
+	strbuf_addf(&buf, "%s/pack", shared_cache_path);
+	switch (safe_create_leading_directories(the_repository, buf.buf)) {
+	case SCLD_OK: case SCLD_EXISTS:
+		break; /* okay */
+	default:
+		res = error_errno(_("could not initialize '%s'"), buf.buf);
+		goto cleanup;
+	}
+
+	alternates = repo_git_path(the_repository, "objects/info/alternates");
+	write_file(alternates, "%s\n", shared_cache_path);
+
+	cleanup:
+	strbuf_release(&buf);
+	free(shared_cache_path);
+	free(cache_key);
+	free(alternates);
+	return res;
+}
+
 static int cmd_clone(int argc, const char **argv)
 {
+	int dummy = 0;
 	const char *branch = NULL;
 	char *branch_to_free = NULL;
 	int full_clone = 0, single_branch = 0, show_progress = isatty(2);
 	int src = 1, tags = 1, maintenance = 1;
+	const char *cache_server_url = NULL, *local_cache_root = NULL;
+	char *default_cache_server_url = NULL, *local_cache_root_abs = NULL;
+	int gvfs_protocol = -1;
+
 	struct option clone_options[] = {
 		OPT_STRING('b', "branch", &branch, N_("<branch>"),
 			   N_("branch to checkout after clone")),
@@ -443,6 +780,16 @@ static int cmd_clone(int argc, const char **argv)
 			 N_("specify if tags should be fetched during clone")),
 		OPT_BOOL(0, "maintenance", &maintenance,
 			 N_("specify if background maintenance should be enabled")),
+		OPT_BOOL(0, "gvfs-protocol", &gvfs_protocol,
+			 N_("force enable (or disable) the GVFS Protocol")),
+		OPT_STRING(0, "cache-server-url", &cache_server_url,
+			   N_("<url>"),
+			   N_("the url or friendly name of the cache server")),
+		OPT_STRING(0, "local-cache-path", &local_cache_root,
+			   N_("<path>"),
+			   N_("override the path for the local Scalar cache")),
+		OPT_HIDDEN_BOOL(0, "no-fetch-commits-and-trees",
+				&dummy, N_("no longer used")),
 		OPT_END(),
 	};
 	const char * const clone_usage[] = {
@@ -483,10 +830,22 @@ static int cmd_clone(int argc, const char **argv)
 	if (is_directory(enlistment))
 		die(_("directory '%s' exists already"), enlistment);
 
+	ensure_absolute_path(enlistment, &enlistment);
+
 	if (src)
 		dir = xstrfmt("%s/src", enlistment);
 	else
 		dir = xstrdup(enlistment);
+
+	if (!local_cache_root)
+		local_cache_root = local_cache_root_abs =
+			default_cache_root(enlistment);
+	else
+		local_cache_root = ensure_absolute_path(local_cache_root,
+							&local_cache_root_abs);
+
+	if (!local_cache_root)
+		die(_("could not determine local cache root"));
 
 	strbuf_reset(&buf);
 	if (branch)
@@ -507,8 +866,28 @@ static int cmd_clone(int argc, const char **argv)
 
 	setup_git_directory();
 
+	repo_config(the_repository, git_default_config, NULL);
+
+	/*
+	 * This `dir_inside_of()` call relies on git_config() having parsed the
+	 * newly-initialized repository config's `core.ignoreCase` value.
+	 */
+	if (dir_inside_of(local_cache_root, dir) >= 0) {
+		struct strbuf path = STRBUF_INIT;
+
+		strbuf_addstr(&path, enlistment);
+		if (chdir("../..") < 0 ||
+		    remove_dir_recursively(&path, 0) < 0)
+			die(_("'--local-cache-path' cannot be inside the src "
+			      "folder;\nCould not remove '%s'"), enlistment);
+
+		die(_("'--local-cache-path' cannot be inside the src folder"));
+	}
+
 	/* common-main already logs `argv` */
 	trace2_def_repo(the_repository);
+	trace2_data_intmax("scalar", the_repository, "unattended",
+			   is_unattended());
 
 	if (!branch && !(branch = branch_to_free = remote_default_branch(url))) {
 		res = error(_("failed to get default branch for '%s'"), url);
@@ -519,9 +898,7 @@ static int cmd_clone(int argc, const char **argv)
 	    set_config("remote.origin.fetch="
 		       "+refs/heads/%s:refs/remotes/origin/%s",
 		       single_branch ? branch : "*",
-		       single_branch ? branch : "*") ||
-	    set_config("remote.origin.promisor=true") ||
-	    set_config("remote.origin.partialCloneFilter=blob:none")) {
+		       single_branch ? branch : "*")) {
 		res = error(_("could not configure remote in '%s'"), dir);
 		goto cleanup;
 	}
@@ -529,6 +906,53 @@ static int cmd_clone(int argc, const char **argv)
 	if (!tags && set_config("remote.origin.tagOpt=--no-tags")) {
 		res = error(_("could not disable tags in '%s'"), dir);
 		goto cleanup;
+	}
+
+	if (set_config("credential.https://dev.azure.com.useHttpPath=true")) {
+		res = error(_("could not configure credential.useHttpPath"));
+		goto cleanup;
+	}
+
+	/* Is --[no-]gvfs-protocol unspecified? Infer from url. */
+	if (gvfs_protocol < 0) {
+		if (cache_server_url ||
+		    strstr(url, "dev.azure.com/") ||
+		    strstr(url, "visualstudio.com"))
+			gvfs_protocol = 1;
+		else
+			gvfs_protocol = 0;
+	}
+
+	if (gvfs_protocol && !supports_gvfs_protocol(url, &default_cache_server_url))
+		die(_("failed to contact server via GVFS Protocol"));
+
+	if (gvfs_protocol) {
+		if ((res = init_shared_object_cache(url, local_cache_root)))
+			goto cleanup;
+		if (!cache_server_url)
+			cache_server_url = default_cache_server_url;
+		if (set_config("core.useGVFSHelper=true") ||
+		    set_config("core.gvfs=150") ||
+		    set_config("http.%s.version=HTTP/1.1", url)) {
+			res = error(_("could not turn on GVFS helper"));
+			goto cleanup;
+		}
+		if (cache_server_url &&
+		    set_config("gvfs.cache-server=%s", cache_server_url)) {
+			res = error(_("could not configure cache server"));
+			goto cleanup;
+		}
+		if (cache_server_url)
+			fprintf(stderr, "Cache server URL: %s\n",
+				cache_server_url);
+	} else {
+		if (set_config("core.useGVFSHelper=false") ||
+		    set_config("remote.origin.promisor=true") ||
+		    set_config("remote.origin.partialCloneFilter=blob:none")) {
+			res = error(_("could not configure partial clone in "
+				      "'%s'"), dir);
+			goto cleanup;
+		}
 	}
 
 	if (!full_clone &&
@@ -543,6 +967,11 @@ static int cmd_clone(int argc, const char **argv)
 				"origin",
 				(tags ? NULL : "--no-tags"),
 				NULL))) {
+		if (gvfs_protocol) {
+			res = error(_("failed to prefetch commits and trees"));
+			goto cleanup;
+		}
+
 		warning(_("partial clone failed; attempting full clone"));
 
 		if (set_config("remote.origin.promisor") ||
@@ -577,6 +1006,8 @@ cleanup:
 	free(enlistment);
 	free(dir);
 	strbuf_release(&buf);
+	free(default_cache_server_url);
+	free(local_cache_root_abs);
 	return res;
 }
 
@@ -598,6 +1029,8 @@ static int cmd_diagnose(int argc, const char **argv)
 	setup_enlistment_directory(argc, argv, usage, options, &diagnostics_root);
 	strbuf_addstr(&diagnostics_root, "/.scalarDiagnostics");
 
+	/* Here, a failure should not repeat itself. */
+	git_retries = 1;
 	res = run_git("diagnose", "--mode=all", "-s", "%Y%m%d_%H%M%S",
 		      "-o", diagnostics_root.buf, NULL);
 
@@ -987,6 +1420,68 @@ static int cmd_version(int argc, const char **argv)
 	return 0;
 }
 
+static int cmd_cache_server(int argc, const char **argv)
+{
+	int get = 0;
+	const char *set = NULL, *list = NULL;
+	struct option options[] = {
+		OPT_CMDMODE(0, "get", &get,
+			    N_("get the configured cache-server URL"), 1),
+		OPT_STRING(0, "set", &set, N_("URL"),
+			   N_("configure the cache-server to use")),
+		OPT_STRING(0, "list", &list, N_("remote"),
+			   N_("list the possible cache-server URLs")),
+		OPT_END(),
+	};
+	const char * const usage[] = {
+		N_("scalar cache-server "
+		   "[--get | --set <url> | --list <remote>] [<enlistment>]"),
+		NULL
+	};
+	int res = 0;
+
+	argc = parse_options(argc, argv, NULL, options,
+			     usage, 0);
+
+	if (get + !!set + !!list > 1)
+		usage_msg_opt(_("--get/--set/--list are mutually exclusive"),
+			      usage, options);
+
+	setup_enlistment_directory(argc, argv, usage, options, NULL);
+
+	if (list) {
+		const char *name = list, *url = list;
+
+		if (!strchr(list, '/')) {
+			struct remote *remote;
+
+			/* Look up remote */
+			remote = remote_get(list);
+			if (!remote) {
+				error("no such remote: '%s'", name);
+				return 1;
+			}
+			if (!remote->url.nr) {
+				return error(_("remote '%s' has no URLs"),
+					     name);
+			}
+			url = remote->url.v[0];
+		}
+		res = supports_gvfs_protocol(url, NULL);
+	} else if (set) {
+		res = set_config("gvfs.cache-server=%s", set);
+	} else {
+		char *url = NULL;
+
+		printf("Using cache server: %s\n",
+		       repo_config_get_string(the_repository, "gvfs.cache-server", &url) ?
+		       "(undefined)" : url);
+		free(url);
+	}
+
+	return !!res;
+}
+
 static struct {
 	const char *name;
 	int (*fn)(int, const char **);
@@ -1001,6 +1496,7 @@ static struct {
 	{ "help", cmd_help },
 	{ "version", cmd_version },
 	{ "diagnose", cmd_diagnose },
+	{ "cache-server", cmd_cache_server },
 	{ NULL, NULL},
 };
 
@@ -1008,6 +1504,12 @@ int cmd_main(int argc, const char **argv)
 {
 	struct strbuf scalar_usage = STRBUF_INIT;
 	int i;
+
+	if (is_unattended()) {
+		setenv("GIT_ASKPASS", "", 0);
+		setenv("GIT_TERMINAL_PROMPT", "false", 0);
+		git_config_push_parameter("credential.interactive=false");
+	}
 
 	while (argc > 1 && *argv[1] == '-') {
 		if (!strcmp(argv[1], "-C")) {
@@ -1031,6 +1533,9 @@ int cmd_main(int argc, const char **argv)
 	if (argc > 1) {
 		argv++;
 		argc--;
+
+		if (!strcmp(argv[0], "config"))
+			argv[0] = "reconfigure";
 
 		for (i = 0; builtins[i].name; i++)
 			if (!strcmp(builtins[i].name, argv[0]))

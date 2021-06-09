@@ -207,6 +207,12 @@
 //            [2] Documentation/technical/long-running-process-protocol.txt
 //            [3] See GIT_TRACE_PACKET
 //
+//     endpoint
+//
+//            Fetch the given endpoint from the main Git server (specifying
+//            `gvfs/config` as endpoint is idempotent to the `config`
+//            command mentioned above).
+//
 //////////////////////////////////////////////////////////////////
 
 #define USE_THE_REPOSITORY_VARIABLE
@@ -3144,18 +3150,20 @@ static void do_req__with_fallback(const char *url_component,
  *
  * Return server's response buffer.  This is probably a raw JSON string.
  */
-static void do__http_get__gvfs_config(struct gh__response_status *status,
-				      struct strbuf *config_data)
+static void do__http_get__simple_endpoint(struct gh__response_status *status,
+					  struct strbuf *response,
+					  const char *endpoint,
+					  const char *tr2_label)
 {
 	struct gh__request_params params = GH__REQUEST_PARAMS_INIT;
 
-	strbuf_addstr(&params.tr2_label, "GET/config");
+	strbuf_addstr(&params.tr2_label, tr2_label);
 
 	params.b_is_post = 0;
 	params.b_write_to_file = 0;
 	/* cache-servers do not handle gvfs/config REST calls */
 	params.b_permit_cache_server_if_defined = 0;
-	params.buffer = config_data;
+	params.buffer = response;
 	params.objects_mode = GH__OBJECTS_MODE__NONE;
 
 	params.object_count = 1; /* a bit of a lie */
@@ -3177,13 +3185,20 @@ static void do__http_get__gvfs_config(struct gh__response_status *status,
 		 * see any need to report progress on the upload side of
 		 * the GET.  So just report progress on the download side.
 		 */
-		strbuf_addstr(&params.progress_base_phase3_msg,
-			      "Receiving gvfs/config");
+		strbuf_addf(&params.progress_base_phase3_msg,
+			    "Receiving %s", endpoint);
 	}
 
-	do_req__with_fallback("gvfs/config", &params, status);
+	do_req__with_fallback(endpoint, &params, status);
 
 	gh__request_params__release(&params);
+}
+
+static void do__http_get__gvfs_config(struct gh__response_status *status,
+				      struct strbuf *config_data)
+{
+	do__http_get__simple_endpoint(status, config_data, "gvfs/config",
+				      "GET/config");
 }
 
 static void setup_gvfs_objects_progress(struct gh__request_params *params,
@@ -3626,6 +3641,35 @@ static enum gh__error_code do_sub_cmd__config(int argc UNUSED, const char **argv
 
 	gh__response_status__release(&status);
 	strbuf_release(&config_data);
+
+	return ec;
+}
+
+static enum gh__error_code do_sub_cmd__endpoint(int argc, const char **argv)
+{
+	struct gh__response_status status = GH__RESPONSE_STATUS_INIT;
+	struct strbuf data = STRBUF_INIT;
+	enum gh__error_code ec = GH__ERROR_CODE__OK;
+	const char *endpoint;
+
+	if (argc != 2)
+		return GH__ERROR_CODE__ERROR;
+	endpoint = argv[1];
+
+	trace2_cmd_mode(endpoint);
+
+	finish_init(0);
+
+	do__http_get__simple_endpoint(&status, &data, endpoint, endpoint);
+	ec = status.ec;
+
+	if (ec == GH__ERROR_CODE__OK)
+		printf("%s\n", data.buf);
+	else
+		error("config: %s", status.error_message.buf);
+
+	gh__response_status__release(&status);
+	strbuf_release(&data);
 
 	return ec;
 }
@@ -4159,6 +4203,9 @@ static enum gh__error_code do_sub_cmd(int argc, const char **argv)
 
 	if (!strcmp(argv[0], "config"))
 		return do_sub_cmd__config(argc, argv);
+
+	if (!strcmp(argv[0], "endpoint"))
+		return do_sub_cmd__endpoint(argc, argv);
 
 	if (!strcmp(argv[0], "prefetch"))
 		return do_sub_cmd__prefetch(argc, argv);

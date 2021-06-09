@@ -335,6 +335,36 @@ static void gh_client__choose_odb(void)
 	}
 }
 
+/*
+ * Custom exit handler for the `gvfs-helper` subprocesses.
+ *
+ * These helper subprocesses will keep waiting for input until they are
+ * stopped. The default `subprocess_exit_handler()` will instead wait for
+ * the subprocess to exit, which is not what we want: In case of a fatal
+ * error, the Git process will exit and the `gvfs-helper` subprocesses will
+ * need to be stopped explicitly.
+ *
+ * The default behavior of `cleanup_children()` does, however, terminate
+ * the process after calling the `clean_on_exit_handler`. So that's exactly
+ * what we do here: reproduce the exact same code as
+ * `subprocess_exit_handler()` modulo waiting for the process that won't
+ * ever terminate on its own.
+ */
+static void gh_client__subprocess_exit_handler(struct child_process *process)
+{
+	sigchain_push(SIGPIPE, SIG_IGN);
+	/* Closing the pipe signals the subprocess to initiate a shutdown. */
+	close(process->in);
+	close(process->out);
+	sigchain_pop(SIGPIPE);
+	/*
+	 * In contrast to subprocess_exit_handler(), do _not_ wait for the
+	 * process to finish on its own accord: It needs to be terminated via
+	 * a signal, which is what `cleanup_children()` will do after this
+	 * function returns.
+	 */
+}
+
 static struct gh_server__process *gh_client__find_long_running_process(
 	unsigned int cap_needed)
 {
@@ -386,6 +416,9 @@ static struct gh_server__process *gh_client__find_long_running_process(
 					  &entry->subprocess, 1,
 					  &argv, gh_client__start_fn))
 			FREE_AND_NULL(entry);
+		else
+			entry->subprocess.process.clean_on_exit_handler =
+				gh_client__subprocess_exit_handler;
 	}
 
 	if (entry &&

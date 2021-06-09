@@ -1,6 +1,7 @@
 #define USE_THE_REPOSITORY_VARIABLE
 #include "git-compat-util.h"
 #include "environment.h"
+#include "gettext.h"
 #include "hex.h"
 #include "alloc.h"
 #include "setup.h"
@@ -1578,6 +1579,8 @@ done:
 
 static enum worker_result dispatch(struct req *req)
 {
+	static regex_t *smart_http_regex;
+	static int initialized;
 	const char *method;
 	enum worker_result wr;
 
@@ -1632,6 +1635,54 @@ static enum worker_result dispatch(struct req *req)
 
 		if (!strcmp(method, "GET"))
 			return do__gvfs_prefetch__get(req);
+	}
+
+	if (!initialized) {
+		smart_http_regex = xmalloc(sizeof(*smart_http_regex));
+		if (regcomp(smart_http_regex, "^/(HEAD|info/refs|"
+			    "objects/info/[^/]+|git-(upload|receive)-pack)$",
+			    REG_EXTENDED)) {
+			warning("could not compile smart HTTP regex");
+			smart_http_regex = NULL;
+		}
+		initialized = 1;
+	}
+
+	if (smart_http_regex &&
+	    !regexec(smart_http_regex, req->uri_base.buf, 0, NULL, 0)) {
+		const char *ok = "HTTP/1.1 200 OK\r\n";
+		struct child_process cp = CHILD_PROCESS_INIT;
+		size_t i;
+		int res;
+
+		if (write(1, ok, strlen(ok)) < 0)
+			return error(_("could not send '%s'"), ok);
+
+		strvec_pushf(&cp.env, "REQUEST_METHOD=%s", method);
+		strvec_pushf(&cp.env, "PATH_TRANSLATED=%s",
+			     req->uri_base.buf);
+		/* Prevent MSYS2 from "converting to a Windows path" */
+		strvec_pushf(&cp.env,
+			     "MSYS2_ENV_CONV_EXCL=PATH_TRANSLATED");
+		strvec_push(&cp.env, "SERVER_PROTOCOL=HTTP/1.1");
+		if (req->quest_args.len)
+			strvec_pushf(&cp.env, "QUERY_STRING=%s",
+				     req->quest_args.buf);
+		for (i = 0; i < req->header_list.nr; i++) {
+			const char *header = req->header_list.items[i].string;
+			if (!strncasecmp("Content-Type: ", header, 14))
+				strvec_pushf(&cp.env, "CONTENT_TYPE=%s",
+					     header + 14);
+			else if (!strncasecmp("Content-Length: ", header, 16))
+				strvec_pushf(&cp.env, "CONTENT_LENGTH=%s",
+					     header + 16);
+		}
+		cp.git_cmd = 1;
+		strvec_push(&cp.args, "http-backend");
+		res = run_command(&cp);
+		close(1);
+		close(0);
+		return !!res;
 	}
 
 	return send_http_error(1, 501, "Not Implemented", -1,
