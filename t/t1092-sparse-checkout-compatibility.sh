@@ -155,6 +155,7 @@ init_repos () {
 	git -C sparse-index reset --hard &&
 
 	# initialize sparse-checkout definitions
+	git -C sparse-checkout config index.sparse false &&
 	git -C sparse-checkout sparse-checkout init --cone &&
 	git -C sparse-checkout sparse-checkout set deep &&
 	git -C sparse-index sparse-checkout init --cone --sparse-index &&
