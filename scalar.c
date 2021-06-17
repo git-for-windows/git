@@ -75,21 +75,34 @@ static void setup_enlistment_directory(int argc, const char **argv,
 	strbuf_release(&path);
 }
 
+static int git_retries = 3;
+
 LAST_ARG_MUST_BE_NULL
 static int run_git(const char *arg, ...)
 {
-	struct child_process cmd = CHILD_PROCESS_INIT;
 	va_list args;
 	const char *p;
+	struct strvec argv = STRVEC_INIT;
+	int res = 0, attempts;
 
 	va_start(args, arg);
-	strvec_push(&cmd.args, arg);
+	strvec_push(&argv, arg);
 	while ((p = va_arg(args, const char *)))
-		strvec_push(&cmd.args, p);
+		strvec_push(&argv, p);
 	va_end(args);
 
-	cmd.git_cmd = 1;
-	return run_command(&cmd);
+	for (attempts = 0, res = 1;
+	     res && attempts < git_retries;
+	     attempts++) {
+		struct child_process cmd = CHILD_PROCESS_INIT;
+
+		cmd.git_cmd = 1;
+		strvec_pushv(&cmd.args, argv.v);
+		res = run_command(&cmd);
+	}
+
+	strvec_clear(&argv);
+	return res;
 }
 
 struct scalar_config {
@@ -611,6 +624,8 @@ static int cmd_diagnose(int argc, const char **argv)
 	setup_enlistment_directory(argc, argv, usage, options, &diagnostics_root);
 	strbuf_addstr(&diagnostics_root, "/.scalarDiagnostics");
 
+	/* Here, a failure should not repeat itself. */
+	git_retries = 1;
 	res = run_git("diagnose", "--mode=all", "-s", "%Y%m%d_%H%M%S",
 		      "-o", diagnostics_root.buf, NULL);
 
