@@ -53,6 +53,14 @@
 #endif
 
 /**
+ * CURLSSLOPT_AUTO_CLIENT_CERT was added in 7.77.0, released in May
+ * 2021.
+ */
+#if LIBCURL_VERSION_NUM >= 0x074d00
+#define GIT_CURL_HAVE_CURLSSLOPT_AUTO_CLIENT_CERT
+#endif
+
+/**
  * curl_easy_header() was added in 7.83.0 and enabled by default in 7.84.0,
  * released in June 2022.
  */
