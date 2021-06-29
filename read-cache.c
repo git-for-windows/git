@@ -3955,7 +3955,7 @@ static void update_callback(struct diff_queue_struct *q,
 		struct diff_filepair *p = q->queue[i];
 		const char *path = p->one->path;
 
-		if (!data->include_sparse &&
+		if (!data->include_sparse && !core_virtualfilesystem &&
 		    !path_in_sparse_checkout(path, data->index))
 			continue;
 
