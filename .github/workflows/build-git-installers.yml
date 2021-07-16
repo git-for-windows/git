@@ -1,0 +1,317 @@
+name: build-git-installers
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*vfs*' # matches "v<number><any characters>vfs<any characters>"
+
+jobs:
+  # Check prerequisites for the workflow
+  prereqs:
+    runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.tag.outputs.name }}           # The full name of the tag, e.g. v2.32.0.vfs.0.0
+      tag_version: ${{ steps.tag.outputs.version }}     # The version number (without preceding "v"), e.g. 2.32.0.vfs.0.0
+    steps:
+      - name: Validate tag
+        run: |
+          echo "$GITHUB_REF" |
+            grep -E '^refs/tags/v2\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc[0-9]+)?\.vfs\.0\.(0|[1-9][0-9]*)$' || {
+            echo "::error::${GITHUB_REF#refs/tags/} is not of the form v2.<X>.<Y>[-rc<N>].vfs.0.<W>" >&2
+            exit 1
+          }
+      - name: Determine tag to build
+        run: |
+          echo "name=${GITHUB_REF#refs/tags/}" >>$GITHUB_OUTPUT
+          echo "version=${GITHUB_REF#refs/tags/v}" >>$GITHUB_OUTPUT
+        id: tag
+      - name: Clone git
+        uses: actions/checkout@v4
+      - name: Validate the tag identified with trigger
+        run: |
+          die () {
+            echo "::error::$*" >&2
+            exit 1
+          }
+
+          # `actions/checkout` only downloads the peeled tag (i.e. the commit)
+          git fetch origin +$GITHUB_REF:$GITHUB_REF
+
+          # Verify that the tag is annotated
+          test $(git cat-file -t "$GITHUB_REF") == "tag" || die "Tag ${{ steps.tag.outputs.name }} is not annotated"
+
+          # Verify tag follows rules in GIT-VERSION-GEN (i.e., matches the specified "DEF_VER" in
+          # GIT-VERSION-FILE) and matches tag determined from trigger
+          make GIT-VERSION-FILE
+          expected_version="${{ steps.tag.outputs.version }}"
+          # Convert -rc to .rc to match GIT-VERSION-FILE format
+          expected_version="${expected_version//-rc/.rc}"
+          test "$expected_version" == "$(sed -n 's/^GIT_VERSION *= *//p'< GIT-VERSION-FILE)" || die "GIT-VERSION-FILE tag ($(cat GIT-VERSION-FILE)) does not match ${{ steps.tag.outputs.name }}"
+  # End check prerequisites for the workflow
+
+  # Build Windows installers (x86_64 & aarch64; installer & portable)
+  windows_pkg:
+    environment: release
+    needs: prereqs
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - name: x86_64
+            artifact: pkg-x86_64
+            toolchain: x86_64
+            mingwprefix: mingw64
+            runner: windows-2022
+          - name: aarch64
+            artifact: pkg-aarch64
+            toolchain: clang-aarch64
+            mingwprefix: clangarm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.arch.runner }}
+    env:
+      GPG_OPTIONS: "--batch --yes --no-tty --list-options no-show-photos --verify-options no-show-photos --pinentry-mode loopback"
+      HOME: "${{github.workspace}}\\home"
+      USERPROFILE: "${{github.workspace}}\\home"
+    steps:
+      - name: Configure user
+        shell: bash
+        run:
+          USER_NAME="${{github.actor}}" &&
+          USER_EMAIL="${{github.actor}}@users.noreply.github.com" &&
+          mkdir -p "$HOME" &&
+          git config --global user.name "$USER_NAME" &&
+          git config --global user.email "$USER_EMAIL" &&
+          echo "PACKAGER=$USER_NAME <$USER_EMAIL>" >>$GITHUB_ENV
+      - uses: git-for-windows/setup-git-for-windows-sdk@v1
+        with:
+          flavor: build-installers
+          architecture: ${{ matrix.arch.name }}
+      - name: Clone build-extra
+        shell: bash
+        run: |
+          git clone --filter=blob:none --single-branch -b main https://github.com/git-for-windows/build-extra /usr/src/build-extra
+      - name: Clone git
+        shell: bash
+        run: |
+          # Since we cannot directly clone a specified tag (as we would a branch with `git clone -b <branch name>`),
+          # this clone has to be done manually (via init->fetch->reset).
+
+          tag_name="${{ needs.prereqs.outputs.tag_name }}" &&
+          git -c init.defaultBranch=main init &&
+          git remote add -f origin https://github.com/git-for-windows/git &&
+          git fetch "https://github.com/${{github.repository}}" refs/tags/${tag_name}:refs/tags/${tag_name} &&
+          git reset --hard ${tag_name}
+      - name: Prepare home directory for code-signing
+        env:
+          CODESIGN_P12: ${{secrets.CODESIGN_P12}}
+          CODESIGN_PASS: ${{secrets.CODESIGN_PASS}}
+        if: env.CODESIGN_P12 != '' && env.CODESIGN_PASS != ''
+        shell: bash
+        run: |
+          cd home &&
+          mkdir -p .sig &&
+          echo -n "$CODESIGN_P12" | tr % '\n' | base64 -d >.sig/codesign.p12 &&
+          echo -n "$CODESIGN_PASS" >.sig/codesign.pass
+          git config --global alias.signtool '!sh "/usr/src/build-extra/signtool.sh"'
+      - name: Prepare home directory for GPG signing
+        if: env.GPGKEY != ''
+        shell: bash
+        run: |
+          # This section ensures that the identity for the GPG key matches the git user identity, otherwise
+          # signing will fail
+
+          echo '${{secrets.PRIVGPGKEY}}' | tr % '\n' | gpg $GPG_OPTIONS --import &&
+          info="$(gpg --list-keys --with-colons "${GPGKEY%% *}" | cut -d : -f 1,10 | sed -n '/^uid/{s|uid:||p;q}')" &&
+          git config --global user.name "${info% <*}" &&
+          git config --global user.email "<${info#*<}"
+        env:
+          GPGKEY: ${{secrets.GPGKEY}}
+      - name: Build mingw-w64-${{matrix.arch.toolchain}}-git
+        env:
+          GPGKEY: "${{secrets.GPGKEY}}"
+        shell: bash
+        run: |
+          set -x
+
+          # Make sure that there is a `/usr/bin/git` that can be used by `makepkg-mingw`
+          printf '#!/bin/sh\n\nexec /${{matrix.arch.mingwprefix}}/bin/git.exe "$@"\n' >/usr/bin/git &&
+
+          sh -x /usr/src/build-extra/please.sh build-mingw-w64-git --only-${{matrix.arch.name}} --build-src-pkg -o artifacts HEAD &&
+          if test -n "$GPGKEY"
+          then
+            for tar in artifacts/*.tar*
+            do
+              /usr/src/build-extra/gnupg-with-gpgkey.sh --detach-sign --no-armor $tar
+            done
+          fi &&
+
+          b=$PWD/artifacts &&
+          version=${{ needs.prereqs.outputs.tag_name }} &&
+          (cd /usr/src/MINGW-packages/mingw-w64-git &&
+          cp PKGBUILD.$version PKGBUILD &&
+          git commit -s -m "mingw-w64-git: new version ($version)" PKGBUILD &&
+          git bundle create "$b"/MINGW-packages.bundle origin/main..main)
+      - name: Publish mingw-w64-${{matrix.arch.toolchain}}-git
+        uses: actions/upload-artifact@v4
+        with:
+          name: "${{ matrix.arch.artifact }}"
+          path: artifacts
+  windows_artifacts:
+    environment: release
+    needs: [prereqs, windows_pkg]
+    env:
+      HOME: "${{github.workspace}}\\home"
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - name: x86_64
+            artifact: pkg-x86_64
+            toolchain: x86_64
+            mingwprefix: mingw64
+            runner: windows-2022
+          - name: aarch64
+            artifact: pkg-aarch64
+            toolchain: clang-aarch64
+            mingwprefix: clangarm64
+            runner: windows-11-arm
+        type:
+          - name: installer
+            fileprefix: Git
+          - name: portable
+            fileprefix: PortableGit
+    runs-on: ${{ matrix.arch.runner }}
+    steps:
+      - name: Download ${{ matrix.arch.artifact }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.arch.artifact }}
+          path: ${{ matrix.arch.artifact }}
+      - uses: git-for-windows/setup-git-for-windows-sdk@v1
+        with:
+          flavor: build-installers
+          architecture: ${{ matrix.arch.name }}
+      - name: Clone build-extra
+        shell: bash
+        run: |
+          git clone --filter=blob:none --single-branch -b main https://github.com/git-for-windows/build-extra /usr/src/build-extra
+      - name: Prepare home directory for code-signing
+        env:
+          CODESIGN_P12: ${{secrets.CODESIGN_P12}}
+          CODESIGN_PASS: ${{secrets.CODESIGN_PASS}}
+        if: env.CODESIGN_P12 != '' && env.CODESIGN_PASS != ''
+        shell: bash
+        run: |
+          mkdir -p home/.sig &&
+          echo -n "$CODESIGN_P12" | tr % '\n' | base64 -d >home/.sig/codesign.p12 &&
+          echo -n "$CODESIGN_PASS" >home/.sig/codesign.pass &&
+          git config --global alias.signtool '!sh "/usr/src/build-extra/signtool.sh"'
+      - name: Retarget auto-update to microsoft/git
+        shell: bash
+        run: |
+          set -x
+
+          b=/usr/src/build-extra &&
+
+          filename=$b/git-update-git-for-windows.config
+          tr % '\t' >$filename <<-\EOF &&
+          [update]
+          %fromFork = microsoft/git
+          EOF
+
+          sed -i -e '/^#include "file-list.iss"/a\
+          Source: {#SourcePath}\\..\\git-update-git-for-windows.config; DestDir: {app}\\${{matrix.arch.mingwprefix}}\\bin; Flags: replacesameversion; AfterInstall: DeleteFromVirtualStore' \
+            -e '/^Type: dirifempty; Name: {app}\\{#MINGW_BITNESS}$/i\
+          Type: files; Name: {app}\\{#MINGW_BITNESS}\\bin\\git-update-git-for-windows.config\
+          Type: dirifempty; Name: {app}\\{#MINGW_BITNESS}\\bin' \
+            $b/installer/install.iss
+      - name: Set the installer Publisher to the Git Client team
+        shell: bash
+        run: |
+          b=/usr/src/build-extra &&
+          sed -i -e 's/^\(AppPublisher=\).*/\1The Git Client Team at Microsoft/' $b/installer/install.iss
+      - name: Let the installer configure Visual Studio to use the installed Git
+        shell: bash
+        run: |
+          set -x
+
+          b=/usr/src/build-extra &&
+
+          sed -i -e '/^ *InstallAutoUpdater();$/a\
+              CustomPostInstall();' \
+            -e '/^ *UninstallAutoUpdater();$/a\
+              CustomPostUninstall();' \
+            $b/installer/install.iss &&
+
+          cat >>$b/installer/helpers.inc.iss <<\EOF
+
+          procedure CustomPostInstall();
+          begin
+              if not RegWriteStringValue(HKEY_CURRENT_USER,'Software\Microsoft\VSCommon\15.0\TeamFoundation\GitSourceControl','GitPath',ExpandConstant('{app}')) or
+                not RegWriteStringValue(HKEY_CURRENT_USER,'Software\Microsoft\VSCommon\16.0\TeamFoundation\GitSourceControl','GitPath',ExpandConstant('{app}')) or
+                not RegWriteStringValue(HKEY_CURRENT_USER,'Software\Microsoft\VSCommon\17.0\TeamFoundation\GitSourceControl','GitPath',ExpandConstant('{app}')) or
+                not RegWriteStringValue(HKEY_CURRENT_USER,'Software\Microsoft\VSCommon\18.0\TeamFoundation\GitSourceControl','GitPath',ExpandConstant('{app}')) or
+                not RegWriteStringValue(HKEY_CURRENT_USER,'Software\Microsoft\VSCommon\19.0\TeamFoundation\GitSourceControl','GitPath',ExpandConstant('{app}')) or
+                not RegWriteStringValue(HKEY_CURRENT_USER,'Software\Microsoft\VSCommon\20.0\TeamFoundation\GitSourceControl','GitPath',ExpandConstant('{app}')) then
+                  LogError('Could not register TeamFoundation\GitSourceControl');
+          end;
+
+          procedure CustomPostUninstall();
+          begin
+              if not RegDeleteValue(HKEY_CURRENT_USER,'Software\Microsoft\VSCommon\15.0\TeamFoundation\GitSourceControl','GitPath') or
+                not RegDeleteValue(HKEY_CURRENT_USER,'Software\Microsoft\VSCommon\16.0\TeamFoundation\GitSourceControl','GitPath') or
+                not RegDeleteValue(HKEY_CURRENT_USER,'Software\Microsoft\VSCommon\17.0\TeamFoundation\GitSourceControl','GitPath') or
+                not RegDeleteValue(HKEY_CURRENT_USER,'Software\Microsoft\VSCommon\18.0\TeamFoundation\GitSourceControl','GitPath') or
+                not RegDeleteValue(HKEY_CURRENT_USER,'Software\Microsoft\VSCommon\19.0\TeamFoundation\GitSourceControl','GitPath') or
+                not RegDeleteValue(HKEY_CURRENT_USER,'Software\Microsoft\VSCommon\20.0\TeamFoundation\GitSourceControl','GitPath') then
+                  LogError('Could not register TeamFoundation\GitSourceControl');
+          end;
+          EOF
+      - name: Enable Scalar/C and the auto-updater in the installer by default
+        shell: bash
+        run: |
+          set -x
+
+          b=/usr/src/build-extra &&
+
+          sed -i -e "/ChosenOptions:=''/a\\
+              if (ExpandConstant('{param:components|/}')='/') then begin\n\
+                  WizardSelectComponents('autoupdate');\n\
+          #ifdef WITH_SCALAR\n\
+                  WizardSelectComponents('scalar');\n\
+          #endif\n\
+              end;" $b/installer/install.iss
+      - name: Build ${{matrix.type.name}} (${{matrix.arch.name}})
+        shell: bash
+        run: |
+          set -x
+
+          # Copy the PDB archive to the directory where `--include-pdbs` expects it
+          b=/usr/src/build-extra &&
+          mkdir -p $b/cached-source-packages &&
+          cp ${{matrix.arch.artifact}}/*-pdb* $b/cached-source-packages/ &&
+
+          # Build the installer, embedding PDBs
+          eval $b/please.sh make_installers_from_mingw_w64_git --include-pdbs \
+              --version=${{ needs.prereqs.outputs.tag_version }} \
+              -o artifacts --${{matrix.type.name}} \
+              --pkg=${{matrix.arch.artifact}}/mingw-w64-${{matrix.arch.toolchain}}-git-[0-9]*.tar.xz \
+              --pkg=${{matrix.arch.artifact}}/mingw-w64-${{matrix.arch.toolchain}}-git-doc-html-[0-9]*.tar.xz &&
+
+          if test portable = '${{matrix.type.name}}' && test -n "$(git config alias.signtool)"
+          then
+            git signtool artifacts/PortableGit-*.exe
+          fi &&
+          openssl dgst -sha256 artifacts/${{matrix.type.fileprefix}}-*.exe | sed "s/.* //" >artifacts/sha-256.txt
+      - name: Verify that .exe files are code-signed
+        if: env.CODESIGN_P12 != '' && env.CODESIGN_PASS != ''
+        shell: bash
+        run: |
+          PATH=$PATH:"/c/Program Files (x86)/Windows Kits/10/App Certification Kit/" \
+          signtool verify //pa artifacts/${{matrix.type.fileprefix}}-*.exe
+      - name: Publish ${{matrix.type.name}}-${{matrix.arch.name}}
+        uses: actions/upload-artifact@v4
+        with:
+          name: win-${{matrix.type.name}}-${{matrix.arch.name}}
+          path: artifacts
+  # End build Windows installers
