@@ -540,3 +540,106 @@ jobs:
             git/.github/macos-installer/*.dmg
             git/.github/macos-installer/*.pkg
   # End build and sign Mac OSX installers
+
+  # Build unsigned Ubuntu package
+  create-linux-unsigned-artifacts:
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:20.04 # security support until 04/02/2025, according to https://endoflife.date/ubuntu
+      volumes:
+        # override /__e/node20 because GitHub Actions uses a version that requires too-recent glibc, see "Install dependencies" below
+        - /tmp:/__e/node20
+    needs: prereqs
+    steps:
+      - name: Install dependencies
+        run: |
+          set -ex
+
+          # Prevent the dialog that asks interactively for the timezone
+          export DEBIAN_FRONTEND=noninteractive
+          export TZ=Etc/UTC
+
+          apt-get update -q
+          apt-get install -y -q --no-install-recommends \
+            build-essential \
+            tcl tk gettext asciidoc xmlto \
+            libcurl4-gnutls-dev libpcre2-dev zlib1g-dev libexpat-dev \
+            curl ca-certificates
+
+          # Install a Node.js version that works in older Ubuntu containers (read: does not require very recent glibc)
+          NODE_VERSION=v20.18.1 &&
+          NODE_URL=https://unofficial-builds.nodejs.org/download/release/$NODE_VERSION/node-$NODE_VERSION-linux-x64-glibc-217.tar.gz &&
+          curl -Lo /tmp/node.tar.gz $NODE_URL &&
+          tar -C /__e/node20 -x --strip-components=1 -f /tmp/node.tar.gz
+
+      - name: Clone git
+        uses: actions/checkout@v4
+        with:
+          path: git
+
+      - name: Build and create Debian package
+        run: |
+          set -ex
+
+          die () {
+              echo "$*" >&2
+              exit 1
+          }
+
+          VERSION="${{ needs.prereqs.outputs.tag_version }}"
+
+          # Convert -rc to .rc to match GIT-VERSION-FILE behavior
+          BUILD_VERSION=$(echo "${VERSION}" | sed 's/-rc/.rc/g')
+          echo "$BUILD_VERSION" >git/version
+          make -C git GIT-VERSION-FILE
+
+          ARCH="$(dpkg-architecture -q DEB_HOST_ARCH)"
+          if test -z "$ARCH"; then
+            die "Could not determine host architecture!"
+          fi
+
+          PKGNAME="microsoft-git_$VERSION"
+          PKGDIR="$(dirname $(pwd))/$PKGNAME"
+
+          rm -rf "$PKGDIR"
+          mkdir -p "$PKGDIR"
+
+          DESTDIR="$PKGDIR" make -C git -j5 V=1 DEVELOPER=1 \
+            USE_LIBPCRE=1 \
+            USE_CURL_FOR_IMAP_SEND=1 NO_OPENSSL=1 \
+            NO_CROSS_DIRECTORY_HARDLINKS=1 \
+            ASCIIDOC8=1 ASCIIDOC_NO_ROFF=1 \
+            ASCIIDOC='TZ=UTC asciidoc' \
+            prefix=/usr/local \
+            gitexecdir=/usr/local/lib/git-core \
+            libexecdir=/usr/local/lib/git-core \
+            htmldir=/usr/local/share/doc/git/html \
+            install install-doc install-html
+
+          cd ..
+          mkdir "$PKGNAME/DEBIAN"
+
+          # Based on https://packages.ubuntu.com/xenial/vcs/git
+          cat >"$PKGNAME/DEBIAN/control" <<EOF
+          Package: microsoft-git
+          Version: $VERSION
+          Section: vcs
+          Priority: optional
+          Architecture: $ARCH
+          Depends: libcurl3-gnutls, liberror-perl, libexpat1, libpcre2-8-0, perl, perl-modules, zlib1g
+          Maintainer: GitClient <gitclient@microsoft.com>
+          Description: Git client built from the https://github.com/microsoft/git repository,
+            specialized in supporting monorepo scenarios. Includes the Scalar CLI.
+          EOF
+
+          dpkg-deb -Zxz --build "$PKGNAME"
+          # Move Debian package for later artifact upload
+          mv "$PKGNAME.deb" "$GITHUB_WORKSPACE"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-artifacts
+          path: |
+            *.deb
+  # End build unsigned Debian package
