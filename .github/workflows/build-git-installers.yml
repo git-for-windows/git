@@ -369,3 +369,174 @@ jobs:
           name: win-${{matrix.type.name}}-${{matrix.arch.name}}
           path: artifacts
   # End build Windows installers
+
+  # Build and sign Mac OSX installers & upload artifacts
+  create-macos-artifacts:
+    runs-on: macos-latest
+    needs: prereqs
+    env:
+      VERSION: "${{ needs.prereqs.outputs.tag_version }}"
+    environment: release
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          path: git
+
+      - name: Install Git dependencies
+        run: |
+          set -ex
+
+          # Install x86_64 packages
+          arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+          arch -x86_64 /usr/local/bin/brew install gettext
+
+          # Install arm64 packages
+          brew install automake asciidoc xmlto docbook
+          brew link --force gettext
+
+          # Make universal gettext library
+          lipo -create -output libintl.a /usr/local/opt/gettext/lib/libintl.a /opt/homebrew/opt/gettext/lib/libintl.a
+
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Download signing secrets
+        id: signing-secrets
+        uses: ./git/.github/actions/akv-secret
+        with:
+          vault: ${{ secrets.AZURE_VAULT }}
+          secrets: |
+            ${{ secrets.APPLE_APPSIGN_ID_SECRET_NAME }}         > $output:appsign-id
+            ${{ secrets.APPLE_INSTSIGN_ID_SECRET_NAME }}        > $output:instsign-id
+            ${{ secrets.APPLE_TEAM_ID_SECRET_NAME }}            > $output:team-id
+            ${{ secrets.APPLE_DEVELOPER_ID_SECRET_NAME }}       > $output:dev-id
+            ${{ secrets.APPLE_DEVELOPER_PASSWORD_SECRET_NAME }} > $output:dev-pass
+            ${{ secrets.APPLE_APPCERT_PASS_SECRET_NAME }}       > $output:appcert-pass
+            ${{ secrets.APPLE_INSTCERT_PASS_SECRET_NAME }}      > $output:instcert-pass
+            ${{ secrets.APPLE_APPCERT_SECRET_NAME }}      base64> ${{ runner.temp }}/appcert.p12
+            ${{ secrets.APPLE_INSTCERT_SECRET_NAME }}     base64> ${{ runner.temp }}/instcert.p12
+
+      - name: Set up signing/notarization infrastructure
+        run: |
+          echo "Setting up signing certificates"
+          security create-keychain -p pwd $RUNNER_TEMP/buildagent.keychain
+          security default-keychain -s $RUNNER_TEMP/buildagent.keychain
+          security unlock-keychain -p pwd $RUNNER_TEMP/buildagent.keychain
+          # Prevent re-locking
+          security set-keychain-settings $RUNNER_TEMP/buildagent.keychain
+
+          security import $RUNNER_TEMP/appcert.p12 \
+            -k $RUNNER_TEMP/buildagent.keychain \
+            -P '${{ steps.signing-secrets.outputs.appcert-pass }}' \
+            -T /usr/bin/codesign
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k pwd \
+            $RUNNER_TEMP/buildagent.keychain
+
+          security import $RUNNER_TEMP/instcert.p12 \
+            -k $RUNNER_TEMP/buildagent.keychain \
+            -P '${{ steps.signing-secrets.outputs.instcert-pass }}' \
+            -T /usr/bin/pkgbuild
+          security set-key-partition-list \
+            -S apple-tool:,apple:,pkgbuild: \
+            -s -k pwd \
+            $RUNNER_TEMP/buildagent.keychain
+
+          echo "Setting up notarytool"
+          xcrun notarytool store-credentials \
+            --team-id '${{ steps.signing-secrets.outputs.team-id }}' \
+            --apple-id '${{ steps.signing-secrets.outputs.dev-id }}' \
+            --password '${{ steps.signing-secrets.outputs.dev-pass }}' \
+            "msftgit"
+
+      - name: Build, sign, and notarize artifacts
+        run: |
+          die () {
+            echo "$*" >&2
+            exit 1
+          }
+
+          # Trace execution, stop on error
+          set -ex
+
+          # Convert -rc to .rc to match GIT-VERSION-FILE behavior
+          BUILD_VERSION=$(echo "${VERSION}" | sed 's/-rc/.rc/g')
+          echo "$BUILD_VERSION" >git/version
+
+          # Configure universal build
+          cat >git/config.mak <<EOF
+          # Create universal binaries. HOST_CPU is a bit of a lie and only
+          # used in 'git version --build-options'.  We'll fix that in code.
+          HOST_CPU = universal
+          BASIC_CFLAGS += -arch arm64 -arch x86_64
+          EOF
+
+          # Configure the Git build to pick up gettext
+          homebrew_prefix="$(brew --prefix)"
+          cat >>git/config.mak <<EOF
+          CFLAGS = -I$homebrew_prefix/include -I/usr/local/opt/gettext/include
+          LDFLAGS = -L"$(pwd)"
+          EOF
+
+          # Configure the Git to use the OS supplied libcurl.
+          cat >>git/config.mak <<EOF
+          CURL_LDFLAGS := -lcurl
+          CURL_CONFIG := /usr/bin/true
+          EOF
+
+          # Avoid even building the dashed built-ins; Those should be hard-linked
+          # copies of the `git` executable but would end up as actual copies instead,
+          # bloating the size of the `.dmg` indecently.
+          echo 'SKIP_DASHED_BUILT_INS = YabbaDabbaDoo' >>git/config.mak
+
+          # To make use of the catalogs...
+          export XML_CATALOG_FILES=$homebrew_prefix/etc/xml/catalog
+
+          make -C git -j$(sysctl -n hw.physicalcpu) GIT-VERSION-FILE dist dist-doc
+
+          # Extract tarballs
+          mkdir payload manpages
+          tar -xvf git/git-$BUILD_VERSION.tar.gz -C payload
+          tar -xvf git/git-manpages-$BUILD_VERSION.tar.gz -C manpages
+
+          # Lay out payload
+          cp git/config.mak payload/git-$BUILD_VERSION/config.mak
+          make -C git/.github/macos-installer V=1 payload
+
+          # Codesign payload
+          cp -R stage/git-universal-$BUILD_VERSION/ \
+            git/.github/macos-installer/build-artifacts
+          make -C git/.github/macos-installer V=1 codesign \
+            APPLE_APP_IDENTITY='${{ steps.signing-secrets.outputs.appsign-id }}' || die "Creating signed payload failed"
+
+          # Build and sign pkg
+          make -C git/.github/macos-installer V=1 pkg \
+            APPLE_INSTALLER_IDENTITY='${{ steps.signing-secrets.outputs.instsign-id }}' \
+            || die "Creating signed pkg failed"
+
+          # Notarize pkg
+          make -C git/.github/macos-installer V=1 notarize \
+            APPLE_INSTALLER_IDENTITY='${{ steps.signing-secrets.outputs.instsign-id }}' \
+            APPLE_KEYCHAIN_PROFILE="msftgit" \
+            || die "Creating signed and notarized pkg failed"
+
+          # Create DMG
+          make -C git/.github/macos-installer V=1 image || die "Creating DMG failed"
+
+          # Move all artifacts into top-level directory
+          mv git/.github/macos-installer/disk-image/*.pkg git/.github/macos-installer/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-artifacts
+          path: |
+            git/.github/macos-installer/*.dmg
+            git/.github/macos-installer/*.pkg
+  # End build and sign Mac OSX installers

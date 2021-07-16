@@ -1,0 +1,2 @@
+[credential]
+	helper = osxkeychain
