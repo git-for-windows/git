@@ -713,3 +713,113 @@ jobs:
           path: |
             *.deb
   # End build and sign Debian package
+
+  create-github-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    needs:
+      - create-linux-artifacts
+      - create-macos-artifacts
+      - windows_artifacts
+      - prereqs
+    if: |
+      success() ||
+        (needs.create-linux-artifacts.result == 'skipped' &&
+        needs.create-macos-artifacts.result == 'success' &&
+        needs.windows_artifacts.result == 'success')
+    steps:
+      - name: Download Windows portable (x86_64)
+        uses: actions/download-artifact@v4
+        with:
+          name: win-portable-x86_64
+          path: win-portable-x86_64
+
+      - name: Download Windows portable (aarch64)
+        uses: actions/download-artifact@v4
+        with:
+          name: win-portable-aarch64
+          path: win-portable-aarch64
+
+      - name: Download Windows installer (x86_64)
+        uses: actions/download-artifact@v4
+        with:
+          name: win-installer-x86_64
+          path: win-installer-x86_64
+
+      - name: Download Windows installer (aarch64)
+        uses: actions/download-artifact@v4
+        with:
+          name: win-installer-aarch64
+          path: win-installer-aarch64
+
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-artifacts
+          path: macos-artifacts
+
+      - name: Download Debian package
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-artifacts
+          path: deb-package
+
+      - uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            var releaseMetadata = {
+              owner: context.repo.owner,
+              repo: context.repo.repo
+            };
+
+            // Create the release
+            var tagName = "${{ needs.prereqs.outputs.tag_name }}";
+            var createdRelease = await github.rest.repos.createRelease({
+              ...releaseMetadata,
+              draft: true,
+              tag_name: tagName,
+              name: tagName
+            });
+            releaseMetadata.release_id = createdRelease.data.id;
+            core.notice(`Created release at ${createdRelease.data.html_url}`);
+
+            // Uploads contents of directory to the release created above
+            async function uploadDirectoryToRelease(directory, includeExtensions=[]) {
+              return fs.promises.readdir(directory)
+                .then(async(files) => Promise.all(
+                  files.filter(file => {
+                    return includeExtensions.length==0 || includeExtensions.includes(path.extname(file).toLowerCase());
+                  })
+                  .map(async (file) => {
+                    var filePath = path.join(directory, file);
+                    github.rest.repos.uploadReleaseAsset({
+                      ...releaseMetadata,
+                      name: file,
+                      headers: {
+                        "content-length": (await fs.promises.stat(filePath)).size
+                      },
+                      data: fs.createReadStream(filePath)
+                    });
+                  }))
+                );
+            }
+
+            await Promise.all([
+              // Upload Windows x86_64 artifacts
+              uploadDirectoryToRelease('win-installer-x86_64', ['.exe']),
+              uploadDirectoryToRelease('win-portable-x86_64', ['.exe']),
+
+              // Upload Windows aarch64 artifacts
+              uploadDirectoryToRelease('win-installer-aarch64', ['.exe']),
+              uploadDirectoryToRelease('win-portable-aarch64', ['.exe']),
+
+              // Upload Mac artifacts
+              uploadDirectoryToRelease('macos-artifacts'),
+
+              // Upload Ubuntu artifacts
+              uploadDirectoryToRelease('deb-package')
+            ]);
