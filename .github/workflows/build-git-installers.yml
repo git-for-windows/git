@@ -5,6 +5,9 @@ on:
     tags:
       - 'v[0-9]*vfs*' # matches "v<number><any characters>vfs<any characters>"
 
+permissions:
+  id-token: write # required for Azure login via OIDC
+
 env:
   DO_WIN_CODESIGN: ${{ secrets.WIN_CODESIGN_CERT_SECRET_NAME != '' && secrets.WIN_CODESIGN_PASS_SECRET_NAME != '' }}
   DO_WIN_GPGSIGN: ${{ secrets.WIN_GPG_KEYGRIP_SECRET_NAME != '' && secrets.WIN_GPG_PRIVATE_SECRET_NAME != '' && secrets.WIN_GPG_PASSPHRASE_SECRET_NAME != '' }}
@@ -541,7 +544,7 @@ jobs:
             git/.github/macos-installer/*.pkg
   # End build and sign Mac OSX installers
 
-  # Build unsigned Ubuntu package
+  # Build and sign Debian package
   create-linux-unsigned-artifacts:
     runs-on: ubuntu-latest
     container:
@@ -639,7 +642,74 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
+          name: linux-unsigned-artifacts
+          path: |
+            *.deb
+
+  create-linux-artifacts:
+    runs-on: ubuntu-latest
+    needs: [prereqs, create-linux-unsigned-artifacts]
+    environment: release
+    steps:
+      - name: Log into Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Check out repository (for akv-secret Action)
+        uses: actions/checkout@v4
+        with:
+          path: git
+
+      - name: Download GPG secrets
+        id: gpg-secrets
+        uses: ./git/.github/actions/akv-secret
+        with:
+          vault: ${{ secrets.AZURE_VAULT }}
+          secrets: |
+            ${{ secrets.LINUX_GPG_KEYGRIP_SECRET_NAME }}       > $output:keygrip
+            ${{ secrets.LINUX_GPG_PRIVATE_SECRET_NAME }} base64> $output:private-key
+            ${{ secrets.LINUX_GPG_PASSPHRASE_SECRET_NAME }}    > $output:passphrase
+
+      - name: Prepare for GPG signing
+        run: |
+          # Install debsigs
+          sudo apt-get install -y debsigs
+
+          # Stop using SHA-1 for the signature. For details, see
+          # https://gitlab.com/debsigs/debsigs/-/commit/75c6c8f96e6cdc33bca9c5f32195b68ff35bc32f
+          # which seems to have made it to have made it into debsigs v0.2.1, but Ubuntu 24.04 is
+          # stuck with v1.19.
+          mkdir -p patched-debsigs &&
+          sed 's/, "--openpgp"//' </usr/bin/debsigs >patched-debsigs/debsigs &&
+          chmod a+x patched-debsigs/debsigs &&
+          echo "$PWD/patched-debsigs" >>$GITHUB_PATH
+
+          # Import GPG key
+          echo -n '${{ steps.gpg-secrets.outputs.private-key }}' | gpg --import --no-tty --batch --yes
+
+          # Configure GPG
+          echo "allow-preset-passphrase" > ~/.gnupg/gpg-agent.conf
+          gpg-connect-agent RELOADAGENT /bye
+          /usr/lib/gnupg2/gpg-preset-passphrase --preset '${{ steps.gpg-secrets.outputs.keygrip }}' <<<'${{ steps.gpg-secrets.outputs.passphrase }}'
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-unsigned-artifacts
+
+      - name: Sign Debian package
+        run: |
+          # Sign Debian package
+          version="${{ needs.prereqs.outputs.tag_version }}"
+          debsigs --sign=origin --verify --check microsoft-git_"$version".deb
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
           name: linux-artifacts
           path: |
             *.deb
-  # End build unsigned Debian package
+  # End build and sign Debian package
