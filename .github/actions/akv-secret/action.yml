@@ -1,0 +1,54 @@
+name: Get Azure Key Vault Secrets
+
+description: |
+  Get secrets from Azure Key Vault and store the results as masked step outputs,
+  environment variables, or files.
+
+inputs:
+  vault:
+    required: true
+    description: Name of the Azure Key Vault.
+  secrets:
+    required: true
+    description: |
+      Comma- or newline-separated list of secret names in Azure Key Vault.
+      The output and encoding of secrets can be specified using this syntax:
+
+        SECRET ENCODING> $output:OUTPUT
+        SECRET ENCODING> $env:ENVAR
+        SECRET ENCODING> FILE
+
+        SECRET      Name of the secret in Azure Key Vault.
+        ENCODING    (optional) Encoding of the secret: base64.
+        OUTPUT      Name of a step output variable.
+        ENVAR       Name of an environment variable.
+        FILE        File path (relative or absolute).
+
+      If no output format is specified the default is a step output variable
+      with the same name as the secret. I.e, SECRET > $output:SECRET.
+
+      Examples:
+
+        Assign output variable named `raw-var` to the raw value of the secret
+        `raw-secret`:
+
+          raw-secret > $output:raw-var
+
+        Assign output variable named `decoded-var` to the base64 decoded value
+        of the secret `encoded-secret`:
+
+          encoded-secret base64> $output:decoded-var
+
+        Download the secret named `tls-certificate` to the file path
+        `.certs/tls.cert`:
+
+          tls-certificate > .certs/tls.cert
+
+        Assign environment variable `ENV_SECRET` to the base64 decoded value of
+        the secret `encoded-secret`:
+
+        encoded-secret base64> $env:ENV_SECRET
+
+runs:
+  using: node20
+  main: index.js

@@ -1,0 +1,62 @@
+#!/bin/bash
+INSTALL_DST="$2"
+SCALAR_C_CMD="$INSTALL_DST/git/bin/scalar"
+SCALAR_DOTNET_CMD="/usr/local/scalar/scalar"
+SCALAR_UNINSTALL_SCRIPT="/usr/local/scalar/uninstall_scalar.sh"
+
+function cleanupScalar()
+{
+    echo "checking whether Scalar was installed"
+    if [ ! -f "$SCALAR_C_CMD" ]; then
+        echo "Scalar not installed; exiting..."
+        return 0
+    fi
+    echo "Scalar is installed!"
+
+    echo "looking for Scalar.NET"
+    if [ ! -f "$SCALAR_DOTNET_CMD" ]; then
+        echo "Scalar.NET not found; exiting..."
+        return 0
+    fi
+    echo "Scalar.NET found!"
+
+    currentUser=$(echo "show State:/Users/ConsoleUser" | scutil | awk '/Name :/ { print $3 }')
+
+    # Re-register Scalar.NET repositories with the newly-installed Scalar
+    for repo in $($SCALAR_DOTNET_CMD list); do
+        (
+            PATH="$INSTALL_DST/git/bin:$PATH"
+            sudo -u "$currentUser" scalar register $repo || \
+                echo "warning: skipping re-registration of $repo"
+        )
+    done
+
+    # Uninstall Scalar.NET
+    echo "removing Scalar.NET"
+
+    # Add /usr/local/bin to path - default install location of Homebrew
+    PATH="/usr/local/bin:$PATH"
+    if (sudo -u "$currentUser" brew list --cask scalar); then
+        # Remove from Homebrew
+        sudo -u "$currentUser" brew remove --cask scalar || echo "warning: Scalar.NET uninstall via Homebrew completed with code $?"
+        echo "Scalar.NET uninstalled via Homebrew!"
+    elif (sudo -u "$currentUser" brew list --cask scalar-azrepos); then
+        sudo -u "$currentUser" brew remove --cask scalar-azrepos || echo "warning: Scalar.NET with GVFS uninstall via Homebrew completed with code $?"
+        echo "Scalar.NET with GVFS uninstalled via Homebrew!"
+    elif [ -f $SCALAR_UNINSTALL_SCRIPT ]; then
+        # If not installed with Homebrew, manually remove package
+        sudo -S sh $SCALAR_UNINSTALL_SCRIPT || echo "warning: Scalar.NET uninstall completed with code $?"
+        echo "Scalar.NET uninstalled!"
+    else
+        echo "warning: Scalar.NET uninstall script not found"
+    fi
+
+    # Re-create the Scalar symlink, in case it was removed by the Scalar.NET uninstall operation
+    mkdir -p $INSTALL_DST/bin
+    /bin/ln -Fs "$SCALAR_C_CMD" "$INSTALL_DST/bin/scalar"
+}
+
+# Run Scalar cleanup (will exit if not applicable)
+cleanupScalar
+
+exit 0

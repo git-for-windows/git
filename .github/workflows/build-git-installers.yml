@@ -1,0 +1,855 @@
+name: build-git-installers
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*vfs*' # matches "v<number><any characters>vfs<any characters>"
+
+permissions:
+  id-token: write # required for Azure login via OIDC
+
+env:
+  DO_WIN_CODESIGN: ${{ secrets.WIN_CODESIGN_CERT_SECRET_NAME != '' && secrets.WIN_CODESIGN_PASS_SECRET_NAME != '' }}
+  DO_WIN_GPGSIGN: ${{ secrets.WIN_GPG_KEYGRIP_SECRET_NAME != '' && secrets.WIN_GPG_PRIVATE_SECRET_NAME != '' && secrets.WIN_GPG_PASSPHRASE_SECRET_NAME != '' }}
+
+jobs:
+  # Check prerequisites for the workflow
+  prereqs:
+    runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.tag.outputs.name }}           # The full name of the tag, e.g. v2.32.0.vfs.0.0
+      tag_version: ${{ steps.tag.outputs.version }}     # The version number (without preceding "v"), e.g. 2.32.0.vfs.0.0
+    steps:
+      - name: Validate tag
+        run: |
+          echo "$GITHUB_REF" |
+            grep -E '^refs/tags/v2\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc[0-9]+)?\.vfs\.0\.(0|[1-9][0-9]*)$' || {
+            echo "::error::${GITHUB_REF#refs/tags/} is not of the form v2.<X>.<Y>[-rc<N>].vfs.0.<W>" >&2
+            exit 1
+          }
+      - name: Determine tag to build
+        run: |
+          echo "name=${GITHUB_REF#refs/tags/}" >>$GITHUB_OUTPUT
+          echo "version=${GITHUB_REF#refs/tags/v}" >>$GITHUB_OUTPUT
+        id: tag
+      - name: Clone git
+        uses: actions/checkout@v4
+      - name: Validate the tag identified with trigger
+        run: |
+          die () {
+            echo "::error::$*" >&2
+            exit 1
+          }
+
+          # `actions/checkout` only downloads the peeled tag (i.e. the commit)
+          git fetch origin +$GITHUB_REF:$GITHUB_REF
+
+          # Verify that the tag is annotated
+          test $(git cat-file -t "$GITHUB_REF") == "tag" || die "Tag ${{ steps.tag.outputs.name }} is not annotated"
+
+          # Verify tag follows rules in GIT-VERSION-GEN (i.e., matches the specified "DEF_VER" in
+          # GIT-VERSION-FILE) and matches tag determined from trigger
+          make GIT-VERSION-FILE
+          expected_version="${{ steps.tag.outputs.version }}"
+          # Convert -rc to .rc to match GIT-VERSION-FILE format
+          expected_version="${expected_version//-rc/.rc}"
+          test "$expected_version" == "$(sed -n 's/^GIT_VERSION *= *//p'< GIT-VERSION-FILE)" || die "GIT-VERSION-FILE tag ($(cat GIT-VERSION-FILE)) does not match ${{ steps.tag.outputs.name }}"
+  # End check prerequisites for the workflow
+
+  # Build Windows installers (x86_64 & aarch64; installer & portable)
+  windows_pkg:
+    environment: release
+    needs: prereqs
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - name: x86_64
+            artifact: pkg-x86_64
+            toolchain: x86_64
+            mingwprefix: mingw64
+            runner: windows-2022
+          - name: aarch64
+            artifact: pkg-aarch64
+            toolchain: clang-aarch64
+            mingwprefix: clangarm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.arch.runner }}
+    env:
+      GPG_OPTIONS: "--batch --yes --no-tty --list-options no-show-photos --verify-options no-show-photos --pinentry-mode loopback"
+      HOME: "${{github.workspace}}\\home"
+      USERPROFILE: "${{github.workspace}}\\home"
+    steps:
+      - name: Configure user
+        shell: bash
+        run:
+          USER_NAME="${{github.actor}}" &&
+          USER_EMAIL="${{github.actor}}@users.noreply.github.com" &&
+          mkdir -p "$HOME" &&
+          git config --global user.name "$USER_NAME" &&
+          git config --global user.email "$USER_EMAIL" &&
+          echo "PACKAGER=$USER_NAME <$USER_EMAIL>" >>$GITHUB_ENV
+      - uses: git-for-windows/setup-git-for-windows-sdk@v1
+        with:
+          flavor: build-installers
+          architecture: ${{ matrix.arch.name }}
+      - name: Clone build-extra
+        shell: bash
+        run: |
+          git clone --filter=blob:none --single-branch -b main https://github.com/git-for-windows/build-extra /usr/src/build-extra
+      - name: Clone git
+        shell: bash
+        run: |
+          # Since we cannot directly clone a specified tag (as we would a branch with `git clone -b <branch name>`),
+          # this clone has to be done manually (via init->fetch->reset).
+
+          tag_name="${{ needs.prereqs.outputs.tag_name }}" &&
+          git -c init.defaultBranch=main init &&
+          git remote add -f origin https://github.com/git-for-windows/git &&
+          git fetch "https://github.com/${{github.repository}}" refs/tags/${tag_name}:refs/tags/${tag_name} &&
+          git reset --hard ${tag_name}
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Download code signing secrets
+        id: codesign-secrets
+        if: env.DO_WIN_CODESIGN == 'true'
+        uses: ./.github/actions/akv-secret
+        with:
+          vault: ${{ secrets.AZURE_VAULT }}
+          secrets: |
+            ${{ secrets.WIN_CODESIGN_CERT_SECRET_NAME }} base64> home/.sig/codesign.p12
+            ${{ secrets.WIN_CODESIGN_PASS_SECRET_NAME }}       > home/.sig/codesign.pass
+      - name: Prepare home directory for code-signing
+        if: ${{ steps.codesign-secrets.outcome == 'success' }}
+        shell: bash
+        run: |
+          git config --global alias.signtool '!sh "/usr/src/build-extra/signtool.sh"'
+      - name: Download GPG secrets
+        id: gpg-secrets
+        if: env.DO_WIN_GPGSIGN == 'true'
+        uses: ./.github/actions/akv-secret
+        with:
+          vault: ${{ secrets.AZURE_VAULT }}
+          secrets: |
+            ${{ secrets.WIN_GPG_KEYGRIP_SECRET_NAME }}       > $output:keygrip
+            ${{ secrets.WIN_GPG_PRIVATE_SECRET_NAME }} base64> $output:private-key
+            ${{ secrets.WIN_GPG_PASSPHRASE_SECRET_NAME }}    > $output:passphrase
+      - name: Prepare home directory for GPG signing
+        if: ${{ steps.gpg-secrets.outputs.keygrip != '' && steps.gpg-secrets.outputs.private-key != '' }}
+        shell: bash
+        run: |
+          # This section ensures that the identity for the GPG key matches the git user identity, otherwise
+          # signing will fail
+
+          # Import the GPG private key
+          echo -n '${{ steps.gpg-secrets.outputs.private-key }}' | gpg $GPG_OPTIONS --import &&
+
+          info="$(gpg --list-keys --with-colons '${{ steps.gpg-secrets.outputs.keygrip }}' | cut -d : -f 1,10 | sed -n '/^uid/{s|uid:||p;q}')" &&
+          git config --global user.name "${info% <*}" &&
+          git config --global user.email "<${info#*<}"
+      - name: Build mingw-w64-${{matrix.arch.toolchain}}-git
+        shell: bash
+        run: |
+          set -x
+
+          # Build the GPGKEY variable
+          export GPGKEY="${{ steps.gpg-secrets.outputs.keygrip }} --passphrase '${{ steps.gpg-secrets.outputs.passphrase }}' --yes --batch --no-tty --pinentry-mode loopback --digest-algo SHA256" &&
+
+          # Make sure that there is a `/usr/bin/git` that can be used by `makepkg-mingw`
+          printf '#!/bin/sh\n\nexec /${{matrix.arch.mingwprefix}}/bin/git.exe "$@"\n' >/usr/bin/git &&
+
+          sh -x /usr/src/build-extra/please.sh build-mingw-w64-git --only-${{matrix.arch.name}} --build-src-pkg -o artifacts HEAD &&
+          if test -n "${{ steps.gpg-secrets.outputs.keygrip }}"
+          then
+            for tar in artifacts/*.tar*
+            do
+              /usr/src/build-extra/gnupg-with-gpgkey.sh --detach-sign --no-armor $tar
+            done
+          fi &&
+
+          b=$PWD/artifacts &&
+          version=${{ needs.prereqs.outputs.tag_name }} &&
+          (cd /usr/src/MINGW-packages/mingw-w64-git &&
+          cp PKGBUILD.$version PKGBUILD &&
+          git commit -s -m "mingw-w64-git: new version ($version)" PKGBUILD &&
+          git bundle create "$b"/MINGW-packages.bundle origin/main..main)
+      - name: Publish mingw-w64-${{matrix.arch.toolchain}}-git
+        uses: actions/upload-artifact@v4
+        with:
+          name: "${{ matrix.arch.artifact }}"
+          path: artifacts
+  windows_artifacts:
+    environment: release
+    needs: [prereqs, windows_pkg]
+    env:
+      HOME: "${{github.workspace}}\\home"
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - name: x86_64
+            artifact: pkg-x86_64
+            toolchain: x86_64
+            mingwprefix: mingw64
+            runner: windows-2022
+          - name: aarch64
+            artifact: pkg-aarch64
+            toolchain: clang-aarch64
+            mingwprefix: clangarm64
+            runner: windows-11-arm
+        type:
+          - name: installer
+            fileprefix: Git
+          - name: portable
+            fileprefix: PortableGit
+    runs-on: ${{ matrix.arch.runner }}
+    steps:
+      - name: Download ${{ matrix.arch.artifact }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.arch.artifact }}
+          path: ${{ matrix.arch.artifact }}
+      - uses: git-for-windows/setup-git-for-windows-sdk@v1
+        with:
+          flavor: build-installers
+          architecture: ${{ matrix.arch.name }}
+      - name: Clone build-extra
+        shell: bash
+        run: |
+          git clone --filter=blob:none --single-branch -b main https://github.com/git-for-windows/build-extra /usr/src/build-extra
+      - name: Log in to Azure
+        uses: azure/login@v2
+        if: env.DO_WIN_CODESIGN == 'true'
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Check out repository (for akv-secret Action)
+        if: env.DO_WIN_CODESIGN == 'true'
+        uses: actions/checkout@v4
+        with:
+          path: git
+      - name: Download code signing secrets
+        id: codesign-secrets
+        if: env.DO_WIN_CODESIGN == 'true'
+        uses: ./git/.github/actions/akv-secret
+        with:
+          vault: ${{ secrets.AZURE_VAULT }}
+          secrets: |
+            ${{ secrets.WIN_CODESIGN_CERT_SECRET_NAME }} base64> home/.sig/codesign.p12
+            ${{ secrets.WIN_CODESIGN_PASS_SECRET_NAME }}       > home/.sig/codesign.pass
+      - name: Prepare home directory for code-signing
+        if: ${{ steps.codesign-secrets.outcome == 'success' }}
+        shell: bash
+        run: |
+          git config --global alias.signtool '!sh "/usr/src/build-extra/signtool.sh"'
+      - name: Retarget auto-update to microsoft/git
+        shell: bash
+        run: |
+          set -x
+
+          b=/usr/src/build-extra &&
+
+          filename=$b/git-update-git-for-windows.config
+          tr % '\t' >$filename <<-\EOF &&
+          [update]
+          %fromFork = microsoft/git
+          EOF
+
+          sed -i -e '/^#include "file-list.iss"/a\
+          Source: {#SourcePath}\\..\\git-update-git-for-windows.config; DestDir: {app}\\${{matrix.arch.mingwprefix}}\\bin; Flags: replacesameversion; AfterInstall: DeleteFromVirtualStore' \
+            -e '/^Type: dirifempty; Name: {app}\\{#MINGW_BITNESS}$/i\
+          Type: files; Name: {app}\\{#MINGW_BITNESS}\\bin\\git-update-git-for-windows.config\
+          Type: dirifempty; Name: {app}\\{#MINGW_BITNESS}\\bin' \
+            $b/installer/install.iss
+      - name: Set alerts to continue until upgrade is taken
+        shell: bash
+        run: |
+          set -x
+
+          b=/${{matrix.arch.mingwprefix}}/bin &&
+
+          sed -i -e '6 a use_recently_seen=no' \
+            $b/git-update-git-for-windows
+      - name: Set the installer Publisher to the Git Client team
+        shell: bash
+        run: |
+          b=/usr/src/build-extra &&
+          sed -i -e 's/^\(AppPublisher=\).*/\1The Git Client Team at Microsoft/' $b/installer/install.iss
+      - name: Let the installer configure Visual Studio to use the installed Git
+        shell: bash
+        run: |
+          set -x
+
+          b=/usr/src/build-extra &&
+
+          sed -i "# First, find the autoupdater parts in the install/uninstall steps
+            /if IsComponentInstalled('autoupdate')/{
+              # slurp in the next two lines, where the call to InstallAutoUpdater()/UninstallAutoUpdater() happens
+              N
+              N
+              # insert the corresponding CustomPostInstall()/CustomPostUninstall() call before that block
+              s/^\\([ \t]*\\)\(.*\\)\\(Install\\|Uninstall\\)\\(AutoUpdater\\)/\\1CustomPost\\3();\\n\\1\\2\\3\\4/
+            }" $b/installer/install.iss &&
+          grep CustomPostInstall $b/installer/install.iss &&
+          grep CustomPostUninstall $b/installer/install.iss &&
+
+          cat >>$b/installer/helpers.inc.iss <<\EOF
+
+          procedure CustomPostInstall();
+          begin
+              if not RegWriteStringValue(HKEY_CURRENT_USER,'Software\Microsoft\VSCommon\15.0\TeamFoundation\GitSourceControl','GitPath',ExpandConstant('{app}')) or
+                not RegWriteStringValue(HKEY_CURRENT_USER,'Software\Microsoft\VSCommon\16.0\TeamFoundation\GitSourceControl','GitPath',ExpandConstant('{app}')) or
+                not RegWriteStringValue(HKEY_CURRENT_USER,'Software\Microsoft\VSCommon\17.0\TeamFoundation\GitSourceControl','GitPath',ExpandConstant('{app}')) or
+                not RegWriteStringValue(HKEY_CURRENT_USER,'Software\Microsoft\VSCommon\18.0\TeamFoundation\GitSourceControl','GitPath',ExpandConstant('{app}')) or
+                not RegWriteStringValue(HKEY_CURRENT_USER,'Software\Microsoft\VSCommon\19.0\TeamFoundation\GitSourceControl','GitPath',ExpandConstant('{app}')) or
+                not RegWriteStringValue(HKEY_CURRENT_USER,'Software\Microsoft\VSCommon\20.0\TeamFoundation\GitSourceControl','GitPath',ExpandConstant('{app}')) then
+                  LogError('Could not register TeamFoundation\GitSourceControl');
+          end;
+
+          procedure CustomPostUninstall();
+          begin
+              if not RegDeleteValue(HKEY_CURRENT_USER,'Software\Microsoft\VSCommon\15.0\TeamFoundation\GitSourceControl','GitPath') or
+                not RegDeleteValue(HKEY_CURRENT_USER,'Software\Microsoft\VSCommon\16.0\TeamFoundation\GitSourceControl','GitPath') or
+                not RegDeleteValue(HKEY_CURRENT_USER,'Software\Microsoft\VSCommon\17.0\TeamFoundation\GitSourceControl','GitPath') or
+                not RegDeleteValue(HKEY_CURRENT_USER,'Software\Microsoft\VSCommon\18.0\TeamFoundation\GitSourceControl','GitPath') or
+                not RegDeleteValue(HKEY_CURRENT_USER,'Software\Microsoft\VSCommon\19.0\TeamFoundation\GitSourceControl','GitPath') or
+                not RegDeleteValue(HKEY_CURRENT_USER,'Software\Microsoft\VSCommon\20.0\TeamFoundation\GitSourceControl','GitPath') then
+                  LogError('Could not register TeamFoundation\GitSourceControl');
+          end;
+          EOF
+      - name: Enable Scalar/C and the auto-updater in the installer by default
+        shell: bash
+        run: |
+          set -x
+
+          b=/usr/src/build-extra &&
+
+          sed -i -e "/ChosenOptions:=''/a\\
+              if (ExpandConstant('{param:components|/}')='/') then begin\n\
+                  WizardSelectComponents('autoupdate');\n\
+          #ifdef WITH_SCALAR\n\
+                  WizardSelectComponents('scalar');\n\
+          #endif\n\
+              end;" $b/installer/install.iss
+      - name: Build ${{matrix.type.name}} (${{matrix.arch.name}})
+        shell: bash
+        run: |
+          set -x
+
+          # Copy the PDB archive to the directory where `--include-pdbs` expects it
+          b=/usr/src/build-extra &&
+          mkdir -p $b/cached-source-packages &&
+          cp ${{matrix.arch.artifact}}/*-pdb* $b/cached-source-packages/ &&
+
+          # Build the installer, embedding PDBs
+          eval $b/please.sh make_installers_from_mingw_w64_git --include-pdbs \
+              --version=${{ needs.prereqs.outputs.tag_version }} \
+              -o artifacts --${{matrix.type.name}} \
+              --pkg=${{matrix.arch.artifact}}/mingw-w64-${{matrix.arch.toolchain}}-git-[0-9]*.tar.xz \
+              --pkg=${{matrix.arch.artifact}}/mingw-w64-${{matrix.arch.toolchain}}-git-doc-html-[0-9]*.tar.xz &&
+
+          if test portable = '${{matrix.type.name}}' && test -n "$(git config alias.signtool)"
+          then
+            git signtool artifacts/PortableGit-*.exe
+          fi &&
+          openssl dgst -sha256 artifacts/${{matrix.type.fileprefix}}-*.exe | sed "s/.* //" >artifacts/sha-256.txt
+      - name: Verify that .exe files are code-signed
+        if: env.DO_WIN_CODESIGN == 'true'
+        shell: pwsh
+        run: |
+          $ret = 0
+          $files = Get-ChildItem -Path artifacts -Filter "${{matrix.type.fileprefix}}-*.exe"
+          foreach ($file in $files) {
+              $signature = Get-AuthenticodeSignature -FilePath $file.FullName
+              if ($signature.Status -eq 'Valid') {
+                  Write-Host "[ VALID ] $($file.FullName)"
+              } else {
+                  Write-Host "[INVALID] $($file.FullName)"
+                  Write-Host "  Message: $($signature.StatusMessage)"
+                  $ret = 1
+              }
+          }
+          exit $ret
+      - name: Publish ${{matrix.type.name}}-${{matrix.arch.name}}
+        uses: actions/upload-artifact@v4
+        with:
+          name: win-${{matrix.type.name}}-${{matrix.arch.name}}
+          path: artifacts
+  # End build Windows installers
+
+  # Build and sign Mac OSX installers & upload artifacts
+  create-macos-artifacts:
+    runs-on: macos-latest
+    needs: prereqs
+    env:
+      VERSION: "${{ needs.prereqs.outputs.tag_version }}"
+    environment: release
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          path: git
+
+      - name: Install Git dependencies
+        run: |
+          set -ex
+
+          # Install x86_64 packages
+          arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+          arch -x86_64 /usr/local/bin/brew install gettext
+
+          # Install arm64 packages
+          brew install automake asciidoc xmlto docbook
+          brew link --force gettext
+
+          # Make universal gettext library
+          lipo -create -output libintl.a /usr/local/opt/gettext/lib/libintl.a /opt/homebrew/opt/gettext/lib/libintl.a
+
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Download signing secrets
+        id: signing-secrets
+        uses: ./git/.github/actions/akv-secret
+        with:
+          vault: ${{ secrets.AZURE_VAULT }}
+          secrets: |
+            ${{ secrets.APPLE_APPSIGN_ID_SECRET_NAME }}         > $output:appsign-id
+            ${{ secrets.APPLE_INSTSIGN_ID_SECRET_NAME }}        > $output:instsign-id
+            ${{ secrets.APPLE_TEAM_ID_SECRET_NAME }}            > $output:team-id
+            ${{ secrets.APPLE_DEVELOPER_ID_SECRET_NAME }}       > $output:dev-id
+            ${{ secrets.APPLE_DEVELOPER_PASSWORD_SECRET_NAME }} > $output:dev-pass
+            ${{ secrets.APPLE_APPCERT_PASS_SECRET_NAME }}       > $output:appcert-pass
+            ${{ secrets.APPLE_INSTCERT_PASS_SECRET_NAME }}      > $output:instcert-pass
+            ${{ secrets.APPLE_APPCERT_SECRET_NAME }}      base64> ${{ runner.temp }}/appcert.p12
+            ${{ secrets.APPLE_INSTCERT_SECRET_NAME }}     base64> ${{ runner.temp }}/instcert.p12
+
+      - name: Set up signing/notarization infrastructure
+        run: |
+          echo "Setting up signing certificates"
+          security create-keychain -p pwd $RUNNER_TEMP/buildagent.keychain
+          security default-keychain -s $RUNNER_TEMP/buildagent.keychain
+          security unlock-keychain -p pwd $RUNNER_TEMP/buildagent.keychain
+          # Prevent re-locking
+          security set-keychain-settings $RUNNER_TEMP/buildagent.keychain
+
+          security import $RUNNER_TEMP/appcert.p12 \
+            -k $RUNNER_TEMP/buildagent.keychain \
+            -P '${{ steps.signing-secrets.outputs.appcert-pass }}' \
+            -T /usr/bin/codesign
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k pwd \
+            $RUNNER_TEMP/buildagent.keychain
+
+          security import $RUNNER_TEMP/instcert.p12 \
+            -k $RUNNER_TEMP/buildagent.keychain \
+            -P '${{ steps.signing-secrets.outputs.instcert-pass }}' \
+            -T /usr/bin/pkgbuild
+          security set-key-partition-list \
+            -S apple-tool:,apple:,pkgbuild: \
+            -s -k pwd \
+            $RUNNER_TEMP/buildagent.keychain
+
+          echo "Setting up notarytool"
+          xcrun notarytool store-credentials \
+            --team-id '${{ steps.signing-secrets.outputs.team-id }}' \
+            --apple-id '${{ steps.signing-secrets.outputs.dev-id }}' \
+            --password '${{ steps.signing-secrets.outputs.dev-pass }}' \
+            "msftgit"
+
+      - name: Build, sign, and notarize artifacts
+        run: |
+          die () {
+            echo "$*" >&2
+            exit 1
+          }
+
+          # Trace execution, stop on error
+          set -ex
+
+          # Convert -rc to .rc to match GIT-VERSION-FILE behavior
+          BUILD_VERSION=$(echo "${VERSION}" | sed 's/-rc/.rc/g')
+          echo "$BUILD_VERSION" >git/version
+
+          # Configure universal build
+          cat >git/config.mak <<EOF
+          # Create universal binaries. HOST_CPU is a bit of a lie and only
+          # used in 'git version --build-options'.  We'll fix that in code.
+          HOST_CPU = universal
+          BASIC_CFLAGS += -arch arm64 -arch x86_64
+          EOF
+
+          # Configure the Git build to pick up gettext
+          homebrew_prefix="$(brew --prefix)"
+          cat >>git/config.mak <<EOF
+          CFLAGS = -I$homebrew_prefix/include -I/usr/local/opt/gettext/include
+          LDFLAGS = -L"$(pwd)"
+          EOF
+
+          # Configure the Git to use the OS supplied libcurl.
+          cat >>git/config.mak <<EOF
+          CURL_LDFLAGS := -lcurl
+          CURL_CONFIG := /usr/bin/true
+          EOF
+
+          # Avoid even building the dashed built-ins; Those should be hard-linked
+          # copies of the `git` executable but would end up as actual copies instead,
+          # bloating the size of the `.dmg` indecently.
+          echo 'SKIP_DASHED_BUILT_INS = YabbaDabbaDoo' >>git/config.mak
+
+          # To make use of the catalogs...
+          export XML_CATALOG_FILES=$homebrew_prefix/etc/xml/catalog
+
+          make -C git -j$(sysctl -n hw.physicalcpu) GIT-VERSION-FILE dist dist-doc
+
+          # Extract tarballs
+          mkdir payload manpages
+          tar -xvf git/git-$BUILD_VERSION.tar.gz -C payload
+          tar -xvf git/git-manpages-$BUILD_VERSION.tar.gz -C manpages
+
+          # Lay out payload
+          cp git/config.mak payload/git-$BUILD_VERSION/config.mak
+          make -C git/.github/macos-installer V=1 payload
+
+          # Codesign payload
+          cp -R stage/git-universal-$BUILD_VERSION/ \
+            git/.github/macos-installer/build-artifacts
+          make -C git/.github/macos-installer V=1 codesign \
+            APPLE_APP_IDENTITY='${{ steps.signing-secrets.outputs.appsign-id }}' || die "Creating signed payload failed"
+
+          # Build and sign pkg
+          make -C git/.github/macos-installer V=1 pkg \
+            APPLE_INSTALLER_IDENTITY='${{ steps.signing-secrets.outputs.instsign-id }}' \
+            || die "Creating signed pkg failed"
+
+          # Notarize pkg
+          make -C git/.github/macos-installer V=1 notarize \
+            APPLE_INSTALLER_IDENTITY='${{ steps.signing-secrets.outputs.instsign-id }}' \
+            APPLE_KEYCHAIN_PROFILE="msftgit" \
+            || die "Creating signed and notarized pkg failed"
+
+          # Create DMG
+          make -C git/.github/macos-installer V=1 image || die "Creating DMG failed"
+
+          # Move all artifacts into top-level directory
+          mv git/.github/macos-installer/disk-image/*.pkg git/.github/macos-installer/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-artifacts
+          path: |
+            git/.github/macos-installer/*.dmg
+            git/.github/macos-installer/*.pkg
+  # End build and sign Mac OSX installers
+
+  # Build and sign Debian package
+  create-linux-unsigned-artifacts:
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:20.04 # security support until 04/02/2025, according to https://endoflife.date/ubuntu
+      volumes:
+        # override /__e/node20 because GitHub Actions uses a version that requires too-recent glibc, see "Install dependencies" below
+        - /tmp:/__e/node20
+    needs: prereqs
+    steps:
+      - name: Install dependencies
+        run: |
+          set -ex
+
+          # Prevent the dialog that asks interactively for the timezone
+          export DEBIAN_FRONTEND=noninteractive
+          export TZ=Etc/UTC
+
+          apt-get update -q
+          apt-get install -y -q --no-install-recommends \
+            build-essential \
+            tcl tk gettext asciidoc xmlto \
+            libcurl4-gnutls-dev libpcre2-dev zlib1g-dev libexpat-dev \
+            curl ca-certificates
+
+          # Install a Node.js version that works in older Ubuntu containers (read: does not require very recent glibc)
+          NODE_VERSION=v20.18.1 &&
+          NODE_URL=https://unofficial-builds.nodejs.org/download/release/$NODE_VERSION/node-$NODE_VERSION-linux-x64-glibc-217.tar.gz &&
+          curl -Lo /tmp/node.tar.gz $NODE_URL &&
+          tar -C /__e/node20 -x --strip-components=1 -f /tmp/node.tar.gz
+
+      - name: Clone git
+        uses: actions/checkout@v4
+        with:
+          path: git
+
+      - name: Build and create Debian package
+        run: |
+          set -ex
+
+          die () {
+              echo "$*" >&2
+              exit 1
+          }
+
+          VERSION="${{ needs.prereqs.outputs.tag_version }}"
+
+          # Convert -rc to .rc to match GIT-VERSION-FILE behavior
+          BUILD_VERSION=$(echo "${VERSION}" | sed 's/-rc/.rc/g')
+          echo "$BUILD_VERSION" >git/version
+          make -C git GIT-VERSION-FILE
+
+          ARCH="$(dpkg-architecture -q DEB_HOST_ARCH)"
+          if test -z "$ARCH"; then
+            die "Could not determine host architecture!"
+          fi
+
+          PKGNAME="microsoft-git_$VERSION"
+          PKGDIR="$(dirname $(pwd))/$PKGNAME"
+
+          rm -rf "$PKGDIR"
+          mkdir -p "$PKGDIR"
+
+          DESTDIR="$PKGDIR" make -C git -j5 V=1 DEVELOPER=1 \
+            USE_LIBPCRE=1 \
+            USE_CURL_FOR_IMAP_SEND=1 NO_OPENSSL=1 \
+            NO_CROSS_DIRECTORY_HARDLINKS=1 \
+            ASCIIDOC8=1 ASCIIDOC_NO_ROFF=1 \
+            ASCIIDOC='TZ=UTC asciidoc' \
+            prefix=/usr/local \
+            gitexecdir=/usr/local/lib/git-core \
+            libexecdir=/usr/local/lib/git-core \
+            htmldir=/usr/local/share/doc/git/html \
+            install install-doc install-html
+
+          cd ..
+          mkdir "$PKGNAME/DEBIAN"
+
+          # Based on https://packages.ubuntu.com/xenial/vcs/git
+          cat >"$PKGNAME/DEBIAN/control" <<EOF
+          Package: microsoft-git
+          Version: $VERSION
+          Section: vcs
+          Priority: optional
+          Architecture: $ARCH
+          Depends: libcurl3-gnutls, liberror-perl, libexpat1, libpcre2-8-0, perl, perl-modules, zlib1g
+          Maintainer: GitClient <gitclient@microsoft.com>
+          Description: Git client built from the https://github.com/microsoft/git repository,
+            specialized in supporting monorepo scenarios. Includes the Scalar CLI.
+          EOF
+
+          dpkg-deb -Zxz --build "$PKGNAME"
+          # Move Debian package for later artifact upload
+          mv "$PKGNAME.deb" "$GITHUB_WORKSPACE"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-unsigned-artifacts
+          path: |
+            *.deb
+
+  create-linux-artifacts:
+    runs-on: ubuntu-latest
+    needs: [prereqs, create-linux-unsigned-artifacts]
+    environment: release
+    steps:
+      - name: Log into Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Check out repository (for akv-secret Action)
+        uses: actions/checkout@v4
+        with:
+          path: git
+
+      - name: Download GPG secrets
+        id: gpg-secrets
+        uses: ./git/.github/actions/akv-secret
+        with:
+          vault: ${{ secrets.AZURE_VAULT }}
+          secrets: |
+            ${{ secrets.LINUX_GPG_KEYGRIP_SECRET_NAME }}       > $output:keygrip
+            ${{ secrets.LINUX_GPG_PRIVATE_SECRET_NAME }} base64> $output:private-key
+            ${{ secrets.LINUX_GPG_PASSPHRASE_SECRET_NAME }}    > $output:passphrase
+
+      - name: Prepare for GPG signing
+        run: |
+          # Install debsigs
+          sudo apt-get install -y debsigs
+
+          # Stop using SHA-1 for the signature. For details, see
+          # https://gitlab.com/debsigs/debsigs/-/commit/75c6c8f96e6cdc33bca9c5f32195b68ff35bc32f
+          # which seems to have made it to have made it into debsigs v0.2.1, but Ubuntu 24.04 is
+          # stuck with v1.19.
+          mkdir -p patched-debsigs &&
+          sed 's/, "--openpgp"//' </usr/bin/debsigs >patched-debsigs/debsigs &&
+          chmod a+x patched-debsigs/debsigs &&
+          echo "$PWD/patched-debsigs" >>$GITHUB_PATH
+
+          # Import GPG key
+          echo -n '${{ steps.gpg-secrets.outputs.private-key }}' | gpg --import --no-tty --batch --yes
+
+          # Configure GPG
+          echo "allow-preset-passphrase" > ~/.gnupg/gpg-agent.conf
+          gpg-connect-agent RELOADAGENT /bye
+          /usr/lib/gnupg2/gpg-preset-passphrase --preset '${{ steps.gpg-secrets.outputs.keygrip }}' <<<'${{ steps.gpg-secrets.outputs.passphrase }}'
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-unsigned-artifacts
+
+      - name: Sign Debian package
+        run: |
+          # Sign Debian package
+          version="${{ needs.prereqs.outputs.tag_version }}"
+          debsigs --sign=origin --verify --check microsoft-git_"$version".deb
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-artifacts
+          path: |
+            *.deb
+  # End build and sign Debian package
+
+  create-github-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write # required for Azure login via OIDC
+    needs:
+      - create-linux-artifacts
+      - create-macos-artifacts
+      - windows_artifacts
+      - prereqs
+    environment: release
+    if: |
+      success() ||
+        (needs.create-linux-artifacts.result == 'skipped' &&
+        needs.create-macos-artifacts.result == 'success' &&
+        needs.windows_artifacts.result == 'success')
+    steps:
+      - name: Download Windows portable (x86_64)
+        uses: actions/download-artifact@v4
+        with:
+          name: win-portable-x86_64
+          path: win-portable-x86_64
+
+      - name: Download Windows portable (aarch64)
+        uses: actions/download-artifact@v4
+        with:
+          name: win-portable-aarch64
+          path: win-portable-aarch64
+
+      - name: Download Windows installer (x86_64)
+        uses: actions/download-artifact@v4
+        with:
+          name: win-installer-x86_64
+          path: win-installer-x86_64
+
+      - name: Download Windows installer (aarch64)
+        uses: actions/download-artifact@v4
+        with:
+          name: win-installer-aarch64
+          path: win-installer-aarch64
+
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-artifacts
+          path: macos-artifacts
+
+      - name: Download Debian package
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-artifacts
+          path: deb-package
+
+      - name: Log into Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Check out repository (for akv-secret Action)
+        uses: actions/checkout@v4
+        with:
+          path: git
+
+      - name: Download Linux GPG public key signature file
+        uses: ./git/.github/actions/akv-secret
+        with:
+          vault: ${{ secrets.AZURE_VAULT }}
+          secrets: |
+            ${{ secrets.LINUX_GPG_PUBLIC_SECRET_NAME }} base64> deb-package/msft-git-public.asc
+
+      - uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            var releaseMetadata = {
+              owner: context.repo.owner,
+              repo: context.repo.repo
+            };
+
+            // Create the release
+            var tagName = "${{ needs.prereqs.outputs.tag_name }}";
+            var createdRelease = await github.rest.repos.createRelease({
+              ...releaseMetadata,
+              draft: true,
+              tag_name: tagName,
+              name: tagName
+            });
+            releaseMetadata.release_id = createdRelease.data.id;
+            core.notice(`Created release at ${createdRelease.data.html_url}`);
+
+            // Uploads contents of directory to the release created above
+            async function uploadDirectoryToRelease(directory, includeExtensions=[]) {
+              return fs.promises.readdir(directory)
+                .then(async(files) => Promise.all(
+                  files.filter(file => {
+                    return includeExtensions.length==0 || includeExtensions.includes(path.extname(file).toLowerCase());
+                  })
+                  .map(async (file) => {
+                    var filePath = path.join(directory, file);
+                    github.rest.repos.uploadReleaseAsset({
+                      ...releaseMetadata,
+                      name: file,
+                      headers: {
+                        "content-length": (await fs.promises.stat(filePath)).size
+                      },
+                      data: fs.createReadStream(filePath)
+                    });
+                  }))
+                );
+            }
+
+            await Promise.all([
+              // Upload Windows x86_64 artifacts
+              uploadDirectoryToRelease('win-installer-x86_64', ['.exe']),
+              uploadDirectoryToRelease('win-portable-x86_64', ['.exe']),
+
+              // Upload Windows aarch64 artifacts
+              uploadDirectoryToRelease('win-installer-aarch64', ['.exe']),
+              uploadDirectoryToRelease('win-portable-aarch64', ['.exe']),
+
+              // Upload Mac artifacts
+              uploadDirectoryToRelease('macos-artifacts'),
+
+              // Upload Ubuntu artifacts
+              uploadDirectoryToRelease('deb-package')
+            ]);
