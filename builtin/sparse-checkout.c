@@ -113,7 +113,7 @@ static int sparse_checkout_list(int argc, const char **argv, const char *prefix,
 
 static void clean_tracked_sparse_directories(struct repository *r)
 {
-	int i, was_full = 0;
+	int i, value, was_full = 0;
 	struct strbuf path = STRBUF_INIT;
 	size_t pathlen;
 	struct string_list_item *item;
@@ -127,6 +127,13 @@ static void clean_tracked_sparse_directories(struct repository *r)
 		return;
 	if (init_sparse_checkout_patterns(r->index) ||
 	    !r->index->sparse_checkout_patterns->use_cone_patterns)
+		return;
+
+	/*
+	 * Users can disable this behavior.
+	 */
+	if (!repo_config_get_bool(r, "index.deletesparsedirectories", &value) &&
+	    !value)
 		return;
 
 	/*
