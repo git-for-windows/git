@@ -783,6 +783,10 @@ test_expect_success 'cone mode clears ignored subdirectories' '
 	git -C repo status --porcelain=v2 >out &&
 	test_must_be_empty out &&
 
+	git -C repo -c index.deleteSparseDirectories=false sparse-checkout reapply &&
+	test_path_is_dir repo/folder1 &&
+	test_path_is_dir repo/deep/deeper2 &&
+
 	git -C repo sparse-checkout reapply &&
 	test_path_is_missing repo/folder1 &&
 	test_path_is_missing repo/deep/deeper2 &&
