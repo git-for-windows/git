@@ -46,6 +46,9 @@ static void setup_enlistment_directory(int argc, const char **argv,
 		die(_("need a working directory"));
 
 	strbuf_trim_trailing_dir_sep(&path);
+#ifdef GIT_WINDOWS_NATIVE
+	convert_slashes(path.buf);
+#endif
 
 	/* check if currently in enlistment root with src/ workdir */
 	len = path.len;
@@ -72,21 +75,34 @@ static void setup_enlistment_directory(int argc, const char **argv,
 	strbuf_release(&path);
 }
 
+static int git_retries = 3;
+
 LAST_ARG_MUST_BE_NULL
 static int run_git(const char *arg, ...)
 {
-	struct child_process cmd = CHILD_PROCESS_INIT;
 	va_list args;
 	const char *p;
+	struct strvec argv = STRVEC_INIT;
+	int res = 0, attempts;
 
 	va_start(args, arg);
-	strvec_push(&cmd.args, arg);
+	strvec_push(&argv, arg);
 	while ((p = va_arg(args, const char *)))
-		strvec_push(&cmd.args, p);
+		strvec_push(&argv, p);
 	va_end(args);
 
-	cmd.git_cmd = 1;
-	return run_command(&cmd);
+	for (attempts = 0, res = 1;
+	     res && attempts < git_retries;
+	     attempts++) {
+		struct child_process cmd = CHILD_PROCESS_INIT;
+
+		cmd.git_cmd = 1;
+		strvec_pushv(&cmd.args, argv.v);
+		res = run_command(&cmd);
+	}
+
+	strvec_clear(&argv);
+	return res;
 }
 
 struct scalar_config {
@@ -172,6 +188,7 @@ static int set_recommended_config(int reconfigure)
 		{ "core.safeCRLF", "false" },
 		{ "fetch.showForcedUpdates", "false" },
 		{ "pack.usePathWalk", "true" },
+		{ "core.configWriteLockTimeoutMS", "150" },
 		{ NULL, NULL },
 	};
 	int i;
@@ -219,6 +236,11 @@ static int set_recommended_config(int reconfigure)
  */
 static int toggle_maintenance(int enable)
 {
+	unsigned long ul;
+
+	if (repo_config_get_ulong(the_repository, "core.configWriteLockTimeoutMS", &ul))
+		git_config_push_parameter("core.configWriteLockTimeoutMS=150");
+
 	return run_git("maintenance",
 		       enable ? "start" : "unregister",
 		       enable ? NULL : "--force",
@@ -228,9 +250,13 @@ static int toggle_maintenance(int enable)
 static int add_or_remove_enlistment(int add)
 {
 	int res;
+	unsigned long ul;
 
 	if (!the_repository->worktree)
 		die(_("Scalar enlistments require a worktree"));
+
+	if (repo_config_get_ulong(the_repository, "core.configWriteLockTimeoutMS", &ul))
+		git_config_push_parameter("core.configWriteLockTimeoutMS=150");
 
 	res = run_git("config", "--global", "--get", "--fixed-value",
 		      "scalar.repo", the_repository->worktree, NULL);
@@ -598,6 +624,8 @@ static int cmd_diagnose(int argc, const char **argv)
 	setup_enlistment_directory(argc, argv, usage, options, &diagnostics_root);
 	strbuf_addstr(&diagnostics_root, "/.scalarDiagnostics");
 
+	/* Here, a failure should not repeat itself. */
+	git_retries = 1;
 	res = run_git("diagnose", "--mode=all", "-s", "%Y%m%d_%H%M%S",
 		      "-o", diagnostics_root.buf, NULL);
 
@@ -1031,6 +1059,9 @@ int cmd_main(int argc, const char **argv)
 	if (argc > 1) {
 		argv++;
 		argc--;
+
+		if (!strcmp(argv[0], "config"))
+			argv[0] = "reconfigure";
 
 		for (i = 0; builtins[i].name; i++)
 			if (!strcmp(builtins[i].name, argv[0]))
