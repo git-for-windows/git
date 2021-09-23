@@ -1924,6 +1924,46 @@ test_expect_success 'sparse index is not expanded: sparse-checkout' '
 	ensure_not_expanded sparse-checkout set
 '
 
+# NEEDSWORK: although the full repository's index is _not_ expanded as part of
+# stash, a temporary index, which is _not_ sparse, is created when stashing and
+# applying a stash of untracked files. As a result, the test reports that it
+# finds an instance of `ensure_full_index`, but it does not carry with it the
+# performance implications of expanding the full repository index.
+test_expect_success 'sparse index is not expanded: stash -u' '
+	init_repos &&
+
+	mkdir -p sparse-index/folder1 &&
+	echo >>sparse-index/README.md &&
+	echo >>sparse-index/a &&
+	echo >>sparse-index/folder1/new &&
+
+	GIT_TRACE2_EVENT="$(pwd)/trace2.txt" GIT_TRACE2_EVENT_NESTING=10 \
+		git -C sparse-index stash -u &&
+	test_region index ensure_full_index trace2.txt &&
+
+	GIT_TRACE2_EVENT="$(pwd)/trace2.txt" GIT_TRACE2_EVENT_NESTING=10 \
+		git -C sparse-index stash pop &&
+	test_region index ensure_full_index trace2.txt
+'
+
+# NEEDSWORK: similar to `git add`, untracked files outside of the sparse
+# checkout definition are successfully stashed and unstashed.
+test_expect_success 'stash -u outside sparse checkout definition' '
+	init_repos &&
+
+	write_script edit-contents <<-\EOF &&
+	echo text >>$1
+	EOF
+
+	run_on_sparse mkdir -p folder1 &&
+	run_on_all ../edit-contents folder1/new &&
+	test_all_match git stash -u &&
+	test_all_match git status --porcelain=v2 &&
+
+	test_all_match git stash pop -q &&
+	test_all_match git status --porcelain=v2
+'
+
 # NEEDSWORK: a sparse-checkout behaves differently from a full checkout
 # in this scenario, but it shouldn't.
 test_expect_success 'reset mixed and checkout orphan' '
