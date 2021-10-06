@@ -266,6 +266,15 @@ jobs:
           Type: files; Name: {app}\\{#MINGW_BITNESS}\\bin\\git-update-git-for-windows.config\
           Type: dirifempty; Name: {app}\\{#MINGW_BITNESS}\\bin' \
             $b/installer/install.iss
+      - name: Set alerts to continue until upgrade is taken
+        shell: bash
+        run: |
+          set -x
+
+          b=/${{matrix.arch.mingwprefix}}/bin &&
+
+          sed -i -e '6 a use_recently_seen=no' \
+            $b/git-update-git-for-windows
       - name: Set the installer Publisher to the Git Client team
         shell: bash
         run: |
