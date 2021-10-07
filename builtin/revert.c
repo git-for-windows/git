@@ -10,6 +10,7 @@
 #include "rerere.h"
 #include "sequencer.h"
 #include "branch.h"
+#include "config.h"
 
 /*
  * This implements the builtins revert and cherry-pick.
@@ -288,6 +289,7 @@ int cmd_revert(int argc,
 
 #ifndef WITH_BREAKING_CHANGES
 	warn_on_auto_comment_char = true;
+	repo_config_clear(the_repository);
 #endif /* !WITH_BREAKING_CHANGES */
 	opts.action = REPLAY_REVERT;
 	sequencer_init_config(&opts);
@@ -308,6 +310,7 @@ struct repository *repo UNUSED)
 
 #ifndef WITH_BREAKING_CHANGES
 	warn_on_auto_comment_char = true;
+	repo_config_clear(the_repository);
 #endif /* !WITH_BREAKING_CHANGES */
 	opts.action = REPLAY_PICK;
 	sequencer_init_config(&opts);

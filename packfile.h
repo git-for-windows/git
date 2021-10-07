@@ -135,6 +135,13 @@ void packfile_store_reprepare(struct packfile_store *store);
  */
 void packfile_store_add_pack(struct packfile_store *store,
 			     struct packed_git *pack);
+/*
+ * Add the pack to the store so that contained objects become accessible via
+ * the store, and then mark it as most recently used. This moves ownership into
+ * the store.
+ */
+void packfile_store_add_pack_also_to_mru(struct repository *r,
+					 struct packed_git *pack);
 
 /*
  * Load and iterate through all packs of the given repository. This helper
@@ -387,5 +394,10 @@ int load_idx(const char *path, const unsigned int hashsz, void *idx_map,
  * turning it into the matching bytes we'd find in a pack.
  */
 int parse_pack_header_option(const char *in, unsigned char *out, unsigned int *len);
+
+/*
+ * Return the number of objects fetched from a packfile.
+ */
+unsigned long get_nr_unpack_entry(void);
 
 #endif

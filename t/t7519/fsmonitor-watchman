@@ -17,7 +17,6 @@ use IPC::Open2;
 # 'git config core.fsmonitor .git/hooks/query-watchman'
 #
 my ($version, $time) = @ARGV;
-#print STDERR "$0 $version $time\n";
 
 # Check the hook interface version
 
@@ -44,7 +43,7 @@ launch_watchman();
 
 sub launch_watchman {
 
-	my $pid = open2(\*CHLD_OUT, \*CHLD_IN, 'watchman -j')
+	my $pid = open2(\*CHLD_OUT, \*CHLD_IN, 'watchman -j --no-pretty')
 	    or die "open2() failed: $!\n" .
 	    "Falling back to scanning...\n";
 
@@ -62,18 +61,10 @@ sub launch_watchman {
 			"fields": ["name"]
 		}]
 	END
-	
-	open (my $fh, ">", ".git/watchman-query.json");
-	print $fh $query;
-	close $fh;
 
 	print CHLD_IN $query;
 	close CHLD_IN;
 	my $response = do {local $/; <CHLD_OUT>};
-
-	open ($fh, ">", ".git/watchman-response.json");
-	print $fh $response;
-	close $fh;
 
 	die "Watchman: command returned no output.\n" .
 	    "Falling back to scanning...\n" if $response eq "";
@@ -93,7 +84,6 @@ sub launch_watchman {
 	my $o = $json_pkg->new->utf8->decode($response);
 
 	if ($retry > 0 and $o->{error} and $o->{error} =~ m/unable to resolve root .* directory (.*) is not watched/) {
-		print STDERR "Adding '$git_work_tree' to watchman's watch list.\n";
 		$retry--;
 		qx/watchman watch "$git_work_tree"/;
 		die "Failed to make watchman watch '$git_work_tree'.\n" .
@@ -103,11 +93,6 @@ sub launch_watchman {
 		# return the fast "everything is dirty" flag to git and do the
 		# Watchman query just to get it over with now so we won't pay
 		# the cost in git to look up each individual file.
-
-		open ($fh, ">", ".git/watchman-output.out");
-		print "/\0";
-		close $fh;
-
 		print "/\0";
 		eval { launch_watchman() };
 		exit 0;
@@ -115,11 +100,6 @@ sub launch_watchman {
 
 	die "Watchman: $o->{error}.\n" .
 	    "Falling back to scanning...\n" if $o->{error};
-
-	open ($fh, ">", ".git/watchman-output.out");
-	binmode $fh, ":utf8";
-	print $fh @{$o->{files}};
-	close $fh;
 
 	binmode STDOUT, ":utf8";
 	local $, = "\0";

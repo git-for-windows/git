@@ -1,5 +1,8 @@
+#define USE_THE_REPOSITORY_VARIABLE
+
 #include "git-compat-util.h"
 #include "abspath.h"
+#include "environment.h"
 #include "advice.h"
 #include "gettext.h"
 #include "hook.h"
@@ -10,13 +13,66 @@
 #include "environment.h"
 #include "setup.h"
 
+static int early_hooks_path_config(const char *var, const char *value,
+				   const struct config_context *ctx UNUSED, void *cb)
+{
+	if (!strcmp(var, "core.hookspath"))
+		return git_config_pathname((char **)cb, var, value);
+
+	return 0;
+}
+
+/* Discover the hook before setup_git_directory() was called */
+static const char *hook_path_early(const char *name, struct strbuf *result)
+{
+	static struct strbuf hooks_dir = STRBUF_INIT;
+	static int initialized;
+
+	if (initialized < 0)
+		return NULL;
+
+	if (!initialized) {
+		struct strbuf gitdir = STRBUF_INIT, commondir = STRBUF_INIT;
+		char *early_hooks_dir = NULL;
+
+		if (discover_git_directory(&commondir, &gitdir) < 0) {
+			strbuf_release(&gitdir);
+			strbuf_release(&commondir);
+			initialized = -1;
+			return NULL;
+		}
+
+		read_early_config(the_repository, early_hooks_path_config, &early_hooks_dir);
+		if (!early_hooks_dir)
+			strbuf_addf(&hooks_dir, "%s/hooks/", commondir.buf);
+		else {
+			strbuf_add_absolute_path(&hooks_dir, early_hooks_dir);
+			free(early_hooks_dir);
+			strbuf_addch(&hooks_dir, '/');
+		}
+
+		strbuf_release(&gitdir);
+		strbuf_release(&commondir);
+
+		initialized = 1;
+	}
+
+	strbuf_addf(result, "%s%s", hooks_dir.buf, name);
+	return result->buf;
+}
+
 const char *find_hook(struct repository *r, const char *name)
 {
 	static struct strbuf path = STRBUF_INIT;
 
 	int found_hook;
 
-	repo_git_path_replace(r, &path, "hooks/%s", name);
+	strbuf_reset(&path);
+	if (have_git_dir())
+		repo_git_path_replace(r, &path, "hooks/%s", name);
+	else if (!hook_path_early(name, &path))
+		return NULL;
+
 	found_hook = access(path.buf, X_OK) >= 0;
 #ifdef STRIP_EXTENSION
 	if (!found_hook) {
@@ -129,7 +185,7 @@ int run_hooks_opt(struct repository *r, const char *hook_name,
 		.hook_name = hook_name,
 		.options = options,
 	};
-	const char *const hook_path = find_hook(r, hook_name);
+	const char *hook_path = find_hook(r, hook_name);
 	int ret = 0;
 	const struct run_process_parallel_opts opts = {
 		.tr2_category = "hook",
@@ -144,6 +200,18 @@ int run_hooks_opt(struct repository *r, const char *hook_name,
 
 		.data = &cb_data,
 	};
+
+	/*
+	 * Backwards compatibility hack in VFS for Git: when originally
+	 * introduced (and used!), it was called `post-indexchanged`, but this
+	 * name was changed during the review on the Git mailing list.
+	 *
+	 * Therefore, when the `post-index-change` hook is not found, let's
+	 * look for a hook with the old name (which would be found in case of
+	 * already-existing checkouts).
+	 */
+	if (!hook_path && !strcmp(hook_name, "post-index-change"))
+		hook_path = find_hook(r, "post-indexchanged");
 
 	if (!options)
 		BUG("a struct run_hooks_opt must be provided to run_hooks");

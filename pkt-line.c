@@ -230,7 +230,7 @@ static int do_packet_write(const int fd_out, const char *buf, size_t size,
 	return 0;
 }
 
-static int packet_write_gently(const int fd_out, const char *buf, size_t size)
+int packet_write_gently(const int fd_out, const char *buf, size_t size)
 {
 	struct strbuf err = STRBUF_INIT;
 	if (do_packet_write(fd_out, buf, size, &err)) {

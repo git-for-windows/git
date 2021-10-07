@@ -5,6 +5,7 @@
 #include "midx.h"
 #include "pack-objects.h"
 #include "setup.h"
+#include "gvfs.h"
 
 static void repo_cfg_bool(struct repository *r, const char *key, int *dest,
 			  int def)
@@ -84,6 +85,13 @@ void prepare_repo_settings(struct repository *r)
 		      &r->settings.pack_use_bitmap_boundary_traversal,
 		      r->settings.pack_use_bitmap_boundary_traversal);
 	repo_cfg_bool(r, "core.usereplacerefs", &r->settings.read_replace_refs, 1);
+
+	/*
+	 * For historical compatibility reasons, enable index.skipHash based
+	 * on a bit in core.gvfs.
+	 */
+	if (gvfs_config_is_set(r, GVFS_SKIP_SHA_ON_INDEX))
+		r->settings.index_skip_hash = 1;
 
 	/*
 	 * The GIT_TEST_MULTI_PACK_INDEX variable is special in that

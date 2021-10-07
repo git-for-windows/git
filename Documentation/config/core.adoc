@@ -111,6 +111,14 @@ Version 2 uses an opaque string so that the monitor can return
 something that can be used to determine what files have changed
 without race conditions.
 
+core.virtualFilesystem::
+	If set, the value of this variable is used as a command which
+	will identify all files and directories that are present in
+	the working directory.  Git will only track and update files
+	listed in the virtual file system.  Using the virtual file system
+	will supersede the sparse-checkout settings which will be ignored.
+	See the "virtual file system" section of linkgit:githooks[5].
+
 core.trustctime::
 	If false, the ctime differences between the index and the
 	working tree are ignored; useful when the inode change time
@@ -760,6 +768,55 @@ core.multiPackIndex::
 	Use the multi-pack-index file to track multiple packfiles using a
 	single index. See linkgit:git-multi-pack-index[1] for more
 	information. Defaults to true.
+
+core.gvfs::
+	Enable the features needed for GVFS.  This value can be set to true
+	to indicate all features should be turned on or the bit values listed
+	below can be used to turn on specific features.
++
+--
+	GVFS_SKIP_SHA_ON_INDEX::
+		Bit value 1
+		Disables the calculation of the sha when writing the index
+	GVFS_MISSING_OK::
+		Bit value 4
+		Normally git write-tree ensures that the objects referenced by the
+		directory exist in the object database. This option disables this check.
+	GVFS_NO_DELETE_OUTSIDE_SPARSECHECKOUT::
+		Bit value 8
+		When marking entries to remove from the index and the working
+		directory this option will take into account what the
+		skip-worktree bit was set to so that if the entry has the
+		skip-worktree bit set it will not be removed from the working
+		directory.  This will allow virtualized working directories to
+		detect the change to HEAD and use the new commit tree to show
+		the files that are in the working directory.
+	GVFS_FETCH_SKIP_REACHABILITY_AND_UPLOADPACK::
+		Bit value 16
+		While performing a fetch with a virtual file system we know
+		that there will be missing objects and we don't want to download
+		them just because of the reachability of the commits.  We also
+		don't want to download a pack file with commits, trees, and blobs
+		since these will be downloaded on demand.  This flag will skip the
+		checks on the reachability of objects during a fetch as well as
+		the upload pack so that extraneous objects don't get downloaded.
+	GVFS_BLOCK_FILTERS_AND_EOL_CONVERSIONS::
+		Bit value 64
+		With a virtual file system we only know the file size before any
+		CRLF or smudge/clean filters processing is done on the client.
+		To prevent file corruption due to truncation or expansion with
+		garbage at the end, these filters must not run when the file
+		is first accessed and brought down to the client. Git.exe can't
+		currently tell the first access vs subsequent accesses so this
+		flag just blocks them from occurring at all.
+	GVFS_PREFETCH_DURING_FETCH::
+		Bit value 128
+		While performing a `git fetch` command, use the gvfs-helper to
+		perform a "prefetch" of commits and trees.
+--
+
+core.useGvfsHelper::
+	TODO
 
 core.sparseCheckout::
 	Enable "sparse checkout" feature. See linkgit:git-sparse-checkout[1]

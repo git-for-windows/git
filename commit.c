@@ -1,6 +1,7 @@
 #define USE_THE_REPOSITORY_VARIABLE
 
 #include "git-compat-util.h"
+#include "gvfs.h"
 #include "tag.h"
 #include "commit.h"
 #include "commit-graph.h"
@@ -558,13 +559,22 @@ int repo_parse_commit_internal(struct repository *r,
 		.sizep = &size,
 		.contentp = &buffer,
 	};
+	int ret;
 	/*
 	 * Git does not support partial clones that exclude commits, so set
 	 * OBJECT_INFO_SKIP_FETCH_OBJECT to fail fast when an object is missing.
 	 */
 	int flags = OBJECT_INFO_LOOKUP_REPLACE | OBJECT_INFO_SKIP_FETCH_OBJECT |
-		OBJECT_INFO_DIE_IF_CORRUPT;
-	int ret;
+		    OBJECT_INFO_DIE_IF_CORRUPT;
+
+	/*
+	 * But the GVFS Protocol _does_ support missing commits!
+	 * And the idea with VFS for Git is to re-download corrupted objects,
+	 * not to fail!
+	 */
+	if (gvfs_config_is_set(r, GVFS_MISSING_OK))
+		flags &= ~(OBJECT_INFO_SKIP_FETCH_OBJECT |
+			   OBJECT_INFO_DIE_IF_CORRUPT);
 
 	if (!item)
 		return -1;

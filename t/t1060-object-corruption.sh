@@ -3,6 +3,7 @@
 test_description='see how we handle various forms of corruption'
 
 . ./test-lib.sh
+. "$TEST_DIRECTORY"/lib-diff-data.sh
 
 # convert "1234abcd" to ".git/objects/12/34abcd"
 obj_to_file() {
@@ -60,6 +61,35 @@ test_expect_success 'streaming a corrupt blob fails' '
 		cd bit-error &&
 		test_must_fail git cat-file blob HEAD:content.t
 	)
+'
+
+test_expect_success PERL 'truncated objects can be re-retrieved via GVFS' '
+	git init truncated &&
+	COPYING_test_data >truncated/COPYING &&
+	git -C truncated add COPYING &&
+	test_tick &&
+	git -C truncated commit -m initial COPYING &&
+
+	# set up the `read-object` hook so that it overwrites the corrupt object
+	mkdir -p truncated/.git/hooks &&
+	sed -e "1s|/usr/bin/perl|$PERL_PATH|" \
+	  -e "s/system/unlink \".git\/objects\/\" . substr(\$sha1, 0, 2) . \"\/\" . substr(\$sha1, 2); &/" \
+	  <$TEST_DIRECTORY/t0410/read-object \
+	  >truncated/.git/hooks/read-object &&
+	chmod +x truncated/.git/hooks/read-object &&
+
+	# ensure that the parent repository has a copy of the object, from
+	# where the `read-object` can read it
+	sha="$(git hash-object -w truncated/COPYING)" &&
+	file=$(obj_to_file $sha) &&
+	size=$(test_file_size $file) &&
+	chmod u+w truncated/$file &&
+	test-tool truncate truncated/$file $(($size-8)) &&
+
+	rm truncated/COPYING &&
+	test_must_fail git -C truncated reset --hard &&
+	git -C truncated -c core.gvfs=4 -c core.virtualizeObjects \
+		reset --hard
 '
 
 test_expect_success 'getting type of a corrupt blob fails' '

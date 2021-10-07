@@ -749,6 +749,26 @@ struct cache_entry *index_file_exists(struct index_state *istate, const char *na
 	return NULL;
 }
 
+struct cache_entry *index_file_next_match(struct index_state *istate, struct cache_entry *ce, int igncase)
+{
+	struct cache_entry *next;
+
+	if (!igncase || !ce) {
+		return NULL;
+	}
+
+	next = hashmap_get_next_entry(&istate->name_hash, ce, ent);
+	if (!next)
+		return NULL;
+
+	hashmap_for_each_entry_from(&istate->name_hash, next, ent) {
+		if (same_name(next, ce->name, ce_namelen(ce), igncase))
+			return next;
+	}
+
+	return NULL;
+}
+
 void free_name_hash(struct index_state *istate)
 {
 	if (!istate->name_hash_initialized)

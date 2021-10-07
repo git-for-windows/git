@@ -456,6 +456,8 @@ static int run_credential_helper(struct credential *c,
 	else
 		helper.no_stdout = 1;
 
+	helper.trace2_child_class = "cred";
+
 	if (start_command(&helper) < 0)
 		return -1;
 
