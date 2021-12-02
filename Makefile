@@ -3805,7 +3805,7 @@ dist: git-archive$(X) configure
 	@$(MAKE) -C git-gui TARDIR=../.dist-tmp-dir/git-gui dist-version
 	./git-archive --format=tar \
 		$(GIT_ARCHIVE_EXTRA_FILES) \
-		--prefix=$(GIT_TARNAME)/ HEAD^{tree} > $(GIT_TARNAME).tar
+		--prefix=$(GIT_TARNAME)/ HEAD > $(GIT_TARNAME).tar
 	@$(RM) -r .dist-tmp-dir
 	gzip -f -9 $(GIT_TARNAME).tar
 
