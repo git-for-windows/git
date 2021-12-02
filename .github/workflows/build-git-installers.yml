@@ -512,6 +512,9 @@ jobs:
 
           make -C git -j$(sysctl -n hw.physicalcpu) GIT-VERSION-FILE dist dist-doc
 
+          export GIT_BUILT_FROM_COMMIT=$(gunzip -c git/git-$BUILD_VERSION.tar.gz | git get-tar-commit-id) ||
+            die "Could not determine commit for build"
+
           # Extract tarballs
           mkdir payload manpages
           tar -xvf git/git-$BUILD_VERSION.tar.gz -C payload
