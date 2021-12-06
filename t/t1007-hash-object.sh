@@ -296,5 +296,4 @@ test_expect_success EXPENSIVE,SIZE_T_IS_64BIT \
 	git hash-object -- big >actual &&
 	test_cmp expect actual
 '
-
 test_done
