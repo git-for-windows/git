@@ -13,22 +13,27 @@ Scalar only to configure those new settings. In particular, we ported
 features like background maintenance to Git to make Scalar simpler and
 make Git more powerful.
 
-Services such as GitHub support partial clone , a standard adopted by the Git
-project to download only part of the Git objects when cloning, and fetching
-further objects on demand. If your hosting service supports partial clone, then
-we absolutely recommend it as a way to greatly speed up your clone and fetch
-times and to reduce how much disk space your Git repository requires. Scalar
-will help with this!
+Scalar ships inside [a custom version of Git][microsoft-git], but we are
+working to make it available in other forks of Git. The only feature
+that is not intended to ever reach the standard Git client is Scalar's use
+of [the GVFS Protocol][gvfs-protocol], which is essentially an older
+version of [Git's partial clone feature](https://github.blog/2020-12-21-get-up-to-speed-with-partial-clone-and-shallow-clone/)
+that was available first in Azure Repos. Services such as GitHub support
+only partial clone instead of the GVFS protocol because that is the
+standard adopted by the Git project. If your hosting service supports
+partial clone, then we absolutely recommend it as a way to greatly speed
+up your clone and fetch times and to reduce how much disk space your Git
+repository requires. Scalar will help with this!
 
-Most of the value of Scalar can be found in the core Git client. However, most
-of the advanced features that really optimize Git's performance are off by
-default for compatibility reasons. To really take advantage of Git's latest and
-greatest features, you either need to study the [`git config`
-documentation](https://git-scm.com/docs/git-config) and regularly read [the Git
-release notes](https://github.com/git/git/tree/master/Documentation/RelNotes).
+If you don't use the GVFS Protocol, then most of the value of Scalar can
+be found in the core Git client. However, most of the advanced features
+that really optimize Git's performance are off by default for compatibility
+reasons. To really take advantage of Git's latest and greatest features,
+you either need to study the [`git config` documentation](https://git-scm.com/docs/git-config)
+and regularly read [the Git release notes](https://github.com/git/git/tree/master/Documentation/RelNotes).
 Even if you do all that work and customize your Git settings on your machines,
-you likely will want to share those settings with other team members. Or, you
-can just use Scalar!
+you likely will want to share those settings with other team members.
+Or, you can just use Scalar!
 
 Using `scalar register` on an existing Git repository will give you these
 benefits:

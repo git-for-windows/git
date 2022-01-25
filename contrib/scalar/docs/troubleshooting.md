@@ -18,3 +18,23 @@ files for that repository. This includes:
 
 As the `diagnose` command completes, it provides the path of the resulting
 zip file. This zip can be attached to bug reports to make the analysis easier.
+
+Modifying Configuration Values
+------------------------------
+
+The Scalar-specific configuration is only available for repos using the
+GVFS protocol.
+
+### Cache Server URL
+
+When using an enlistment cloned with `scalar clone` and the GVFS protocol,
+you will have a value called the cache server URL. Cache servers are a feature
+of the GVFS protocol to provide low-latency access to the on-demand object
+requests. This modifies the `gvfs.cache-server` setting in your local Git config
+file.
+
+Run `scalar cache-server --get` to see the current cache server.
+
+Run `scalar cache-server --list` to see the available cache server URLs.
+
+Run `scalar cache-server --set=<url>` to set your cache server to `<url>`.

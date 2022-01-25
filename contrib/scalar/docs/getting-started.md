@@ -18,8 +18,9 @@ Creating a new Scalar clone
 ---------------------------------------------------
 
 The `clone` verb creates a local enlistment of a remote repository using the
-partial clone feature available e.g. on GitHub.
-
+partial clone feature available e.g. on GitHub, or using the
+[GVFS protocol](https://github.com/microsoft/VFSForGit/blob/HEAD/Protocol.md),
+such as Azure Repos.
 
 ```
 scalar clone [options] <url> [<dir>]
@@ -68,10 +69,25 @@ in `<path>`.
 These options allow a user to customize their initial enlistment.
 
 * `--full-clone`: If specified, do not initialize the sparse-checkout feature.
-  All files will be present in your `src` directory. This uses a Git partial
-  clone: blobs are downloaded on demand.
+  All files will be present in your `src` directory. This behaves very similar
+  to a Git partial clone in that blobs are downloaded on demand. However, it
+  will use the GVFS protocol to download all Git objects.
+
+* `--cache-server-url=<url>`: If specified, set the intended cache server to
+  the specified `<url>`. All object queries will use the GVFS protocol to this
+  `<url>` instead of the origin remote. If the remote supplies a list of
+  cache servers via the `<url>/gvfs/config` endpoint, then the `clone` command
+  will select a nearby cache server from that list.
 
 * `--branch=<ref>`: Specify the branch to checkout after clone.
+
+* `--local-cache-path=<path>`: Use this option to override the path for the
+  local Scalar cache. If not specified, then Scalar will select a default
+  path to share objects with your other enlistments. On Windows, this path
+  is a subdirectory of `<Volume>:\.scalarCache\`. On Mac, this path is a
+  subdirectory of `~/.scalarCache/`. The default cache path is recommended so
+  multiple enlistments of the same remote repository share objects on the
+  same device.
 
 ### Advanced Options
 
