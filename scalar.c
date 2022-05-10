@@ -46,6 +46,9 @@ static void setup_enlistment_directory(int argc, const char **argv,
 		die(_("need a working directory"));
 
 	strbuf_trim_trailing_dir_sep(&path);
+#ifdef GIT_WINDOWS_NATIVE
+	convert_slashes(path.buf);
+#endif
 
 	/* check if currently in enlistment root with src/ workdir */
 	len = path.len;
