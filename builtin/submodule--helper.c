@@ -3385,7 +3385,7 @@ static void die_on_index_match(const char *path, int force)
 		char *ps_matched = xcalloc(ps.nr, 1);
 
 		/* TODO: audit for interaction with sparse-index. */
-		ensure_full_index(the_repository->index);
+		ensure_full_index_unaudited(the_repository->index);
 
 		/*
 		 * Since there is only one pathspec, we just need to

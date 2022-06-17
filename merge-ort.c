@@ -4594,7 +4594,8 @@ static int record_conflicted_index_entries(struct merge_options *opt)
 	 */
 	strmap_for_each_entry(&opt->priv->conflicted, &iter, e) {
 		if (!path_in_sparse_checkout(e->key, index)) {
-			ensure_full_index(index);
+			const char *fmt = "merge-ort: path outside sparse checkout (%s)";
+			ensure_full_index_with_reason(index, fmt, e->key);
 			break;
 		}
 	}

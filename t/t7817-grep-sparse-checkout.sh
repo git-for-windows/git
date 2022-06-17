@@ -49,7 +49,7 @@ test_expect_success 'setup' '
 		echo "text" >B/b &&
 		git add A B &&
 		git commit -m sub &&
-		git sparse-checkout init --cone &&
+		git sparse-checkout init --cone --no-sparse-index &&
 		git sparse-checkout set B
 	) &&
 

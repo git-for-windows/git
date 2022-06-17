@@ -56,7 +56,7 @@ test_expect_success 'setup repo and indexes' '
 	git -c core.sparseCheckoutCone=true clone --branch=wide --sparse . full-v3 &&
 	(
 		cd full-v3 &&
-		git sparse-checkout init --cone &&
+		git sparse-checkout init --cone --no-sparse-index &&
 		git sparse-checkout set $SPARSE_CONE &&
 		git config index.version 3 &&
 		git update-index --index-version=3 &&
@@ -65,7 +65,7 @@ test_expect_success 'setup repo and indexes' '
 	git -c core.sparseCheckoutCone=true clone --branch=wide --sparse . full-v4 &&
 	(
 		cd full-v4 &&
-		git sparse-checkout init --cone &&
+		git sparse-checkout init --cone --no-sparse-index &&
 		git sparse-checkout set $SPARSE_CONE &&
 		git config index.version 4 &&
 		git update-index --index-version=4 &&

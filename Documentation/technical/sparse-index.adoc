@@ -206,3 +206,10 @@ Here are some commands that might be useful to update:
 * `git am`
 * `git clean`
 * `git stash`
+
+In order to help identify the cases where remaining index expansion is
+occurring in user machines, calls to `ensure_full_index()` have been
+replaced with `ensure_full_index_with_reason()` or with
+`ensure_full_index_unaudited()`. These versions add tracing that should
+help identify the reason for the index expansion without needing full
+access to someone's repository.

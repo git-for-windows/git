@@ -706,7 +706,9 @@ static int do_reupdate(const char **paths,
 		 * to process each path individually
 		 */
 		if (S_ISSPARSEDIR(ce->ce_mode)) {
-			ensure_full_index(the_repository->index);
+			const char *fmt = "update-index:modified sparse dir '%s'";
+			ensure_full_index_with_reason(the_repository->index,
+						      fmt, ce->name);
 			goto redo;
 		}
 

@@ -232,7 +232,8 @@ int cmd_read_tree(int argc,
 		setup_work_tree();
 
 	if (opts.skip_sparse_checkout)
-		ensure_full_index(the_repository->index);
+		ensure_full_index_with_reason(the_repository->index,
+					      "read-tree");
 
 	if (opts.merge) {
 		switch (stage - 1) {

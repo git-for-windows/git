@@ -765,7 +765,7 @@ static int do_recursive_merge(struct repository *r,
 	o.branch2 = next ? next_label : "(empty tree)";
 	if (is_rebase_i(opts))
 		o.buffer_output = 2;
-	o.show_rename_progress = 1;
+	o.show_rename_progress = isatty(2);
 
 	head_tree = parse_tree_indirect(head);
 	if (!head_tree)
@@ -2597,7 +2597,7 @@ static int read_and_refresh_cache(struct repository *r,
 	 * expand the sparse index.
 	 */
 	if (opts->strategy && strcmp(opts->strategy, "ort"))
-		ensure_full_index(r->index);
+		ensure_full_index_with_reason(r->index, "non-ort merge strategy");
 	return 0;
 }
 

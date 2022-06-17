@@ -4066,6 +4066,13 @@ static int reuse_worktree_file(struct index_state *istate,
 		return 0;
 
 	/*
+	 * If this path does not match our sparse-checkout definition,
+	 * then the file will not be in the working directory.
+	 */
+	if (!path_in_sparse_checkout(name, istate))
+		return 0;
+
+	/*
 	 * Similarly, if we'd have to convert the file contents anyway, that
 	 * makes the optimization not worthwhile.
 	 */

@@ -155,6 +155,7 @@ init_repos () {
 	git -C sparse-index reset --hard &&
 
 	# initialize sparse-checkout definitions
+	git -C sparse-checkout config index.sparse false &&
 	git -C sparse-checkout sparse-checkout init --cone &&
 	git -C sparse-checkout sparse-checkout set deep &&
 	git -C sparse-index sparse-checkout init --cone --sparse-index &&
@@ -576,6 +577,45 @@ test_expect_success 'diff --cached' '
 	test_all_match git add README.md &&
 	test_all_match git diff &&
 	test_all_match git diff --cached
+'
+
+test_expect_success 'diff partially-staged' '
+	init_repos &&
+
+	git -C full-checkout config advice.sparseIndexExpanded false &&
+
+	write_script edit-contents <<-\EOF &&
+	echo text >>$1
+	EOF
+
+	# Add file within cone
+	test_all_match git sparse-checkout set deep &&
+	run_on_all ../edit-contents deep/testfile &&
+	test_all_match git add deep/testfile &&
+	run_on_all ../edit-contents deep/testfile &&
+
+	test_all_match git diff &&
+	test_all_match git diff --staged &&
+
+	# Add file outside cone
+	test_all_match git reset --hard &&
+	run_on_all mkdir newdirectory &&
+	run_on_all ../edit-contents newdirectory/testfile &&
+	test_all_match git sparse-checkout set newdirectory &&
+	test_all_match git add newdirectory/testfile &&
+	run_on_all ../edit-contents newdirectory/testfile &&
+	test_all_match git sparse-checkout set &&
+
+	test_all_match git diff &&
+	test_all_match git diff --staged &&
+
+	# Merge conflict outside cone
+	test_all_match git reset --hard &&
+	test_all_match git checkout merge-left &&
+	test_all_match test_must_fail git merge merge-right &&
+
+	test_all_match git diff &&
+	test_all_match git diff --staged
 '
 
 # NEEDSWORK: sparse-checkout behaves differently from full-checkout when
@@ -1058,7 +1098,9 @@ test_expect_success 'read-tree --merge with directory-file conflicts' '
 test_expect_success 'merge, cherry-pick, and rebase' '
 	init_repos &&
 
-	for OPERATION in "merge -m merge" cherry-pick "rebase --apply" "rebase --merge"
+	# microsoft/git specific: we need to use "quiet" mode
+	# to avoid different stderr for some rebases.
+	for OPERATION in "merge -m merge" cherry-pick "rebase -q --apply" "rebase -q --merge"
 	do
 		test_all_match git checkout -B temp update-deep &&
 		test_all_match git $OPERATION update-folder1 &&
@@ -1545,6 +1587,11 @@ test_expect_success 'sparse-index is not expanded' '
 	ensure_not_expanded reset --merge update-deep &&
 	ensure_not_expanded reset --hard &&
 
+	echo a test change >>sparse-index/README.md &&
+	ensure_not_expanded diff &&
+	git -C sparse-index add README.md &&
+	ensure_not_expanded diff --staged &&
+
 	ensure_not_expanded reset base -- deep/a &&
 	ensure_not_expanded reset base -- nonexistent-file &&
 	ensure_not_expanded reset deepest -- deep &&
@@ -1875,6 +1922,46 @@ test_expect_success 'sparse index is not expanded: sparse-checkout' '
 	# or not.
 	ensure_not_expanded sparse-checkout set --skip-checks deep/deeper1 &&
 	ensure_not_expanded sparse-checkout set
+'
+
+# NEEDSWORK: although the full repository's index is _not_ expanded as part of
+# stash, a temporary index, which is _not_ sparse, is created when stashing and
+# applying a stash of untracked files. As a result, the test reports that it
+# finds an instance of `ensure_full_index`, but it does not carry with it the
+# performance implications of expanding the full repository index.
+test_expect_success 'sparse index is not expanded: stash -u' '
+	init_repos &&
+
+	mkdir -p sparse-index/folder1 &&
+	echo >>sparse-index/README.md &&
+	echo >>sparse-index/a &&
+	echo >>sparse-index/folder1/new &&
+
+	GIT_TRACE2_EVENT="$(pwd)/trace2.txt" GIT_TRACE2_EVENT_NESTING=10 \
+		git -C sparse-index stash -u &&
+	test_region index ensure_full_index trace2.txt &&
+
+	GIT_TRACE2_EVENT="$(pwd)/trace2.txt" GIT_TRACE2_EVENT_NESTING=10 \
+		git -C sparse-index stash pop &&
+	test_region index ensure_full_index trace2.txt
+'
+
+# NEEDSWORK: similar to `git add`, untracked files outside of the sparse
+# checkout definition are successfully stashed and unstashed.
+test_expect_success 'stash -u outside sparse checkout definition' '
+	init_repos &&
+
+	write_script edit-contents <<-\EOF &&
+	echo text >>$1
+	EOF
+
+	run_on_sparse mkdir -p folder1 &&
+	run_on_all ../edit-contents folder1/new &&
+	test_all_match git stash -u &&
+	test_all_match git status --porcelain=v2 &&
+
+	test_all_match git stash pop -q &&
+	test_all_match git status --porcelain=v2
 '
 
 # NEEDSWORK: a sparse-checkout behaves differently from a full checkout
@@ -2573,6 +2660,22 @@ test_expect_success 'cat-file --batch' '
 	EOF
 	test_all_match git cat-file --batch <in &&
 	ensure_expanded cat-file --batch <in
+'
+
+test_expect_success 'ensure_full_index_with_reason' '
+	init_repos &&
+
+	GIT_TRACE2_EVENT="$(pwd)/ls-files-trace" \
+		git -C sparse-index ls-files --no-sparse HEAD &&
+	test_trace2_data "sparse-index" "expansion-reason" "ls-files" <ls-files-trace &&
+
+	mkdir -p sparse-index/folder2 &&
+	echo >sparse-index/folder2/a &&
+	GIT_TRACE2_EVENT="$(pwd)/status-trace" \
+		git -C sparse-index status &&
+	test_trace2_data "sparse-index" "skip-worktree sparsedir" "folder2/" <status-trace &&
+	test_trace2_data "sparse-index" "expansion-reason" \
+		"failed to clear skip-worktree while sparse" <status-trace
 '
 
 test_done

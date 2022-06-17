@@ -66,7 +66,7 @@ static void merge_all(void)
 {
 	int i;
 	/* TODO: audit for interaction with sparse-index. */
-	ensure_full_index(the_repository->index);
+	ensure_full_index_unaudited(the_repository->index);
 	for (i = 0; i < the_repository->index->cache_nr; i++) {
 		const struct cache_entry *ce = the_repository->index->cache[i];
 		if (!ce_stage(ce))
@@ -98,7 +98,7 @@ int cmd_merge_index(int argc,
 	repo_read_index(the_repository);
 
 	/* TODO: audit for interaction with sparse-index. */
-	ensure_full_index(the_repository->index);
+	ensure_full_index_unaudited(the_repository->index);
 
 	i = 1;
 	if (!strcmp(argv[i], "-o")) {

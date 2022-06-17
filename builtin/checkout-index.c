@@ -156,7 +156,7 @@ static int checkout_all(struct index_state *index, const char *prefix, int prefi
 			 * first entry inside the expanded sparse directory).
 			 */
 			if (ignore_skip_worktree) {
-				ensure_full_index(index);
+				ensure_full_index_with_reason(index, "checkout-index");
 				ce = index->cache[i];
 			}
 		}
