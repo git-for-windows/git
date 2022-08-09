@@ -260,3 +260,5 @@ Release/
 CMakeSettings.json
 /contrib/libgit-rs/target
 /contrib/libgit-sys/target
+/.github/codeql/.cache/
+/.github/codeql/codeql-pack.lock.yml
