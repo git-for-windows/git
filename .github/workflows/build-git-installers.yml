@@ -726,12 +726,83 @@ jobs:
             *.deb
   # End build and sign Debian package
 
+  # Validate installers
+  validate-installers:
+    name: Validate installers
+    strategy:
+      matrix:
+        component:
+          - os: ubuntu-latest
+            artifact: linux-artifacts
+            command: git
+          - os: macos-latest
+            artifact: macos-artifacts
+            command: git
+          - os: macos-latest
+            artifact: macos-artifacts
+            command: git
+          - os: windows-latest
+            artifact: win-installer-x86_64
+            command: $PROGRAMFILES\Git\cmd\git.exe
+          - os: windows-11-arm
+            artifact: win-installer-aarch64
+            command: $PROGRAMFILES\Git\cmd\git.exe
+    runs-on: ${{ matrix.component.os }}
+    needs: [prereqs, windows_artifacts, create-macos-artifacts, create-linux-artifacts]
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.component.artifact }}
+
+      - name: Install Windows
+        if: contains(matrix.component.artifact, 'win-installer')
+        shell: pwsh
+        run: |
+          $exePath = Get-ChildItem -Path ./*.exe | %{$_.FullName}
+          Start-Process -Wait -FilePath "$exePath" -ArgumentList "/SILENT /VERYSILENT /NORESTART /SUPPRESSMSGBOXES /ALLOWDOWNGRADE=1"
+
+      - name: Install Linux
+        if: contains(matrix.component.artifact, 'linux')
+        run: |
+          debpath=$(find ./*.deb)
+          sudo apt install $debpath
+
+      - name: Install macOS
+        if: contains(matrix.component.artifact, 'macos')
+        run: |
+          # avoid letting Homebrew's `git` in `/opt/homebrew/bin` override `/usr/local/bin/git`
+          arch="$(uname -m)"
+          test arm64 != "$arch" ||
+          brew uninstall git
+
+          pkgpath=$(find ./*universal*.pkg)
+          sudo installer -pkg $pkgpath -target /
+
+      - name: Validate
+        shell: bash
+        run: |
+          "${{ matrix.component.command }}" --version | sed 's/git version //' >actual
+          echo "${{ needs.prereqs.outputs.tag_version }}" | sed 's/-rc/.rc/g' >expect
+          cmp expect actual || exit 1
+
+      - name: Validate universal binary CPU architecture
+        if: contains(matrix.component.os, 'macos')
+        shell: bash
+        run: |
+          set -ex
+          git version --build-options >actual
+          cat actual
+          grep "cpu: $(uname -m)" actual
+  # End validate installers
+
   create-github-release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
       id-token: write # required for Azure login via OIDC
     needs:
+      - validate-installers
       - create-linux-artifacts
       - create-macos-artifacts
       - windows_artifacts
