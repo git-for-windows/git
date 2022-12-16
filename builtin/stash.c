@@ -348,7 +348,7 @@ static int reset_tree(struct object_id *i_tree, int update, int reset)
 	memset(&opts, 0, sizeof(opts));
 
 	tree = parse_tree_indirect(i_tree);
-	if (parse_tree(tree))
+	if (!tree || parse_tree(tree))
 		return -1;
 
 	init_tree_desc(t, &tree->object.oid, tree->buffer, tree->size);
