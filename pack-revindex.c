@@ -211,7 +211,7 @@ static int load_revindex_from_disk(const struct git_hash_algo *algo,
 	int fd, ret = 0;
 	struct stat st;
 	void *data = NULL;
-	size_t revindex_size;
+	size_t revindex_size = 0;
 	struct revindex_header *hdr;
 
 	if (git_env_bool(GIT_TEST_REV_INDEX_DIE_ON_DISK, 0))
