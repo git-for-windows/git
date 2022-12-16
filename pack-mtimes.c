@@ -28,7 +28,7 @@ static int load_pack_mtimes_file(char *mtimes_file,
 	int fd, ret = 0;
 	struct stat st;
 	uint32_t *data = NULL;
-	size_t mtimes_size, expected_size;
+	size_t mtimes_size = 0, expected_size;
 	struct mtimes_header header;
 
 	fd = git_open(mtimes_file);
