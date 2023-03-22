@@ -46,3 +46,21 @@ jobs:
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
+        with:
+          upload: False
+          output: sarif-results
+
+      - name: debug
+        shell: bash
+        run: ls -la sarif-results
+
+      - name: publish sarif for debugging
+        uses: actions/upload-artifact@v4
+        with:
+          name: sarif-results
+          path: sarif-results
+
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+         sarif_file: sarif-results/cpp.sarif
