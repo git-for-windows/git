@@ -105,6 +105,11 @@
 //                       The GVFS Protocol defines this value as a way to
 //                       request cached packfiles NEWER THAN this timestamp.
 //
+//                 --max-retries=<n>     // defaults to "6"
+//
+//                       Number of retries after transient network errors.
+//                       Set to zero to disable such retries.
+//
 //     server
 //
 //            Interactive/sub-process mode.  Listen for a series of commands
@@ -3780,6 +3785,8 @@ static enum gh__error_code do_sub_cmd__prefetch(int argc, const char **argv)
 	static const char *since_str;
 	static struct option prefetch_options[] = {
 		OPT_STRING(0, "since", &since_str, N_("since"), N_("seconds since epoch")),
+		OPT_INTEGER('r', "max-retries", &gh__cmd_opts.max_retries,
+			    N_("retries for transient network errors")),
 		OPT_END(),
 	};
 
@@ -3799,6 +3806,8 @@ static enum gh__error_code do_sub_cmd__prefetch(int argc, const char **argv)
 		if (my_parse_since(since_str, &seconds_since_epoch))
 			die("could not parse 'since' field");
 	}
+	if (gh__cmd_opts.max_retries < 0)
+		gh__cmd_opts.max_retries = 0;
 
 	finish_init(1);
 
