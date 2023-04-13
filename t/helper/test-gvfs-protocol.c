@@ -1154,6 +1154,82 @@ static int ct_pack_sort_compare(const void *_a, const void *_b)
 	return (a->ph.timestamp < b->ph.timestamp) ? -1 : (a->ph.timestamp != b->ph.timestamp);
 }
 
+#define MY_MIN(a, b) ((a) < (b) ? (a) : (b))
+
+/*
+ * Like copy.c:copy_fd(), but corrupt part of the trailing SHA (if the
+ * given mayhem key is defined) as we copy it to the destination file.
+ *
+ * We don't know (or care) if the input file is a pack file or idx
+ * file, just that the final bytes are part of a SHA that we can
+ * corrupt.
+ */
+static int copy_fd_with_checksum_mayhem(int ifd, int ofd,
+					const char *mayhem_key,
+					ssize_t nr_wrong_bytes)
+{
+	off_t in_cur, in_len;
+	ssize_t bytes_to_copy;
+	ssize_t bytes_remaining_to_copy;
+	char buffer[8192];
+
+	if (!mayhem_key || !*mayhem_key || !nr_wrong_bytes ||
+	    !string_list_has_string(&mayhem_list, mayhem_key))
+		return copy_fd(ifd, ofd);
+
+	in_cur = lseek(ifd, 0, SEEK_CUR);
+	if (in_cur < 0)
+		return in_cur;
+
+	in_len = lseek(ifd, 0, SEEK_END);
+	if (in_len < 0)
+		return in_len;
+
+	if (lseek(ifd, in_cur, SEEK_SET) < 0)
+		return -1;
+
+	/* Copy the entire file except for the last few bytes. */
+
+	bytes_to_copy = (ssize_t)in_len - nr_wrong_bytes;
+	bytes_remaining_to_copy = bytes_to_copy;
+	while (bytes_remaining_to_copy) {
+		ssize_t to_read = MY_MIN((ssize_t)sizeof(buffer), bytes_remaining_to_copy);
+		ssize_t len = xread(ifd, buffer, to_read);
+
+		if (!len)
+			return -1; /* error on unexpected EOF */
+		if (len < 0)
+			return -1;
+		if (write_in_full(ofd, buffer, len) < 0)
+			return -1;
+
+		bytes_remaining_to_copy -= len;
+	}
+
+	/* Read the trailing bytes so that we can alter them before copying. */
+
+	while (nr_wrong_bytes) {
+		ssize_t to_read = MY_MIN((ssize_t)sizeof(buffer), nr_wrong_bytes);
+		ssize_t len = xread(ifd, buffer, to_read);
+		ssize_t k;
+
+		if (!len)
+			return -1; /* error on unexpected EOF */
+		if (len < 0)
+			return -1;
+
+		for (k = 0; k < len; k++)
+			buffer[k] ^= 0xff;
+
+		if (write_in_full(ofd, buffer, len) < 0)
+			return -1;
+
+		nr_wrong_bytes -= len;
+	}
+
+	return 0;
+}
+
 static enum worker_result send_ct_item(const struct ct_pack_item *item)
 {
 	struct ph ph_le;
@@ -1175,7 +1251,8 @@ static enum worker_result send_ct_item(const struct ct_pack_item *item)
 	trace2_printf("%s: sending prefetch pack '%s'", TR2_CAT, item->path_pack.buf);
 
 	fd_pack = git_open_cloexec(item->path_pack.buf, O_RDONLY);
-	if (fd_pack == -1 || copy_fd(fd_pack, 1)) {
+	if (fd_pack == -1 ||
+	    copy_fd_with_checksum_mayhem(fd_pack, 1, "bad_prefetch_pack_sha", 4)) {
 		logerror("could not send packfile");
 		wr = WR_IO_ERROR;
 		goto done;
@@ -1185,7 +1262,8 @@ static enum worker_result send_ct_item(const struct ct_pack_item *item)
 		trace2_printf("%s: sending prefetch idx '%s'", TR2_CAT, item->path_idx.buf);
 
 		fd_idx = git_open_cloexec(item->path_idx.buf, O_RDONLY);
-		if (fd_idx == -1 || copy_fd(fd_idx, 1)) {
+		if (fd_idx == -1 ||
+		    copy_fd_with_checksum_mayhem(fd_idx, 1, "bad_prefetch_idx_sha", 4)) {
 			logerror("could not send idx");
 			wr = WR_IO_ERROR;
 			goto done;
