@@ -1389,14 +1389,11 @@ test_expect_success 'prefetch corrupt pack without idx' '
 
 # Send corrupt PACK files with IDX files.  Since the cache server
 # sends both, `gvfs-helper` might fail to verify both of them.
-test_expect_failure 'prefetch corrupt pack with corrupt idx' '
+test_expect_success 'prefetch corrupt pack with corrupt idx' '
 	test_when_finished "per_test_cleanup" &&
 	start_gvfs_protocol_server_with_mayhem \
 		bad_prefetch_pack_sha &&
 
-	# TODO This is a false-positive since `gvfs-helper`
-	# TODO does not verify either of them when a pair
-	# TODO is sent.
 	test_must_fail \
 		git -C "$REPO_T1" gvfs-helper \
 			--cache-server=disable \

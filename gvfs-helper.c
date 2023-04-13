@@ -2134,7 +2134,6 @@ static void extract_packfile_from_multipack(
 {
 	struct ph ph;
 	struct tempfile *tempfile_pack = NULL;
-	struct tempfile *tempfile_idx = NULL;
 	int result = -1;
 	int b_no_idx_in_multipack;
 	struct object_id packfile_checksum;
@@ -2168,16 +2167,14 @@ static void extract_packfile_from_multipack(
 	b_no_idx_in_multipack = (ph.idx_len == maximum_unsigned_value_of_type(uint64_t) ||
 				 ph.idx_len == 0);
 
-	if (b_no_idx_in_multipack) {
-		my_create_tempfile(status, 0, "pack", &tempfile_pack, NULL, NULL);
-		if (!tempfile_pack)
-			goto done;
-	} else {
-		/* create a pair of tempfiles with the same basename */
-		my_create_tempfile(status, 0, "pack", &tempfile_pack, "idx", &tempfile_idx);
-		if (!tempfile_pack || !tempfile_idx)
-			goto done;
-	}
+	/*
+	 * We are going to harden `gvfs-helper` here and ignore the .idx file
+	 * if it is provided and always compute it locally so that we get the
+	 * added verification that `git index-pack` provides.
+	 */
+	my_create_tempfile(status, 0, "pack", &tempfile_pack, NULL, NULL);
+	if (!tempfile_pack)
+		goto done;
 
 	/*
 	 * Copy the current packfile from the open stream and capture
@@ -2204,38 +2201,31 @@ static void extract_packfile_from_multipack(
 
 	oid_to_hex_r(hex_checksum, &packfile_checksum);
 
-	if (b_no_idx_in_multipack) {
-		/*
-		 * The server did not send the corresponding .idx, so
-		 * we have to compute it ourselves.
-		 */
-		strbuf_addbuf(&temp_path_idx, &temp_path_pack);
-		strbuf_strip_suffix(&temp_path_idx, ".pack");
-		strbuf_addstr(&temp_path_idx, ".idx");
+	/*
+	 * Always compute the .idx file from the .pack file.
+	 */
+	strbuf_addbuf(&temp_path_idx, &temp_path_pack);
+	strbuf_strip_suffix(&temp_path_idx, ".pack");
+	strbuf_addstr(&temp_path_idx, ".idx");
 
-		my_run_index_pack(params, status,
-				  &temp_path_pack, &temp_path_idx,
-				  NULL);
-		if (status->ec != GH__ERROR_CODE__OK)
-			goto done;
+	my_run_index_pack(params, status,
+			  &temp_path_pack, &temp_path_idx,
+			  NULL);
+	if (status->ec != GH__ERROR_CODE__OK)
+		goto done;
 
-	} else {
+	if (!b_no_idx_in_multipack) {
 		/*
 		 * Server sent the .idx immediately after the .pack in the
-		 * data stream.  I'm tempted to verify it, but that defeats
-		 * the purpose of having it cached...
+		 * data stream.  Skip over it.
 		 */
-		if (my_copy_fd_len(fd_multipack, get_tempfile_fd(tempfile_idx),
-				   ph.idx_len) < 0) {
+		if (lseek(fd_multipack, ph.idx_len, SEEK_CUR) < 0) {
 			strbuf_addf(&status->error_message,
-				    "could not extract index[%d] in multipack",
+				    "could not skip index[%d] in multipack",
 				    k);
 			status->ec = GH__ERROR_CODE__COULD_NOT_INSTALL_PREFETCH;
 			goto done;
 		}
-
-		strbuf_addstr(&temp_path_idx, get_tempfile_path(tempfile_idx));
-		close_tempfile_gently(tempfile_idx);
 	}
 
 	strbuf_addf(&buf_timestamp, "%u", (unsigned int)ph.timestamp);
@@ -2251,7 +2241,6 @@ static void extract_packfile_from_multipack(
 
 done:
 	delete_tempfile(&tempfile_pack);
-	delete_tempfile(&tempfile_idx);
 	strbuf_release(&temp_path_pack);
 	strbuf_release(&temp_path_idx);
 	strbuf_release(&final_path_pack);
