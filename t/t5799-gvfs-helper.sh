@@ -1321,7 +1321,7 @@ test_expect_success 'duplicate and busy: vfs- packfile' '
 # content matches the requested SHA.
 #
 test_expect_success 'catch corrupted loose object' '
-#	test_when_finished "per_test_cleanup" &&
+	test_when_finished "per_test_cleanup" &&
 	start_gvfs_protocol_server_with_mayhem corrupt_loose &&
 
 	test_must_fail \
@@ -1342,6 +1342,69 @@ test_expect_success 'catch corrupted loose object' '
 
 	! verify_objects_in_shared_cache "$OID_ONE_BLOB_FILE" &&
 	git -C "$REPO_T1" fsck
+'
+
+#################################################################
+# Ensure that we can detect when we receive a corrupted packfile
+# from the server.  This is not concerned with network IO errors,
+# but rather cases when the cache or origin server generates or
+# sends an invalid packfile.
+#
+# For example, if the server throws an exception and writes the
+# stack trace to the socket rather than or in addition to the
+# packfile content.
+#
+# Or for example, if the packfile on the server's disk is corrupt
+# and it sends it correctly, but the original data was already
+# garbage, so the client still has garbage (and retrying won't
+# help).
+#################################################################
+
+# Send corrupt PACK files w/o IDX files (so that `gvfs-helper`
+# must use `index-pack` to create it.  (And as a side-effect,
+# validate the PACK file is not corrupt.)
+test_expect_success 'prefetch corrupt pack without idx' '
+	test_when_finished "per_test_cleanup" &&
+	start_gvfs_protocol_server_with_mayhem \
+		bad_prefetch_pack_sha \
+		no_prefetch_idx &&
+
+	test_must_fail \
+		git -C "$REPO_T1" gvfs-helper \
+			--cache-server=disable \
+			--remote=origin \
+			--no-progress \
+			prefetch \
+			--max-retries=0 \
+			--since="1000000000" \
+			>OUT.output 2>OUT.stderr &&
+
+	stop_gvfs_protocol_server &&
+
+	# Verify corruption detected in pack when building
+	# local idx file for it.
+
+	test_grep "error: .* index-pack failed" OUT.stderr
+'
+
+# Send corrupt PACK files with IDX files.  Since the cache server
+# sends both, `gvfs-helper` might fail to verify both of them.
+test_expect_success 'prefetch corrupt pack with corrupt idx' '
+	test_when_finished "per_test_cleanup" &&
+	start_gvfs_protocol_server_with_mayhem \
+		bad_prefetch_pack_sha &&
+
+	test_must_fail \
+		git -C "$REPO_T1" gvfs-helper \
+			--cache-server=disable \
+			--remote=origin \
+			--no-progress \
+			prefetch \
+			--max-retries=0 \
+			--since="1000000000" \
+			>OUT.output 2>OUT.stderr &&
+
+	stop_gvfs_protocol_server
 '
 
 test_done
