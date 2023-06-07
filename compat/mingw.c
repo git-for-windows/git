@@ -23,6 +23,7 @@
 #include "win32/fscache.h"
 #include "../attr.h"
 #include "../string-list.h"
+#include "win32/wsl.h"
 #include "dir.h"
 #include "gettext.h"
 #define SECURITY_WIN32
@@ -889,6 +890,11 @@ int mingw_open (const char *filename, int oflags, ...)
 
 	fd = open_fn(wfilename, oflags, mode);
 
+	if ((oflags & O_CREAT) && fd >= 0 && are_wsl_compatible_mode_bits_enabled()) {
+		_mode_t wsl_mode = S_IFREG | (mode&0777);
+		set_wsl_mode_bits_by_handle((HANDLE)_get_osfhandle(fd), wsl_mode);
+	}
+
 	/*
 	 * Internally, `_wopen()` uses the `CreateFile()` API with CREATE_NEW,
 	 * which may error out with ERROR_ACCESS_DENIED and an NtStatus of
@@ -904,6 +910,7 @@ int mingw_open (const char *filename, int oflags, ...)
 	if (fd < 0 && create && GetLastError() == ERROR_ACCESS_DENIED &&
 	    INIT_PROC_ADDR(RtlGetLastNtStatus) && RtlGetLastNtStatus() == STATUS_DELETE_PENDING)
 		errno = EEXIST;
+
 	if (fd < 0 && (oflags & O_ACCMODE) != O_RDONLY && errno == EACCES) {
 		DWORD attrs = GetFileAttributesW(wfilename);
 		if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY))
@@ -1203,6 +1210,11 @@ int mingw_lstat(const char *file_name, struct stat *buf)
 		filetime_to_timespec(&(fdata.ftLastAccessTime), &(buf->st_atim));
 		filetime_to_timespec(&(fdata.ftLastWriteTime), &(buf->st_mtim));
 		filetime_to_timespec(&(fdata.ftCreationTime), &(buf->st_ctim));
+		if (S_ISREG(buf->st_mode) &&
+		    are_wsl_compatible_mode_bits_enabled()) {
+			copy_wsl_mode_bits_from_disk(wfilename, -1,
+						     &buf->st_mode);
+		}
 		return 0;
 	}
 
@@ -1254,6 +1266,8 @@ static int get_file_info_by_handle(HANDLE hnd, struct stat *buf)
 	filetime_to_timespec(&(fdata.ftLastAccessTime), &(buf->st_atim));
 	filetime_to_timespec(&(fdata.ftLastWriteTime), &(buf->st_mtim));
 	filetime_to_timespec(&(fdata.ftCreationTime), &(buf->st_ctim));
+	if (are_wsl_compatible_mode_bits_enabled())
+	    get_wsl_mode_bits_by_handle(hnd, &buf->st_mode);
 	return 0;
 }
 
