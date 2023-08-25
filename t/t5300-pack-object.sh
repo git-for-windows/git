@@ -374,11 +374,10 @@ test_expect_success 'complain about index name' '
 	test -f test-complain-0.idx &&
 	test -f test-complain-0.rev &&
 
-	# Non .idx suffix
+	# Non .idx suffix -- implicitly omits the .rev
 	cat test-1-${packname_1}.pack >test-complain-1.pack &&
-	test_must_fail git index-pack -o test-complain-1.idx-suffix --rev-index test-complain-1.pack 2>err &&
-	grep "does not end" err &&
-	! test -f test-complain-1.idx-suffix &&
+	git index-pack -o test-complain-1.idx-suffix --rev-index test-complain-1.pack &&
+	test -f test-complain-1.idx-suffix &&
 	! test -f test-complain-1.rev
 '
 
