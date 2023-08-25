@@ -357,6 +357,31 @@ test_expect_success 'build pack index for an existing pack' '
 	:
 '
 
+# The `--rev-index` option of `git index-pack` is now the default, so
+# a `foo.rev` REV file will be created when a `foo.idx` IDX file is
+# created.  Normally, these pathnames are based upon the `foo.pack`
+# PACK file pathname.
+#
+# However, the `-o` option lets you set the pathname of the IDX file
+# indepdent of the PACK file.
+#
+# Verify what happens if these suffixes are changed.
+#
+test_expect_success 'complain about index name' '
+	# Normal case { .pack, .idx, .rev }
+	cat test-1-${packname_1}.pack >test-complain-0.pack &&
+	git index-pack -o test-complain-0.idx --rev-index test-complain-0.pack &&
+	test -f test-complain-0.idx &&
+	test -f test-complain-0.rev &&
+
+	# Non .idx suffix
+	cat test-1-${packname_1}.pack >test-complain-1.pack &&
+	test_must_fail git index-pack -o test-complain-1.idx-suffix --rev-index test-complain-1.pack 2>err &&
+	grep "does not end" err &&
+	! test -f test-complain-1.idx-suffix &&
+	! test -f test-complain-1.rev
+'
+
 test_expect_success 'unpacking with --strict' '
 
 	for j in a b c d e f g
