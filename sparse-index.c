@@ -407,7 +407,7 @@ void expand_index(struct index_state *istate, struct pattern_list *pl)
 		if (pl &&
 		    path_matches_pattern_list(ce->name, ce->ce_namelen,
 					      NULL, &dtype,
-					      pl, istate) == NOT_MATCHED) {
+					      pl, full) == NOT_MATCHED) {
 			set_index_entry(full, full->cache_nr++, ce);
 			continue;
 		}
@@ -435,6 +435,7 @@ void expand_index(struct index_state *istate, struct pattern_list *pl)
 	}
 
 	/* Copy back into original index. */
+	istate->name_hash_initialized = full->name_hash_initialized;
 	memcpy(&istate->name_hash, &full->name_hash, sizeof(full->name_hash));
 	memcpy(&istate->dir_hash, &full->dir_hash, sizeof(full->dir_hash));
 	istate->sparse_index = pl ? INDEX_PARTIALLY_SPARSE : INDEX_EXPANDED;
