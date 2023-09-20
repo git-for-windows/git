@@ -317,6 +317,22 @@ test_expect_success 'root directory cannot be sparse' '
 	test_cmp expect actual
 '
 
+test_expect_success 'sparse-checkout with untracked files and dirs' '
+	init_repos &&
+
+	# Empty directories outside sparse cone are deleted
+	run_on_sparse mkdir -p deep/empty &&
+	test_sparse_match git sparse-checkout set folder1 &&
+	test_must_be_empty sparse-checkout-err &&
+	run_on_sparse test_path_is_missing deep &&
+
+	# Untracked files outside sparse cone are not deleted
+	run_on_sparse touch folder1/another &&
+	test_sparse_match git sparse-checkout set folder2 &&
+	grep "directory ${SQ}folder1/${SQ} contains untracked files" sparse-checkout-err &&
+	run_on_sparse test_path_exists folder1/another
+'
+
 test_expect_success 'status with options' '
 	init_repos &&
 	test_sparse_match ls &&
