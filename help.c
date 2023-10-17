@@ -769,6 +769,22 @@ char *help_unknown_cmd(const char *cmd)
 	exit(1);
 }
 
+#if defined(__APPLE__)
+static const char *git_host_cpu(void) {
+	if (!strcmp(GIT_HOST_CPU, "universal")) {
+#if defined(__x86_64__)
+		return "x86_64";
+#elif defined(__aarch64__)
+		return "arm64";
+#endif
+	}
+
+	return GIT_HOST_CPU;
+}
+#undef GIT_HOST_CPU
+#define GIT_HOST_CPU git_host_cpu()
+#endif
+
 void get_version_info(struct strbuf *buf, int show_build_options)
 {
 	/*
