@@ -718,11 +718,13 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write # required for Azure login via OIDC
     needs:
       - create-linux-artifacts
       - create-macos-artifacts
       - windows_artifacts
       - prereqs
+    environment: release
     if: |
       success() ||
         (needs.create-linux-artifacts.result == 'skipped' &&
@@ -764,6 +766,25 @@ jobs:
         with:
           name: linux-artifacts
           path: deb-package
+
+      - name: Log into Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Check out repository (for akv-secret Action)
+        uses: actions/checkout@v4
+        with:
+          path: git
+
+      - name: Download Linux GPG public key signature file
+        uses: ./git/.github/actions/akv-secret
+        with:
+          vault: ${{ secrets.AZURE_VAULT }}
+          secrets: |
+            ${{ secrets.LINUX_GPG_PUBLIC_SECRET_NAME }} base64> deb-package/msft-git-public.asc
 
       - uses: actions/github-script@v6
         with:
