@@ -16,6 +16,8 @@
 #include "strbuf.h"
 #include "strvec.h"
 #include "trace2.h"
+#include "tree.h"
+#include "tree-walk.h"
 
 static const char * const survey_usage[] = {
 	N_("(EXPERIMENTAL!) git survey <options>"),
@@ -69,11 +71,162 @@ struct survey_report_ref_summary {
 	size_t len_sum_remote_refnames;
 };
 
+/*
+ * HBIN -- hex binning (histogram bucketing).
+ *
+ * We create histograms for various counts and sums.  Since we have a
+ * wide range of values (objects range in size from 1 to 4G bytes), a
+ * linear bucketing is not interesting.  Instead, lets use a
+ * log16()-based bucketing.  This gives us a better spread on the low
+ * and middle range and a coarse bucketing on the high end.
+ *
+ * The idea here is that it doesn't matter if you have n 1GB blobs or
+ * n/2 1GB blobs and n/2 1.5GB blobs -- either way you have a scaling
+ * problem that we want to report on.
+ */
+#define HBIN_LEN (sizeof(unsigned long) * 2)
+#define HBIN_MASK (0xF)
+#define HBIN_SHIFT (4)
+
+static int hbin(unsigned long value)
+{
+	for (size_t k = 0; k < HBIN_LEN; k++) {
+		if ((value & ~(HBIN_MASK)) == 0)
+			return k;
+		value >>= HBIN_SHIFT;
+	}
+
+	return 0; /* should not happen */
+}
+
+/*
+ * QBIN -- base4 binning (histogram bucketing).
+ *
+ * This is the same idea as the above, but we want better granularity
+ * in the low end and don't expect as many large values.
+ */
+#define QBIN_LEN (sizeof(unsigned long) * 4)
+#define QBIN_MASK (0x3)
+#define QBIN_SHIFT (2)
+
+static int qbin(unsigned long value)
+{
+	for (size_t k = 0; k < QBIN_LEN; k++) {
+		if ((value & ~(QBIN_MASK)) == 0)
+			return k;
+		value >>= (QBIN_SHIFT);
+	}
+
+	return 0; /* should not happen */
+}
+
+/*
+ * histogram bin for objects.
+ */
+struct obj_hist_bin {
+	uint64_t sum_size;      /* sum(object_size) for all objects in this bin */
+	uint64_t sum_disk_size; /* sum(on_disk_size) for all objects in this bin */
+	uint32_t cnt_seen;      /* number seen in this bin */
+};
+
+static void incr_obj_hist_bin(struct obj_hist_bin *pbin,
+			       unsigned long object_length,
+			       off_t disk_sizep)
+{
+	pbin->sum_size += object_length;
+	pbin->sum_disk_size += disk_sizep;
+	pbin->cnt_seen++;
+}
+
+/*
+ * Common fields for any type of object.
+ */
+struct survey_stats_base_object {
+	uint32_t cnt_seen;
+
+	uint32_t cnt_missing; /* we may have a partial clone. */
+
+	/*
+	 * Number of objects grouped by where they are stored on disk.
+	 * This is a function of how the ODB is packed.
+	 */
+	uint32_t cnt_cached;   /* see oi.whence */
+	uint32_t cnt_loose;    /* see oi.whence */
+	uint32_t cnt_packed;   /* see oi.whence */
+	uint32_t cnt_dbcached; /* see oi.whence */
+
+	uint64_t sum_size; /* sum(object_size) */
+	uint64_t sum_disk_size; /* sum(disk_size) */
+
+	/*
+	 * A histogram of the count of objects, the observed size, and
+	 * the on-disk size grouped by the observed size.
+	 */
+	struct obj_hist_bin size_hbin[HBIN_LEN];
+};
+
+/*
+ * PBIN -- parent vector binning (histogram bucketing).
+ *
+ * We create a histogram based upon the number of parents
+ * in a commit.  This is a simple linear vector.  It starts
+ * at zero for "initial" commits.
+ *
+ * If a commit has more parents, just put it in the last bin.
+ */
+#define PBIN_VEC_LEN (32)
+
+struct survey_stats_commits {
+	struct survey_stats_base_object base;
+
+	/*
+	 * Count of commits with k parents.
+	 */
+	uint32_t parent_cnt_pbin[PBIN_VEC_LEN];
+};
+
+/*
+ * Stats for reachable trees.
+ */
+struct survey_stats_trees {
+	struct survey_stats_base_object base;
+
+	/*
+	 * In the following, nr_entries refers to the number of files or
+	 * subdirectories in a tree.  We are interested in how wide the
+	 * tree is and if the repo has gigantic directories.
+	 */
+	uint64_t max_entries; /* max(nr_entries) -- the width of the largest tree */
+
+	/*
+	 * Computing the sum of the number of entries across all trees
+	 * is probably not that interesting.
+	 */
+	uint64_t sum_entries; /* sum(nr_entries) -- sum across all trees */
+
+	/*
+	 * A histogram of the count of trees, the observed size, and
+	 * the on-disk size grouped by the number of entries in the tree.
+	 */
+	struct obj_hist_bin entry_qbin[QBIN_LEN];
+};
+
+/*
+ * Stats for reachable blobs.
+ */
+struct survey_stats_blobs {
+	struct survey_stats_base_object base;
+};
+
 struct survey_report_object_summary {
 	size_t commits_nr;
 	size_t tags_nr;
 	size_t trees_nr;
 	size_t blobs_nr;
+
+	struct survey_stats_commits commits;
+	struct survey_stats_trees   trees;
+	struct survey_stats_blobs   blobs;
 };
 
 /**
@@ -363,6 +516,98 @@ static void print_table_plaintext(struct survey_table *table)
 	free(column_widths);
 }
 
+static void pretty_print_bin_table(const char *title_caption,
+				   const char *bucket_header,
+				   struct obj_hist_bin *bin,
+				   uint64_t bin_len, int bin_shift, uint64_t bin_mask)
+{
+	struct survey_table table = SURVEY_TABLE_INIT;
+	struct strbuf bucket = STRBUF_INIT, cnt_seen = STRBUF_INIT;
+	struct strbuf sum_size = STRBUF_INIT, sum_disk_size = STRBUF_INIT;
+	uint64_t lower = 0;
+	uint64_t upper = bin_mask;
+
+	table.table_name = title_caption;
+	strvec_pushl(&table.header, bucket_header, "Count", "Size", "Disk Size", NULL);
+
+	for (size_t k = 0; k < bin_len; k++) {
+		struct obj_hist_bin *p = bin + k;
+		uintmax_t lower_k = lower;
+		uintmax_t upper_k = upper;
+
+		lower = upper+1;
+		upper = (upper << bin_shift) + bin_mask;
+
+		if (!p->cnt_seen)
+			continue;
+
+		strbuf_reset(&bucket);
+		strbuf_addf(&bucket, "%"PRIuMAX"..%"PRIuMAX, lower_k, upper_k);
+
+		strbuf_reset(&cnt_seen);
+		strbuf_addf(&cnt_seen, "%"PRIuMAX, (uintmax_t)p->cnt_seen);
+
+		strbuf_reset(&sum_size);
+		strbuf_addf(&sum_size, "%"PRIuMAX, (uintmax_t)p->sum_size);
+
+		strbuf_reset(&sum_disk_size);
+		strbuf_addf(&sum_disk_size, "%"PRIuMAX, (uintmax_t)p->sum_disk_size);
+
+		insert_table_rowv(&table, bucket.buf,
+			     cnt_seen.buf, sum_size.buf, sum_disk_size.buf, NULL);
+	}
+	strbuf_release(&bucket);
+	strbuf_release(&cnt_seen);
+	strbuf_release(&sum_size);
+	strbuf_release(&sum_disk_size);
+
+	print_table_plaintext(&table);
+	clear_table(&table);
+}
+
+static void survey_report_hbin(const char *title_caption,
+			       struct obj_hist_bin *bin)
+{
+	pretty_print_bin_table(title_caption,
+			       "Byte Range",
+			       bin,
+			       HBIN_LEN, HBIN_SHIFT, HBIN_MASK);
+}
+
+static void survey_report_tree_lengths(struct survey_context *ctx)
+{
+	pretty_print_bin_table(_("TREE HISTOGRAM BY NUMBER OF ENTRIES"),
+			       "Entry Range",
+			       ctx->report.reachable_objects.trees.entry_qbin,
+			       QBIN_LEN, QBIN_SHIFT, QBIN_MASK);
+}
+
+static void survey_report_commit_parents(struct survey_context *ctx)
+{
+	struct survey_stats_commits *psc = &ctx->report.reachable_objects.commits;
+	struct survey_table table = SURVEY_TABLE_INIT;
+	struct strbuf parents = STRBUF_INIT, counts = STRBUF_INIT;
+
+	table.table_name = _("HISTOGRAM BY NUMBER OF COMMIT PARENTS");
+	strvec_pushl(&table.header, "Parents", "Counts", NULL);
+
+	for (int k = 0; k < PBIN_VEC_LEN; k++)
+		if (psc->parent_cnt_pbin[k]) {
+			strbuf_reset(&parents);
+			strbuf_addf(&parents, "%02d", k);
+
+			strbuf_reset(&counts);
+			strbuf_addf(&counts, "%14"PRIuMAX, (uintmax_t)psc->parent_cnt_pbin[k]);
+
+			insert_table_rowv(&table, parents.buf, counts.buf, NULL);
+		}
+	strbuf_release(&parents);
+	strbuf_release(&counts);
+
+	print_table_plaintext(&table);
+	clear_table(&table);
+}
+
 static void survey_report_plaintext_refs(struct survey_context *ctx)
 {
 	struct survey_report_ref_summary *refs = &ctx->report.refs;
@@ -514,6 +759,19 @@ static void survey_report_plaintext(struct survey_context *ctx)
 				   _("Object Type"),
 				   ctx->report.by_type,
 				   REPORT_TYPE_COUNT);
+
+	survey_report_commit_parents(ctx);
+
+	survey_report_hbin(_("COMMITS HISTOGRAM BY SIZE IN BYTES"),
+			   ctx->report.reachable_objects.commits.base.size_hbin);
+
+	survey_report_tree_lengths(ctx);
+
+	survey_report_hbin(_("TREES HISTOGRAM BY SIZE IN BYTES"),
+			   ctx->report.reachable_objects.trees.base.size_hbin);
+
+	survey_report_hbin(_("BLOBS HISTOGRAM BY SIZE IN BYTES"),
+			   ctx->report.reachable_objects.blobs.base.size_hbin);
 
 	survey_report_plaintext_sorted_size(
 		&ctx->report.top_paths_by_count[REPORT_TYPE_TREE]);
@@ -784,6 +1042,8 @@ static void increment_totals(struct survey_context *ctx,
 		unsigned long object_length = 0;
 		off_t disk_sizep = 0;
 		enum object_type type;
+		struct survey_stats_base_object *base;
+		int hb;
 
 		oi.typep = &type;
 		oi.sizep = &object_length;
@@ -793,11 +1053,81 @@ static void increment_totals(struct survey_context *ctx,
 						  &oids->oid[i],
 						  &oi, oi_flags) < 0) {
 			summary->num_missing++;
-		} else {
-			summary->nr++;
-			summary->disk_size += disk_sizep;
-			summary->inflated_size += object_length;
+			continue;
 		}
+
+		summary->nr++;
+		summary->disk_size += disk_sizep;
+		summary->inflated_size += object_length;
+
+		switch (type) {
+		case OBJ_COMMIT: {
+			struct commit *commit = lookup_commit(ctx->repo, &oids->oid[i]);
+			unsigned k = commit_list_count(commit->parents);
+
+			if (k >= PBIN_VEC_LEN)
+				k = PBIN_VEC_LEN - 1;
+
+			ctx->report.reachable_objects.commits.parent_cnt_pbin[k]++;
+			base = &ctx->report.reachable_objects.commits.base;
+			break;
+		}
+		case OBJ_TREE: {
+			struct tree *tree = lookup_tree(ctx->repo, &oids->oid[i]);
+			if (tree) {
+				struct survey_stats_trees *pst = &ctx->report.reachable_objects.trees;
+				struct tree_desc desc;
+				struct name_entry entry;
+				uint64_t nr_entries;
+				int qb;
+
+				parse_tree(tree);
+				init_tree_desc(&desc, &oids->oid[i], tree->buffer, tree->size);
+				nr_entries = 0;
+				while (tree_entry(&desc, &entry))
+					nr_entries++;
+
+				pst->sum_entries += nr_entries;
+
+				if (nr_entries > pst->max_entries)
+					pst->max_entries = nr_entries;
+
+				qb = qbin(nr_entries);
+				incr_obj_hist_bin(&pst->entry_qbin[qb], object_length, disk_sizep);
+			}
+			base = &ctx->report.reachable_objects.trees.base;
+			break;
+		}
+		case OBJ_BLOB:
+			base = &ctx->report.reachable_objects.blobs.base;
+			break;
+		default:
+			continue;
+		}
+
+		switch (oi.whence) {
+		case OI_CACHED:
+			base->cnt_cached++;
+			break;
+		case OI_LOOSE:
+			base->cnt_loose++;
+			break;
+		case OI_PACKED:
+			base->cnt_packed++;
+			break;
+		case OI_DBCACHED:
+			base->cnt_dbcached++;
+			break;
+		default:
+			break;
+		}
+
+		base->sum_size += object_length;
+		base->sum_disk_size += disk_sizep;
+
+		hb = hbin(object_length);
+		incr_obj_hist_bin(&base->size_hbin[hb], object_length, disk_sizep);
+
 	}
 }
 
