@@ -15,9 +15,7 @@
 #include "revision.h"
 #include "strbuf.h"
 #include "strvec.h"
-#include "tag.h"
 #include "trace2.h"
-#include "color.h"
 
 static const char * const survey_usage[] = {
 	N_("(EXPERIMENTAL!) git survey <options>"),
@@ -53,6 +51,22 @@ struct survey_report_ref_summary {
 	size_t tags_annotated_nr;
 	size_t others_nr;
 	size_t unknown_nr;
+
+	size_t cnt_symref;
+
+	size_t cnt_packed;
+	size_t cnt_loose;
+
+	/*
+	 * Measure the length of the refnames.  We can look for
+	 * potential platform limits.  The partial sums may help us
+	 * estimate the size of a haves/wants conversation, since each
+	 * refname and a SHA must be transmitted.
+	 */
+	size_t len_max_local_refname;
+	size_t len_sum_local_refnames;
+	size_t len_max_remote_refname;
+	size_t len_sum_remote_refnames;
 };
 
 struct survey_report_object_summary {
@@ -380,6 +394,42 @@ static void survey_report_plaintext_refs(struct survey_context *ctx)
 		free(fmt);
 	}
 
+	/*
+	 * SymRefs are somewhat orthogonal to the above classification (e.g.
+	 * "HEAD" --> detached and "refs/remotes/origin/HEAD" --> remote) so the
+	 * above classified counts will already include them, but it is less
+	 * confusing to display them here than to create a whole new section.
+	 */
+	if (ctx->report.refs.cnt_symref) {
+		char *fmt = xstrfmt("%"PRIuMAX"", (uintmax_t)refs->cnt_symref);
+		insert_table_rowv(&table, _("Symbolic refs"), fmt, NULL);
+		free(fmt);
+	}
+
+	if (ctx->report.refs.cnt_loose || ctx->report.refs.cnt_packed) {
+		char *fmt = xstrfmt("%"PRIuMAX"", (uintmax_t)refs->cnt_loose);
+		insert_table_rowv(&table, _("Loose refs"), fmt, NULL);
+		free(fmt);
+		fmt = xstrfmt("%"PRIuMAX"", (uintmax_t)refs->cnt_packed);
+		insert_table_rowv(&table, _("Packed refs"), fmt, NULL);
+		free(fmt);
+	}
+
+	if (ctx->report.refs.len_max_local_refname || ctx->report.refs.len_max_remote_refname) {
+		char *fmt = xstrfmt("%"PRIuMAX"", (uintmax_t)refs->len_max_local_refname);
+		insert_table_rowv(&table, _("Max local refname length"), fmt, NULL);
+		free(fmt);
+		fmt = xstrfmt("%"PRIuMAX"", (uintmax_t)refs->len_sum_local_refnames);
+		insert_table_rowv(&table, _("Sum local refnames length"), fmt, NULL);
+		free(fmt);
+		fmt = xstrfmt("%"PRIuMAX"", (uintmax_t)refs->len_max_remote_refname);
+		insert_table_rowv(&table, _("Max remote refname length"), fmt, NULL);
+		free(fmt);
+		fmt = xstrfmt("%"PRIuMAX"", (uintmax_t)refs->len_sum_remote_refnames);
+		insert_table_rowv(&table, _("Sum remote refnames length"), fmt, NULL);
+		free(fmt);
+	}
+
 	print_table_plaintext(&table);
 	clear_table(&table);
 }
@@ -638,6 +688,7 @@ static void survey_phase_refs(struct survey_context *ctx)
 	for (int i = 0; i < ctx->ref_array.nr; i++) {
 		unsigned long size;
 		struct ref_array_item *item = ctx->ref_array.items[i];
+		size_t len = strlen(item->refname);
 
 		switch (item->kind) {
 		case FILTER_REFS_TAGS:
@@ -663,6 +714,33 @@ static void survey_phase_refs(struct survey_context *ctx)
 		default:
 			ctx->report.refs.unknown_nr++;
 			break;
+		}
+
+		/*
+		 * SymRefs are somewhat orthogonal to the above
+		 * classification (e.g. "HEAD" --> detached
+		 * and "refs/remotes/origin/HEAD" --> remote) so
+		 * our totals will already include them.
+		 */
+		if (item->flag & REF_ISSYMREF)
+			ctx->report.refs.cnt_symref++;
+
+		/*
+		 * Where/how is the ref stored in GITDIR.
+		 */
+		if (item->flag & REF_ISPACKED)
+			ctx->report.refs.cnt_packed++;
+		else
+			ctx->report.refs.cnt_loose++;
+
+		if (item->kind == FILTER_REFS_REMOTES) {
+			ctx->report.refs.len_sum_remote_refnames += len;
+			if (len > ctx->report.refs.len_max_remote_refname)
+				ctx->report.refs.len_max_remote_refname = len;
+		} else {
+			ctx->report.refs.len_sum_local_refnames += len;
+			if (len > ctx->report.refs.len_max_local_refname)
+				ctx->report.refs.len_max_local_refname = len;
 		}
 	}
 
