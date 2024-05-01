@@ -121,6 +121,27 @@ clone), and `~/.scalarCache` on macOS.
 	Retrieve missing objects from the specified remote, which is expected to
 	understand the GVFS protocol.
 
+--gvfs-protocol::
+--no-gvfs-protocol::
+	When cloning from a `<url>` with either `dev.azure.com` or
+	`visualstudio.com` in the name, `scalar clone` will attempt to use the GVFS
+	Protocol to access Git objects, specifically from a cache server when
+	available, and will fail to clone if there is an error over that protocol.
+
+	To enable the GVFS Protocol regardless of the origin `<url>`, use
+	`--gvfs-protocol`. This will cause `scalar clone` to fail when the origin
+	server fails to provide a valid response to the `gvfs/config` endpoint.
+
+	To disable the GVFS Protocol, use `--no-gvfs-protocol` and `scalar clone`
+	will only use the Git protocol, starting with a partial clone. This can be
+	helpful if your `<url>` points to Azure Repos but the repository does not
+	have GVFS cache servers enabled. It is likely more efficient to use its
+	partial clone functionality through the Git protocol.
+
+	Previous versions of `scalar clone` could fall back to a partial clone over
+	the Git protocol if there is any issue gathering GVFS configuration
+	information from the origin server.
+
 List
 ~~~~
 

@@ -393,7 +393,12 @@ test_expect_success '`scalar clone` with GVFS-enabled server' '
 	# We must set credential.interactive=true to bypass a setting
 	# in "scalar clone" that disables interactive credentials during
 	# an unattended command.
-	scalar -c credential.interactive=true clone --single-branch -- http://$HOST_PORT/ using-gvfs &&
+	GIT_TRACE2_EVENT="$(pwd)/clone-trace-with-gvfs" scalar \
+		-c credential.interactive=true \
+		clone --gvfs-protocol \
+		--single-branch -- http://$HOST_PORT/ using-gvfs &&
+
+	grep "GET/config(main)" <clone-trace-with-gvfs &&
 
 	: verify that the shared cache has been configured &&
 	cache_key="url_$(printf "%s" http://$HOST_PORT/ |
@@ -413,6 +418,24 @@ test_expect_success '`scalar clone` with GVFS-enabled server' '
 		echo "second" >expect &&
 		test_cmp expect actual
 	)
+'
+
+test_expect_success '`scalar clone --no-gvfs-protocol` skips gvfs/config' '
+	# the fake cache server requires fake authentication &&
+	git config --global core.askPass true &&
+
+	# We must set credential.interactive=true to bypass a setting
+	# in "scalar clone" that disables interactive credentials during
+	# an unattended command.
+	GIT_TRACE2_EVENT="$(pwd)/clone-trace-no-gvfs" scalar \
+		-c credential.interactive=true \
+		clone --no-gvfs-protocol \
+		--single-branch -- http://$HOST_PORT/ skipping-gvfs &&
+
+	! grep "GET/config(main)" <clone-trace-no-gvfs &&
+	! git -C skipping-gvfs/src config core.gvfs &&
+
+	test_config -C skipping-gvfs/src remote.origin.partialclonefilter blob:none
 '
 
 test_expect_success '`scalar register` parallel to worktree is unsupported' '

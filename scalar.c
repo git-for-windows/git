@@ -720,6 +720,8 @@ static int cmd_clone(int argc, const char **argv)
 	int src = 1, tags = 1, maintenance = 1;
 	const char *cache_server_url = NULL, *local_cache_root = NULL;
 	char *default_cache_server_url = NULL, *local_cache_root_abs = NULL;
+	int gvfs_protocol = -1;
+
 	struct option clone_options[] = {
 		OPT_STRING('b', "branch", &branch, N_("<branch>"),
 			   N_("branch to checkout after clone")),
@@ -734,6 +736,8 @@ static int cmd_clone(int argc, const char **argv)
 			 N_("specify if tags should be fetched during clone")),
 		OPT_BOOL(0, "maintenance", &maintenance,
 			 N_("specify if background maintenance should be enabled")),
+		OPT_BOOL(0, "gvfs-protocol", &gvfs_protocol,
+			 N_("force enable (or disable) the GVFS Protocol")),
 		OPT_STRING(0, "cache-server-url", &cache_server_url,
 			   N_("<url>"),
 			   N_("the url or friendly name of the cache server")),
@@ -753,7 +757,6 @@ static int cmd_clone(int argc, const char **argv)
 	char *enlistment = NULL, *dir = NULL;
 	struct strbuf buf = STRBUF_INIT;
 	int res;
-	int gvfs_protocol;
 
 	argc = parse_options(argc, argv, NULL, clone_options, clone_usage, 0);
 
@@ -866,8 +869,18 @@ static int cmd_clone(int argc, const char **argv)
 		goto cleanup;
 	}
 
-	gvfs_protocol = cache_server_url ||
-			supports_gvfs_protocol(url, &default_cache_server_url);
+	/* Is --[no-]gvfs-protocol unspecified? Infer from url. */
+	if (gvfs_protocol < 0) {
+		if (cache_server_url ||
+		    strstr(url, "dev.azure.com") ||
+		    strstr(url, "visualstudio.com"))
+			gvfs_protocol = 1;
+		else
+			gvfs_protocol = 0;
+	}
+
+	if (gvfs_protocol && !supports_gvfs_protocol(url, &default_cache_server_url))
+		die(_("failed to contact server via GVFS Protocol"));
 
 	if (gvfs_protocol) {
 		if ((res = init_shared_object_cache(url, local_cache_root)))
