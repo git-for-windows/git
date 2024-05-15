@@ -156,7 +156,21 @@ static void incr_obj_hist_bin(struct obj_hist_bin *pbin,
 struct large_item {
 	uint64_t size;
 	struct object_id oid;
+
+	/*
+	 * For blobs and trees the name field is the pathname of the
+	 * file or directory.  Root trees will have a zero-length
+	 * name.  The name field is not currenly used for commits.
+	 */
 	struct strbuf name;
+
+	/*
+	 * For blobs and trees remember the transient commit from
+	 * the treewalk so that we can say that this large item
+	 * first appeared in this commit (relative to the treewalk
+	 * order).
+	 */
+	struct object_id containing_commit_oid;
 };
 
 struct large_item_vec {
@@ -204,7 +218,8 @@ static void free_large_item_vec(struct large_item_vec *vec)
 static void maybe_insert_large_item(struct large_item_vec *vec,
 				    uint64_t size,
 				    struct object_id *oid,
-				    const char *name)
+				    const char *name,
+				    const struct object_id *containing_commit_oid)
 {
 	size_t rest_len;
 	size_t k;
@@ -240,6 +255,7 @@ static void maybe_insert_large_item(struct large_item_vec *vec,
 		memset(&vec->items[k], 0, sizeof(struct large_item));
 		vec->items[k].size = size;
 		oidcpy(&vec->items[k].oid, oid);
+		oidcpy(&vec->items[k].containing_commit_oid, containing_commit_oid ? containing_commit_oid : null_oid(the_hash_algo));
 		strbuf_init(&vec->items[k].name, 0);
 		if (name && *name)
 			strbuf_addstr(&vec->items[k].name, name);
@@ -748,7 +764,7 @@ static void survey_report_largest_vec(struct large_item_vec *vec)
 		return;
 
 	table.table_name = vec->dimension_label;
-	strvec_pushl(&table.header, "Size", "OID", "Name", NULL);
+	strvec_pushl(&table.header, "Size", "OID", "Name", "Commit", NULL);
 
 	for (size_t k = 0; k < vec->nr_items; k++) {
 		struct large_item *pk = &vec->items[k];
@@ -756,7 +772,10 @@ static void survey_report_largest_vec(struct large_item_vec *vec)
 			strbuf_reset(&size);
 			strbuf_addf(&size, "%"PRIuMAX, (uintmax_t)pk->size);
 
-			insert_table_rowv(&table, size.buf, oid_to_hex(&pk->oid), pk->name.buf, NULL);
+			insert_table_rowv(&table, size.buf, oid_to_hex(&pk->oid), pk->name.buf,
+					  is_null_oid(&pk->containing_commit_oid) ?
+					  "" : oid_to_hex(&pk->containing_commit_oid),
+					  NULL);
 		}
 	}
 	strbuf_release(&size);
@@ -1256,8 +1275,8 @@ static void increment_totals(struct survey_context *ctx,
 			ctx->report.reachable_objects.commits.parent_cnt_pbin[k]++;
 			base = &ctx->report.reachable_objects.commits.base;
 
-			maybe_insert_large_item(ctx->report.reachable_objects.commits.vec_largest_by_nr_parents, k, &commit->object.oid, NULL);
-			maybe_insert_large_item(ctx->report.reachable_objects.commits.vec_largest_by_size_bytes, object_length, &commit->object.oid, NULL);
+			maybe_insert_large_item(ctx->report.reachable_objects.commits.vec_largest_by_nr_parents, k, &commit->object.oid, NULL, &commit->object.oid);
+			maybe_insert_large_item(ctx->report.reachable_objects.commits.vec_largest_by_size_bytes, object_length, &commit->object.oid, NULL, &commit->object.oid);
 			break;
 		}
 		case OBJ_TREE: {
@@ -1277,8 +1296,8 @@ static void increment_totals(struct survey_context *ctx,
 
 				pst->sum_entries += nr_entries;
 
-				maybe_insert_large_item(pst->vec_largest_by_nr_entries, nr_entries, &tree->object.oid, path);
-				maybe_insert_large_item(pst->vec_largest_by_size_bytes, object_length, &tree->object.oid, path);
+				maybe_insert_large_item(pst->vec_largest_by_nr_entries, nr_entries, &tree->object.oid, path, NULL);
+				maybe_insert_large_item(pst->vec_largest_by_size_bytes, object_length, &tree->object.oid, path, NULL);
 
 				qb = qbin(nr_entries);
 				incr_obj_hist_bin(&pst->entry_qbin[qb], object_length, disk_sizep);
@@ -1289,7 +1308,7 @@ static void increment_totals(struct survey_context *ctx,
 		case OBJ_BLOB:
 			base = &ctx->report.reachable_objects.blobs.base;
 
-			maybe_insert_large_item(ctx->report.reachable_objects.blobs.vec_largest_by_size_bytes, object_length, &oids->oid[i], path);
+			maybe_insert_large_item(ctx->report.reachable_objects.blobs.vec_largest_by_size_bytes, object_length, &oids->oid[i], path, NULL);
 			break;
 		default:
 			continue;
