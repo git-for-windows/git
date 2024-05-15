@@ -156,6 +156,7 @@ static void incr_obj_hist_bin(struct obj_hist_bin *pbin,
 struct large_item {
 	uint64_t size;
 	struct object_id oid;
+	struct strbuf name;
 };
 
 struct large_item_vec {
@@ -171,6 +172,7 @@ static struct large_item_vec *alloc_large_item_vec(const char *dimension_label,
 {
 	struct large_item_vec *vec;
 	size_t flex_len = nr_items * sizeof(struct large_item);
+	size_t k;
 
 	if (!nr_items)
 		return NULL;
@@ -180,6 +182,9 @@ static struct large_item_vec *alloc_large_item_vec(const char *dimension_label,
 	vec->item_label = strdup(item_label);
 	vec->nr_items = nr_items;
 
+	for (k = 0; k < nr_items; k++)
+		strbuf_init(&vec->items[k].name, 0);
+
 	return vec;
 }
 
@@ -188,6 +193,9 @@ static void free_large_item_vec(struct large_item_vec *vec)
 	if (!vec)
 		return;
 
+	for (size_t k = 0; k < vec->nr_items; k++)
+		strbuf_release(&vec->items[k].name);
+
 	free(vec->dimension_label);
 	free(vec->item_label);
 	free(vec);
@@ -195,7 +203,8 @@ static void free_large_item_vec(struct large_item_vec *vec)
 
 static void maybe_insert_large_item(struct large_item_vec *vec,
 				    uint64_t size,
-				    struct object_id *oid)
+				    struct object_id *oid,
+				    const char *name)
 {
 	size_t rest_len;
 	size_t k;
@@ -215,7 +224,14 @@ static void maybe_insert_large_item(struct large_item_vec *vec,
 		if (size < vec->items[k].size)
 			continue;
 
-		/* push items[k..] down one and insert it here */
+		/*
+		 * The last large_item in the vector is about to be
+		 * overwritten by the previous one during the shift.
+		 * Steal its allocated strbuf and reuse it.
+		 */
+		strbuf_release(&vec->items[vec->nr_items - 1].name);
+
+		/* push items[k..] down one and insert data for this item here */
 
 		rest_len = (vec->nr_items - k - 1) * sizeof(struct large_item);
 		if (rest_len)
@@ -224,6 +240,10 @@ static void maybe_insert_large_item(struct large_item_vec *vec,
 		memset(&vec->items[k], 0, sizeof(struct large_item));
 		vec->items[k].size = size;
 		oidcpy(&vec->items[k].oid, oid);
+		strbuf_init(&vec->items[k].name, 0);
+		if (name && *name)
+			strbuf_addstr(&vec->items[k].name, name);
+
 		return;
 	}
 }
@@ -728,7 +748,7 @@ static void survey_report_largest_vec(struct large_item_vec *vec)
 		return;
 
 	table.table_name = vec->dimension_label;
-	strvec_pushl(&table.header, "Size", "OID", NULL);
+	strvec_pushl(&table.header, "Size", "OID", "Name", NULL);
 
 	for (size_t k = 0; k < vec->nr_items; k++) {
 		struct large_item *pk = &vec->items[k];
@@ -736,7 +756,7 @@ static void survey_report_largest_vec(struct large_item_vec *vec)
 			strbuf_reset(&size);
 			strbuf_addf(&size, "%"PRIuMAX, (uintmax_t)pk->size);
 
-			insert_table_rowv(&table, size.buf, oid_to_hex(&pk->oid), NULL);
+			insert_table_rowv(&table, size.buf, oid_to_hex(&pk->oid), pk->name.buf, NULL);
 		}
 	}
 	strbuf_release(&size);
@@ -1198,7 +1218,8 @@ static void increment_object_counts(
 
 static void increment_totals(struct survey_context *ctx,
 			     struct oid_array *oids,
-			     struct survey_report_object_size_summary *summary)
+			     struct survey_report_object_size_summary *summary,
+			     const char *path)
 {
 	for (size_t i = 0; i < oids->nr; i++) {
 		struct object_info oi = OBJECT_INFO_INIT;
@@ -1235,8 +1256,8 @@ static void increment_totals(struct survey_context *ctx,
 			ctx->report.reachable_objects.commits.parent_cnt_pbin[k]++;
 			base = &ctx->report.reachable_objects.commits.base;
 
-			maybe_insert_large_item(ctx->report.reachable_objects.commits.vec_largest_by_nr_parents, k, &commit->object.oid);
-			maybe_insert_large_item(ctx->report.reachable_objects.commits.vec_largest_by_size_bytes, object_length, &commit->object.oid);
+			maybe_insert_large_item(ctx->report.reachable_objects.commits.vec_largest_by_nr_parents, k, &commit->object.oid, NULL);
+			maybe_insert_large_item(ctx->report.reachable_objects.commits.vec_largest_by_size_bytes, object_length, &commit->object.oid, NULL);
 			break;
 		}
 		case OBJ_TREE: {
@@ -1256,8 +1277,8 @@ static void increment_totals(struct survey_context *ctx,
 
 				pst->sum_entries += nr_entries;
 
-				maybe_insert_large_item(pst->vec_largest_by_nr_entries, nr_entries, &tree->object.oid);
-				maybe_insert_large_item(pst->vec_largest_by_size_bytes, object_length, &tree->object.oid);
+				maybe_insert_large_item(pst->vec_largest_by_nr_entries, nr_entries, &tree->object.oid, path);
+				maybe_insert_large_item(pst->vec_largest_by_size_bytes, object_length, &tree->object.oid, path);
 
 				qb = qbin(nr_entries);
 				incr_obj_hist_bin(&pst->entry_qbin[qb], object_length, disk_sizep);
@@ -1268,7 +1289,7 @@ static void increment_totals(struct survey_context *ctx,
 		case OBJ_BLOB:
 			base = &ctx->report.reachable_objects.blobs.base;
 
-			maybe_insert_large_item(ctx->report.reachable_objects.blobs.vec_largest_by_size_bytes, object_length, &oids->oid[i]);
+			maybe_insert_large_item(ctx->report.reachable_objects.blobs.vec_largest_by_size_bytes, object_length, &oids->oid[i], path);
 			break;
 		default:
 			continue;
@@ -1308,7 +1329,7 @@ static void increment_object_totals(struct survey_context *ctx,
 	struct survey_report_object_size_summary *total;
 	struct survey_report_object_size_summary summary = { 0 };
 
-	increment_totals(ctx, oids, &summary);
+	increment_totals(ctx, oids, &summary, path);
 
 	switch (type) {
 	case OBJ_COMMIT:
