@@ -13,6 +13,7 @@
 #include "ref-filter.h"
 #include "refs.h"
 #include "revision.h"
+#include "run-command.h"
 #include "strbuf.h"
 #include "strvec.h"
 #include "trace2.h"
@@ -171,6 +172,12 @@ struct large_item {
 	 * order).
 	 */
 	struct object_id containing_commit_oid;
+
+	/*
+	 * Lookup `containing_commit_oid` using `git name-rev`.
+	 * Lazy allocate this post-treewalk.
+	 */
+	struct strbuf name_rev;
 };
 
 struct large_item_vec {
@@ -207,8 +214,10 @@ static void free_large_item_vec(struct large_item_vec *vec)
 	if (!vec)
 		return;
 
-	for (size_t k = 0; k < vec->nr_items; k++)
+	for (size_t k = 0; k < vec->nr_items; k++) {
 		strbuf_release(&vec->items[k].name);
+		strbuf_release(&vec->items[k].name_rev);
+	}
 
 	free(vec->dimension_label);
 	free(vec->item_label);
@@ -243,6 +252,9 @@ static void maybe_insert_large_item(struct large_item_vec *vec,
 		 * The last large_item in the vector is about to be
 		 * overwritten by the previous one during the shift.
 		 * Steal its allocated strbuf and reuse it.
+		 *
+		 * We can ignore .name_rev because it will not be
+		 * allocated until after the treewalk.
 		 */
 		strbuf_release(&vec->items[vec->nr_items - 1].name);
 
@@ -764,7 +776,7 @@ static void survey_report_largest_vec(struct large_item_vec *vec)
 		return;
 
 	table.table_name = vec->dimension_label;
-	strvec_pushl(&table.header, "Size", "OID", "Name", "Commit", NULL);
+	strvec_pushl(&table.header, "Size", "OID", "Name", "Commit", "Name-Rev", NULL);
 
 	for (size_t k = 0; k < vec->nr_items; k++) {
 		struct large_item *pk = &vec->items[k];
@@ -775,6 +787,7 @@ static void survey_report_largest_vec(struct large_item_vec *vec)
 			insert_table_rowv(&table, size.buf, oid_to_hex(&pk->oid), pk->name.buf,
 					  is_null_oid(&pk->containing_commit_oid) ?
 					  "" : oid_to_hex(&pk->containing_commit_oid),
+					  pk->name_rev.len ? pk->name_rev.buf : "",
 					  NULL);
 		}
 	}
@@ -1124,6 +1137,73 @@ static void do_load_refs(struct survey_context *ctx,
 	stop_progress(&ctx->progress);
 	ref_filter_clear(&filter);
 	ref_sorting_release(sorting);
+}
+
+/*
+ * Try to run `git name-rev` on each of the containing-commit-oid's
+ * in this large-item-vec to get a pretty name for each OID.  Silently
+ * ignore errors if it fails because this info is nice to have but not
+ * essential.
+ */
+static void large_item_vec_lookup_name_rev(struct survey_context *ctx,
+					   struct large_item_vec *vec)
+{
+	struct child_process cp = CHILD_PROCESS_INIT;
+	struct strbuf in = STRBUF_INIT;
+	struct strbuf out = STRBUF_INIT;
+	const char *line;
+	size_t k;
+
+	if (!vec || !vec->nr_items)
+		return;
+
+	ctx->progress_total += vec->nr_items;
+	display_progress(ctx->progress, ctx->progress_total);
+
+	for (k = 0; k < vec->nr_items; k++)
+		strbuf_addf(&in, "%s\n", oid_to_hex(&vec->items[k].containing_commit_oid));
+
+	cp.git_cmd = 1;
+	strvec_pushl(&cp.args, "name-rev", "--name-only", "--annotate-stdin", NULL);
+	if (pipe_command(&cp, in.buf, in.len, &out, 0, NULL, 0)) {
+		strbuf_release(&in);
+		strbuf_release(&out);
+		return;
+	}
+
+	line = out.buf;
+	k = 0;
+	while (*line) {
+		const char *eol = strchrnul(line, '\n');
+
+		strbuf_init(&vec->items[k].name_rev, 0);
+		strbuf_add(&vec->items[k].name_rev, line, (eol - line));
+
+		line = eol + 1;
+		k++;
+	}
+
+	strbuf_release(&in);
+	strbuf_release(&out);
+}
+
+static void do_lookup_name_rev(struct survey_context *ctx)
+{
+	if (ctx->opts.show_progress) {
+		ctx->progress_total = 0;
+		ctx->progress = start_progress(ctx->repo, _("Resolving name-revs..."), 0);
+	}
+
+	large_item_vec_lookup_name_rev(ctx, ctx->report.reachable_objects.commits.vec_largest_by_nr_parents);
+	large_item_vec_lookup_name_rev(ctx, ctx->report.reachable_objects.commits.vec_largest_by_size_bytes);
+
+	large_item_vec_lookup_name_rev(ctx, ctx->report.reachable_objects.trees.vec_largest_by_nr_entries);
+	large_item_vec_lookup_name_rev(ctx, ctx->report.reachable_objects.trees.vec_largest_by_size_bytes);
+
+	large_item_vec_lookup_name_rev(ctx, ctx->report.reachable_objects.blobs.vec_largest_by_size_bytes);
+
+	if (ctx->opts.show_progress)
+		stop_progress(&ctx->progress);
 }
 
 /*
@@ -1482,7 +1562,10 @@ static void survey_phase_objects(struct survey_context *ctx)
 
 	release_revisions(&revs);
 	trace2_region_leave("survey", "phase/objects", ctx->repo);
-}
+
+	trace2_region_enter("survey", "phase/namerev", the_repository);
+	do_lookup_name_rev(ctx);
+	trace2_region_enter("survey", "phase/namerev", the_repository);}
 
 int cmd_survey(int argc, const char **argv, const char *prefix, struct repository *repo)
 {
