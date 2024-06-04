@@ -42,6 +42,7 @@ static struct survey_refs_wanted default_ref_options = {
 struct survey_opts {
 	int verbose;
 	int show_progress;
+	int show_name_rev;
 
 	int show_largest_commits_by_nr_parents;
 	int show_largest_commits_by_size_bytes;
@@ -767,7 +768,7 @@ static void survey_report_commit_parents(struct survey_context *ctx)
 	clear_table(&table);
 }
 
-static void survey_report_largest_vec(struct large_item_vec *vec)
+static void survey_report_largest_vec(struct survey_context *ctx, struct large_item_vec *vec)
 {
 	struct survey_table table = SURVEY_TABLE_INIT;
 	struct strbuf size = STRBUF_INIT;
@@ -776,7 +777,7 @@ static void survey_report_largest_vec(struct large_item_vec *vec)
 		return;
 
 	table.table_name = vec->dimension_label;
-	strvec_pushl(&table.header, "Size", "OID", "Name", "Commit", "Name-Rev", NULL);
+	strvec_pushl(&table.header, "Size", "OID", "Name", "Commit", ctx->opts.show_name_rev ? "Name-Rev" : NULL, NULL);
 
 	for (size_t k = 0; k < vec->nr_items; k++) {
 		struct large_item *pk = &vec->items[k];
@@ -787,7 +788,7 @@ static void survey_report_largest_vec(struct large_item_vec *vec)
 			insert_table_rowv(&table, size.buf, oid_to_hex(&pk->oid), pk->name.buf,
 					  is_null_oid(&pk->containing_commit_oid) ?
 					  "" : oid_to_hex(&pk->containing_commit_oid),
-					  pk->name_rev.len ? pk->name_rev.buf : "",
+					  !ctx->opts.show_name_rev ? NULL : pk->name_rev.len ? pk->name_rev.buf : "",
 					  NULL);
 		}
 	}
@@ -977,11 +978,11 @@ static void survey_report_plaintext(struct survey_context *ctx)
 	survey_report_plaintext_sorted_size(
 		&ctx->report.top_paths_by_inflate[REPORT_TYPE_BLOB]);
 
-	survey_report_largest_vec(ctx->report.reachable_objects.commits.vec_largest_by_nr_parents);
-	survey_report_largest_vec(ctx->report.reachable_objects.commits.vec_largest_by_size_bytes);
-	survey_report_largest_vec(ctx->report.reachable_objects.trees.vec_largest_by_nr_entries);
-	survey_report_largest_vec(ctx->report.reachable_objects.trees.vec_largest_by_size_bytes);
-	survey_report_largest_vec(ctx->report.reachable_objects.blobs.vec_largest_by_size_bytes);
+	survey_report_largest_vec(ctx, ctx->report.reachable_objects.commits.vec_largest_by_nr_parents);
+	survey_report_largest_vec(ctx, ctx->report.reachable_objects.commits.vec_largest_by_size_bytes);
+	survey_report_largest_vec(ctx, ctx->report.reachable_objects.trees.vec_largest_by_nr_entries);
+	survey_report_largest_vec(ctx, ctx->report.reachable_objects.trees.vec_largest_by_size_bytes);
+	survey_report_largest_vec(ctx, ctx->report.reachable_objects.blobs.vec_largest_by_size_bytes);
 }
 
 /*
@@ -1051,6 +1052,10 @@ static int survey_load_config_cb(const char *var, const char *value,
 	}
 	if (!strcmp(var, "survey.progress")) {
 		ctx->opts.show_progress = git_config_bool(var, value);
+		return 0;
+	}
+	if (!strcmp(var, "survey.namerev")) {
+		ctx->opts.show_name_rev = git_config_bool(var, value);
 		return 0;
 	}
 	if (!strcmp(var, "survey.showcommitparents")) {
@@ -1189,6 +1194,13 @@ static void large_item_vec_lookup_name_rev(struct survey_context *ctx,
 
 static void do_lookup_name_rev(struct survey_context *ctx)
 {
+	/*
+	 * `git name-rev` can be very expensive when there are lots of
+	 * refs, so make it optional.
+	 */
+	if (!ctx->opts.show_name_rev)
+		return;
+
 	if (ctx->opts.show_progress) {
 		ctx->progress_total = 0;
 		ctx->progress = start_progress(ctx->repo, _("Resolving name-revs..."), 0);
@@ -1563,9 +1575,12 @@ static void survey_phase_objects(struct survey_context *ctx)
 	release_revisions(&revs);
 	trace2_region_leave("survey", "phase/objects", ctx->repo);
 
-	trace2_region_enter("survey", "phase/namerev", the_repository);
-	do_lookup_name_rev(ctx);
-	trace2_region_enter("survey", "phase/namerev", the_repository);}
+	if (ctx->opts.show_name_rev) {
+		trace2_region_enter("survey", "phase/namerev", the_repository);
+		do_lookup_name_rev(ctx);
+		trace2_region_enter("survey", "phase/namerev", the_repository);
+	}
+}
 
 int cmd_survey(int argc, const char **argv, const char *prefix, struct repository *repo)
 {
@@ -1589,6 +1604,7 @@ int cmd_survey(int argc, const char **argv, const char *prefix, struct repositor
 	static struct option survey_options[] = {
 		OPT__VERBOSE(&ctx.opts.verbose, N_("verbose output")),
 		OPT_BOOL(0, "progress", &ctx.opts.show_progress, N_("show progress")),
+		OPT_BOOL(0, "name-rev", &ctx.opts.show_name_rev, N_("run name-rev on each reported commit")),
 		OPT_INTEGER('n', "top", &ctx.opts.top_nr,
 			    N_("number of entries to include in detail tables")),
 

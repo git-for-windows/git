@@ -4,6 +4,10 @@ survey.*::
 	background with these options.
 +
 --
+	survey.namerev::
+		Boolean to show/hide `git name-rev` information for each
+		reported commit and the containing commit of each
+		reported tree and blob.
 	verbose::
 		This boolean value implies the `--[no-]verbose` option.
 	progress::

@@ -32,6 +32,11 @@ OPTIONS
 --progress::
 	Show progress.  This is automatically enabled when interactive.
 
+--name-rev::
+--no-name-rev::
+	Print `git name-rev` output for each commit, tree, and blob.
+	Defaults to true.
+
 Ref Selection
 ~~~~~~~~~~~~~
 
