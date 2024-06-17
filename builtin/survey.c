@@ -1689,3 +1689,49 @@ int cmd_survey(int argc, const char **argv, const char *prefix, struct repositor
 	clear_survey_context(&ctx);
 	return 0;
 }
+
+/*
+ * NEEDSWORK: The following is a bit of a laundry list of things
+ * that I'd like to add.
+ *
+ * [] Dump stats on all of the packfiles. The number and size of each.
+ * Whether each is in the .git directory or in an alternate.  The state
+ * of the IDX or MIDX files and etc.  Delta chain stats.  All of this
+ * data is relative to the "lived-in" state of the repository.  Stuff
+ * that may change after a GC or repack.
+ *
+ * [] Dump stats on each remote.  When we fetch from a remote the size
+ * of the response is related to the set of haves on the server.  You
+ * can see this in `GIT_TRACE_CURL=1 git fetch`. We get a `ls-refs`
+ * payload that lists all of the branches and tags on the server, so
+ * at a minimum the RefName and SHA for each. But for annotated tags
+ * we also get the peeled SHA.  The size of this overhead on every
+ * fetch is proporational to the size of the `git ls-remote` response
+ * (roughly, although the latter repeats the RefName of the peeled
+ * tag).  If, for example, you have 500K refs on a remote, you're
+ * going to have a long "haves" message, so every fetch will be slow
+ * just because of that overhead (not counting new objects to be
+ * downloaded).
+ *
+ * Note that the local set of tags in "refs/tags/" is a union over all
+ * remotes.  However, since most people only have one remote, we can
+ * probaly estimate the overhead value directly from the size of the
+ * set of "refs/tags/" that we visited while building the `ref_info`
+ * and `ref_array` and not need to ask the remote.
+ *
+ * [] Dump info on the complexity of the DAG.  Criss-cross merges.
+ * The number of edges that must be touched to compute merge bases.
+ * Edge length. The number of parallel lanes in the history that must
+ * be navigated to get to the merge base.  What affects the cost of
+ * the Ahead/Behind computation?  How often do criss-crosses occur and
+ * do they cause various operations to slow down?
+ *
+ * [] If there are primary branches (like "main" or "master") are they
+ * always on the left side of merges?  Does the graph have a clean
+ * left edge?  Or are there normal and "backwards" merges?  Do these
+ * cause problems at scale?
+ *
+ * [] If we have a hierarchy of FI/RI branches like "L1", "L2, ...,
+ * can we learn anything about the shape of the repo around these FI
+ * and RI integrations?
+ */
