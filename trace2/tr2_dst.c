@@ -24,7 +24,7 @@
  */
 static int tr2env_max_files = 0;
 
-static int tr2_dst_want_warning(void)
+int tr2_dst_want_warning(void)
 {
 	static int tr2env_dst_debug = -1;
 

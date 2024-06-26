@@ -227,6 +227,16 @@ void trace2_initialize_fl(const char *file, int line)
 	if (!tr2_tgt_want_builtins())
 		return;
 	trace2_enabled = 1;
+
+	/*
+	 * getenv() on Windows stomps on `errno` and the code in
+	 * tr2_dst.c verifies that warnings are enabled before
+	 * formatting the warning message (and calling strerror()).
+	 * So prefetch the value from the environment before we need
+	 * it.
+	 */
+	tr2_dst_want_warning();
+
 	if (!git_env_bool("GIT_TRACE2_REDACT", 1))
 		trace2_redact = 0;
 
