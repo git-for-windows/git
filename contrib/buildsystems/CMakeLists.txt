@@ -44,8 +44,19 @@ This process generates a Makefile(Linux/*BSD/MacOS), Visual Studio solution(Wind
 Run `make` to build Git on Linux/*BSD/MacOS.
 Open git.sln on Windows and build Git.
 
-NOTE: By default CMake will install vcpkg locally to your source tree on configuration,
-to avoid this, add `-DNO_VCPKG=TRUE` to the command line when configuring.
+NOTE: By default CMake will install vcpkg locally to your source
+tree on configuration, to avoid this, add `-DUSE_VCPKG=FALSE` to
+the command line when configuring.
+
+To use your own vcpkg clone, set the environment variable VCPKG_ROOT
+to the path or pass the path as `-DVCPKG_DIR=/your/clone/of/vcpkg`.
+
+To set the vcpkg arch (target triplet) pass `VCPKG_ARCH` or
+`VCPKG_TARGET_TRIPLET` e.g.: `-DVCPKG_ARCH=x64-windows`.
+
+By default for vcpkg, gettext is not built and translations do not
+work because gettext is a very long compile. To enable translations
+pass `-DNO_GETTEXT=FALSE`.
 
 The Visual Studio default generator changed in v16.6 from its Visual Studio
 implemenation to `Ninja` This required changes to many CMake scripts.
@@ -56,10 +67,29 @@ cmake_minimum_required(VERSION 3.14)
 #set the source directory to root of git
 set(CMAKE_SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}/../..)
 
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake)
+
+include(Utilities)
+
 option(USE_VCPKG "Whether or not to use vcpkg for obtaining dependencies.  Only applicable to Windows platforms" ON)
 if(NOT WIN32)
 	set(USE_VCPKG OFF CACHE BOOL "" FORCE)
 endif()
+
+set(gettext_default TRUE)
+
+# Turn off gettext by default when using vcpkg because it's a very
+# long compile.
+if(NOT USE_VCPKG)
+	set(gettext_default FALSE)
+endif()
+
+build_option(
+	NO_GETTEXT
+	BOOL "Set to TRUE/ON to disable internationalization support using gettext and building translations using msgfmt from gettext-tools."
+	${gettext_default}
+	ALIASES ENV{NO_GETTEXT}
+)
 
 if(NOT DEFINED CMAKE_EXPORT_COMPILE_COMMANDS)
 	set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
@@ -67,24 +97,27 @@ if(NOT DEFINED CMAKE_EXPORT_COMPILE_COMMANDS)
 endif()
 
 if(USE_VCPKG)
-	set(VCPKG_DIR "${CMAKE_SOURCE_DIR}/compat/vcbuild/vcpkg")
-	message("WIN32: ${WIN32}") # show its underlying text values
-	message("VCPKG_DIR: ${VCPKG_DIR}")
-	message("VCPKG_ARCH: ${VCPKG_ARCH}") # maybe unset
-	message("MSVC: ${MSVC}")
-	message("CMAKE_GENERATOR: ${CMAKE_GENERATOR}")
-	message("CMAKE_CXX_COMPILER_ID: ${CMAKE_CXX_COMPILER_ID}")
-	message("CMAKE_GENERATOR_PLATFORM: ${CMAKE_GENERATOR_PLATFORM}")
-	message("CMAKE_EXPORT_COMPILE_COMMANDS: ${CMAKE_EXPORT_COMPILE_COMMANDS}")
-	message("ENV(CMAKE_EXPORT_COMPILE_COMMANDS): $ENV{CMAKE_EXPORT_COMPILE_COMMANDS}")
-	if(NOT EXISTS ${VCPKG_DIR})
-		message("Initializing vcpkg and building the Git's dependencies (this will take a while...)")
-		execute_process(COMMAND ${CMAKE_SOURCE_DIR}/compat/vcbuild/vcpkg_install.bat ${VCPKG_ARCH})
-	endif()
-	if(NOT EXISTS ${VCPKG_ARCH})
-		message("VCPKG_ARCH: unset, using 'x64-windows'")
-		set(VCPKG_ARCH "x64-windows") # default from vcpkg_install.bat
-	endif()
+	build_option(
+		VCPKG_DIR
+		PATH "Path to vcpkg clone."
+		"${CMAKE_SOURCE_DIR}/compat/vcbuild/vcpkg"
+		ALIASES ENV{VCPKG_ROOT}
+	)
+
+	build_option(
+		VCPKG_ARCH
+		STRING "vcpkg arch/triplet, e.g. x64-windows."
+		x64-windows
+		ALIASES VCPKG_TARGET_TRIPLET
+	)
+
+	message(STATUS "WIN32: ${WIN32}")
+	message(STATUS "VCPKG_DIR: ${VCPKG_DIR}")
+	message(STATUS "VCPKG_ARCH: ${VCPKG_ARCH}")
+	message(STATUS "CMAKE_GENERATOR: ${CMAKE_GENERATOR}")
+	message(STATUS "CMAKE_EXPORT_COMPILE_COMMANDS: ${CMAKE_EXPORT_COMPILE_COMMANDS}")
+	message(STATUS "ENV(CMAKE_EXPORT_COMPILE_COMMANDS): $ENV{CMAKE_EXPORT_COMPILE_COMMANDS}")
+	execute_process(COMMAND ${CMAKE_SOURCE_DIR}/compat/vcbuild/vcpkg_install.bat ${VCPKG_ARCH})
 	list(APPEND CMAKE_PREFIX_PATH "${VCPKG_DIR}/installed/${VCPKG_ARCH}")
 
 	# In the vcpkg edition, we need this to be able to link to libcurl
@@ -122,6 +155,14 @@ endif()
 project(git
 	VERSION ${git_version}
 	LANGUAGES C)
+
+# Some diagnostic output about the detected toolchain, must be
+# below project() call.
+if(WIN32)
+	message(STATUS "MSVC: ${MSVC}")
+endif()
+message(STATUS "CMAKE_C_COMPILER_ID: ${CMAKE_C_COMPILER_ID}")
+message(STATUS "CMAKE_GENERATOR_PLATFORM: ${CMAKE_GENERATOR_PLATFORM}")
 
 
 #TODO gitk git-gui gitweb
@@ -172,8 +213,7 @@ find_package(CURL)
 find_package(EXPAT)
 find_package(Iconv)
 
-#Don't use libintl on Windows Visual Studio and Clang builds
-if(NOT (WIN32 AND (CMAKE_C_COMPILER_ID STREQUAL "MSVC" OR CMAKE_C_COMPILER_ID STREQUAL "Clang")))
+if(NOT NO_GETTEXT)
 	find_package(Intl)
 endif()
 
@@ -217,18 +257,10 @@ if(WIN32 AND NOT MSVC)#not required for visual studio builds
 	endif()
 endif()
 
-if(NO_GETTEXT)
-	message(STATUS "msgfmt not used under NO_GETTEXT")
-else()
+if(NOT NO_GETTEXT)
 	find_program(MSGFMT_EXE msgfmt)
 	if(NOT MSGFMT_EXE)
-		if(USE_VCPKG)
-			set(MSGFMT_EXE ${CMAKE_SOURCE_DIR}/compat/vcbuild/vcpkg/downloads/tools/msys2/msys64/usr/bin/msgfmt.exe)
-		endif()
-		if(NOT EXISTS ${MSGFMT_EXE})
-			message(WARNING "Text Translations won't be built")
-			unset(MSGFMT_EXE)
-		endif()
+		message(WARNING "msgfmt not available and/or could not be installed, text translations won't be built.")
 	endif()
 endif()
 
@@ -845,7 +877,8 @@ endif()
 
 add_custom_command(OUTPUT ${git_links} ${git_http_links}
 		COMMAND ${CMAKE_COMMAND} -P ${CMAKE_BINARY_DIR}/CreateLinks.cmake
-		DEPENDS git git-remote-http)
+		DEPENDS git git-remote-http
+		WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 add_custom_target(git-links ALL DEPENDS ${git_links} ${git_http_links})
 
 
@@ -1093,7 +1126,6 @@ set(NO_PTHREADS )
 set(NO_PYTHON )
 set(PAGER_ENV "LESS=FRX LV=-c")
 set(RUNTIME_PREFIX true)
-set(NO_GETTEXT )
 
 if(NOT CURL_FOUND)
 	set(NO_CURL 1)
@@ -1101,10 +1133,6 @@ endif()
 
 if(NOT EXPAT_FOUND)
 	set(NO_EXPAT 1)
-endif()
-
-if(NOT Intl_FOUND)
-	set(NO_GETTEXT 1)
 endif()
 
 if(NOT PERL_TESTS)
@@ -1133,7 +1161,7 @@ file(APPEND ${CMAKE_BINARY_DIR}/GIT-BUILD-OPTIONS "RUNTIME_PREFIX='${RUNTIME_PRE
 file(APPEND ${CMAKE_BINARY_DIR}/GIT-BUILD-OPTIONS "NO_PYTHON='${NO_PYTHON}'\n")
 file(APPEND ${CMAKE_BINARY_DIR}/GIT-BUILD-OPTIONS "SUPPORTS_SIMPLE_IPC='${SUPPORTS_SIMPLE_IPC}'\n")
 if(USE_VCPKG)
-	file(APPEND ${CMAKE_BINARY_DIR}/GIT-BUILD-OPTIONS "PATH=\"$PATH:$TEST_DIRECTORY/../compat/vcbuild/vcpkg/installed/${VCPKG_ARCH}/bin\"\n")
+	file(APPEND ${CMAKE_BINARY_DIR}/GIT-BUILD-OPTIONS "PATH=\"$PATH:${VCPKG_DIR}/installed/${VCPKG_ARCH}/bin\"\n")
 endif()
 
 #Make the tests work when building out of the source tree
@@ -1166,3 +1194,5 @@ endforeach()
 set_tests_properties("t.suite.t7112-reset-submodule" PROPERTIES TIMEOUT 4000)
 
 endif()#BUILD_TESTING
+
+# vim:set sw=8 ts=8 noet:

@@ -4,25 +4,26 @@ REM This script installs the "vcpkg" source package manager and uses
 REM it to build the third-party libraries that git requires when it
 REM is built using MSVC.
 REM
-REM [1] Install VCPKG.
-REM     [a] Create <root>/compat/vcbuild/vcpkg/
+REM [1] Install VCPKG (unless already exists.)
+REM     [a] Create %VCPKG_ROOT% defaulting to
+REM         <root>/compat/vcbuild/vcpkg/.
 REM     [b] Download "vcpkg".
 REM     [c] Compile using the currently installed version of VS.
-REM     [d] Create <root>/compat/vcbuild/vcpkg/vcpkg.exe
+REM     [d] Create %VCPKG_ROOT%/vcpkg.exe
 REM
-REM [2] Install third-party libraries.
+REM [2] Install third-party libraries (unless already installed.)
 REM     [a] Download each (which may also install CMAKE).
 REM     [b] Compile in RELEASE mode and install in:
-REM         vcpkg/installed/<arch>/{bin,lib}
+REM         %VCPKG_ROOT%/installed/<arch>/{bin,lib}
 REM     [c] Compile in DEBUG mode and install in:
-REM         vcpkg/installed/<arch>/debug/{bin,lib}
+REM         %VCPKG_ROOT%/installed/<arch>/debug/{bin,lib}
 REM     [d] Install headers in:
-REM         vcpkg/installed/<arch>/include
+REM         %VCPKG_ROOT%/installed/<arch>/include
 REM
 REM [3] Create a set of MAKE definitions for the top-level
 REM     Makefile to allow "make MSVC=1" to find the above
 REM     third-party libraries.
-REM     [a] Write vcpkg/VCPGK-DEFS
+REM     [a] Write %VCPKG_ROOT%/VCPGK-DEFS
 REM
 REM https://blogs.msdn.microsoft.com/vcblog/2016/09/19/vcpkg-a-tool-to-acquire-and-build-c-open-source-libraries-on-windows/
 REM https://github.com/Microsoft/vcpkg
@@ -33,45 +34,55 @@ REM ================================================================
 
 	SET arch=%1
 	IF NOT DEFINED arch (
-		echo defaulting to 'x64-windows`. Invoke %0 with 'x86-windows', 'x64-windows', or 'arm64-windows'
+		echo defaulting to 'x64-windows`. Invoke %0 with 'x86-windows', 'x64-windows', or 'arm64-windows', append '-static' for static builds. >&2
 		set arch=x64-windows
 	)
 
 	@FOR /F "delims=" %%D IN ("%~dp0") DO @SET cwd=%%~fD
 	cd %cwd%
 
-	dir vcpkg\vcpkg.exe >nul 2>nul && GOTO :install_libraries
+	IF NOT DEFINED VCPKG_ROOT (
+		set VCPKG_ROOT=%cwd%\vcpkg
+	) ELSE (IF NOT EXIST %VCPKG_ROOT%\..\ (
+		echo Invalid VCPKG_ROOT: %VCPKG_ROOT%, not under a valid directory. >&2
+		exit /B 1
+	))
+
+	IF EXIST %VCPKG_ROOT%\vcpkg.exe goto :install_libraries
 
 	git.exe version 2>nul
 	IF ERRORLEVEL 1 (
-	echo "***"
-	echo "Git not found. Please adjust your CMD path or Git install option."
-	echo "***"
-	EXIT /B 1 )
+		echo *** >&2
+		echo Git not found. Please adjust your CMD path or Git install option. >&2
+		echo *** >&2
+		EXIT /B 1
+	)
 
-	echo Fetching vcpkg in %cwd%vcpkg
-	git.exe clone https://github.com/Microsoft/vcpkg vcpkg
+	echo Fetching vcpkg in %VCPKG_ROOT%
+	git.exe clone https://github.com/Microsoft/vcpkg %VCPKG_ROOT%
 	IF ERRORLEVEL 1 ( EXIT /B 1 )
 
-	cd vcpkg
+	cd %VCPKG_ROOT%
 	echo Building vcpkg
 	powershell -exec bypass scripts\bootstrap.ps1
 	IF ERRORLEVEL 1 ( EXIT /B 1 )
 
-	echo Successfully installed %cwd%vcpkg\vcpkg.exe
+	echo Successfully installed %VCPKG_ROOT%\vcpkg.exe
 
 :install_libraries
 
-	echo Installing third-party libraries(%arch%)...
-	FOR %%i IN (zlib expat libiconv openssl libssh2 curl) DO (
-	    cd %cwd%vcpkg
-	    IF NOT EXIST "packages\%%i_%arch%" CALL :sub__install_one %%i
-	    IF ERRORLEVEL 1 ( EXIT /B 1 )
+	echo Installing third-party libraries(%arch%), this may take a while...
+	FOR %%i IN (zlib expat libiconv openssl libssh2 curl gettext) DO (
+	    IF NOT DEFINED NO_%%i (
+		cd %VCPKG_ROOT%
+		IF NOT EXIST "packages\%%i_%arch%" CALL :sub__install_one %%i
+		IF ERRORLEVEL 1 ( EXIT /B 1 )
+	    )
 	)
 
 :install_defines
 	cd %cwd%
-	SET inst=%cwd%vcpkg\installed\%arch%
+	SET inst=%VCPKG_ROOT%\installed\%arch%
 
 	echo vcpkg_inc=-I"%inst%\include">VCPKG-DEFS
 	echo vcpkg_rel_lib=-L"%inst%\lib">>VCPKG-DEFS
@@ -128,4 +139,8 @@ goto :EOF
 
 :curl_features
 set features=[core,openssl,schannel]
+goto :EOF
+
+:gettext_features
+set features=[tools]
 goto :EOF
