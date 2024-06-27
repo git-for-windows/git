@@ -1,5 +1,6 @@
 #define USE_THE_REPOSITORY_VARIABLE
 #include "git-compat-util.h"
+#include "config.h"
 #include "dir.h"
 #include "environment.h"
 #include "gvfs-helper-client.h"
@@ -340,6 +341,7 @@ static struct gh_server__process *gh_client__find_long_running_process(
 	struct gh_server__process *entry;
 	struct strvec argv = STRVEC_INIT;
 	struct strbuf quoted = STRBUF_INIT;
+	int fallback;
 
 	gh_client__choose_odb();
 
@@ -347,10 +349,17 @@ static struct gh_server__process *gh_client__find_long_running_process(
 	 * TODO decide what defaults we want.
 	 */
 	strvec_push(&argv, "gvfs-helper");
-	strvec_push(&argv, "--fallback");
 	strvec_push(&argv, "--cache-server=trust");
 	strvec_pushf(&argv, "--shared-cache=%s",
 			 gh_client__chosen_odb->path);
+
+	/* If gvfs.fallback=false, then don't add --fallback. */
+	if (!repo_config_get_bool(the_repository, "gvfs.fallback", &fallback) &&
+	    !fallback)
+		strvec_push(&argv, "--no-fallback");
+	else
+		strvec_push(&argv, "--fallback");
+
 	strvec_push(&argv, "server");
 
 	sq_quote_argv_pretty(&quoted, argv.v);
