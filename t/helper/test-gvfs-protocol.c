@@ -1581,6 +1581,14 @@ static enum worker_result dispatch(struct req *req)
 	const char *method;
 	enum worker_result wr;
 
+	if (strstr(req->uri_base.buf, MY_SERVER_TYPE__CACHE)) {
+		if (string_list_has_string(&mayhem_list, "cache_http_503")) {
+			logmayhem("cache_http_503");
+			return send_http_error(1, 503, "Service Unavailable", 2,
+					       WR_MAYHEM | WR_HANGUP);
+		}
+	}
+
 	if (string_list_has_string(&mayhem_list, "close_no_write")) {
 		logmayhem("close_no_write");
 		return WR_MAYHEM | WR_HANGUP;
