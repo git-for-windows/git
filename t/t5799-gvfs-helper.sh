@@ -1052,6 +1052,70 @@ test_expect_success 'successful retry after http-error: origin get' '
 '
 
 #################################################################
+# So far we have confirmed that gvfs-helper can recover from a network
+# error (with retries, since the cache-server was disabled in all of
+# the above tests).  Try again with fallback turned on.
+#
+# With mayhem "http_503" turned on both the cache and origin server
+# will always throw a 503 error.
+#
+# Confirm that we tried to make six connections: we should hit the
+# cache-server 3 times (one initial attempt and two retries) and then
+# try the origin server 3 times.
+#
+#################################################################
+
+test_expect_success 'http-error: 503 Service Unavailable (with retry and fallback)' '
+	test_when_finished "per_test_cleanup" &&
+	start_gvfs_protocol_server_with_mayhem http_503 &&
+
+	test_expect_code $GH__ERROR_CODE__HTTP_503 \
+		git -C "$REPO_T1" gvfs-helper \
+		--cache-server=trust \
+		--remote=origin \
+		--fallback \
+		get \
+		--max-retries=2 \
+		<"$OIDS_FILE" >OUT.output 2>OUT.stderr &&
+
+	stop_gvfs_protocol_server &&
+
+	test_grep "error: get: (http:503)" OUT.stderr &&
+	verify_connection_count 6
+'
+
+#################################################################
+# Now repeat the above, but explicitly turn off fallback.
+#
+# Again, we use mayhem "http_503".  However, with fallback turned
+# off, we will only attempt the 3 connections to the cache server.
+# We will not try to hit the origin server.
+#
+# So we should only see a total of 3 connections rather than the
+# six in the previous test.
+#
+#################################################################
+
+test_expect_success 'http-error: 503 Service Unavailable (with retry and no-fallback)' '
+	test_when_finished "per_test_cleanup" &&
+	start_gvfs_protocol_server_with_mayhem http_503 &&
+
+	test_expect_code $GH__ERROR_CODE__HTTP_503 \
+		git -C "$REPO_T1" gvfs-helper \
+		--cache-server=trust \
+		--remote=origin \
+		--no-fallback \
+		get \
+		--max-retries=2 \
+		<"$OIDS_FILE" >OUT.output 2>OUT.stderr &&
+
+	stop_gvfs_protocol_server &&
+
+	test_grep "error: get: (http:503)" OUT.stderr &&
+	verify_connection_count 3
+'
+
+#################################################################
 # Test HTTP Auth
 #
 #################################################################
