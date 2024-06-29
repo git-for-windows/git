@@ -1572,7 +1572,7 @@ int looks_like_command_line_option(const char *str)
 
 char *xdg_config_home_for(const char *subdir, const char *filename)
 {
-	const char *appdata, *home, *config_home;
+	const char *home, *config_home;
 	char *home_config = NULL;
 
 	assert(subdir);
@@ -1586,9 +1586,9 @@ char *xdg_config_home_for(const char *subdir, const char *filename)
 		home_config = mkpathdup("%s/.config/%s/%s", home, subdir, filename);
 
 	#ifdef WIN32
-	appdata = getenv("APPDATA");
+	const char *appdata = getenv("APPDATA");
 	if (appdata && *appdata) {
-		char *appdata_config = mkpathdup("%s/Git/%s", appdata, appdata, filename);
+		char *appdata_config = mkpathdup("%s/Git/%s", appdata, filename);
 		if (file_exists(appdata_config)) {
 			if (home_config && file_exists(home_config))
 				warning("'%s' was ignored because '%s' exists.", home_config, appdata_config);
