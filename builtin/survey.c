@@ -1724,6 +1724,16 @@ int cmd_survey(int argc, const char **argv, const char *prefix, struct repositor
  *    size of the set of "refs/tags/" that we visited while building
  *    the `ref_info` and `ref_array` and not need to ask the remote.
  *
+ *    [] Should the "string length of refnames / remote refs", for
+ *       example, be sub-divided by remote so we can project the
+ *       cost of the haves/wants overhead a fetch.
+ *
+ * [] Can we examine the merge commits and classify them as clean or
+ *    dirty?  (ie. ones with merge conflicts that needed to be
+ *    addressed during the merge itself.)
+ *
+ *    [] Do dirty merges affect performance of later operations?
+ *
  * [] Dump info on the complexity of the DAG.  Criss-cross merges.
  *    The number of edges that must be touched to compute merge bases.
  *    Edge length. The number of parallel lanes in the history that
