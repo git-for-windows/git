@@ -24,8 +24,12 @@ test_set_port GIT_TEST_GVFS_PROTOCOL_PORT
 #        actually use it).  We are only testing explicit object
 #        fetching using gvfs-helper.exe in isolation.
 #
+#    repo_t2:
+#        Another empty repo to use after we contaminate t1.
+#
 REPO_SRC="$(pwd)"/repo_src
 REPO_T1="$(pwd)"/repo_t1
+REPO_T2="$(pwd)"/repo_t2
 
 # Setup some loopback URLs where test-gvfs-protocol.exe will be
 # listening.  We will spawn it directly inside the repo_src directory,
@@ -45,6 +49,7 @@ ORIGIN_URL=http://$HOST_PORT/servertype/origin
 CACHE_URL=http://$HOST_PORT/servertype/cache
 
 SHARED_CACHE_T1="$(pwd)"/shared_cache_t1
+SHARED_CACHE_T2="$(pwd)"/shared_cache_t2
 
 # The pid-file is created by test-gvfs-protocol.exe when it starts.
 # The server will shut down if/when we delete it.  (This is a little
@@ -182,6 +187,10 @@ test_expect_success 'setup repos' '
 	mkdir "$SHARED_CACHE_T1/pack" &&
 	mkdir "$SHARED_CACHE_T1/info" &&
 	#
+	mkdir "$SHARED_CACHE_T2" &&
+	mkdir "$SHARED_CACHE_T2/pack" &&
+	mkdir "$SHARED_CACHE_T2/info" &&
+	#
 	# setup repo_t1 and point all of the gvfs.* values to repo_src.
 	#
 	test_create_repo "$REPO_T1" &&
@@ -190,6 +199,13 @@ test_expect_success 'setup repos' '
 	git -C "$REPO_T1" config --local gvfs.cache-server $CACHE_URL &&
 	git -C "$REPO_T1" config --local gvfs.sharedCache "$SHARED_CACHE_T1" &&
 	echo "$SHARED_CACHE_T1" >> "$REPO_T1"/.git/objects/info/alternates &&
+	#
+	test_create_repo "$REPO_T2" &&
+	git -C "$REPO_T2" branch -M main &&
+	git -C "$REPO_T2" remote add origin $ORIGIN_URL &&
+	git -C "$REPO_T2" config --local gvfs.cache-server $CACHE_URL &&
+	git -C "$REPO_T2" config --local gvfs.sharedCache "$SHARED_CACHE_T2" &&
+	echo "$SHARED_CACHE_T2" >> "$REPO_T2"/.git/objects/info/alternates &&
 	#
 	#
 	#
@@ -203,6 +219,7 @@ test_expect_success 'setup repos' '
 	EOF
 	chmod 755 creds.sh &&
 	git -C "$REPO_T1" config --local credential.helper "!f() { cat \"$(pwd)\"/creds.txt; }; f" &&
+	git -C "$REPO_T2" config --local credential.helper "!f() { cat \"$(pwd)\"/creds.txt; }; f" &&
 	#
 	# Create some test data sets.
 	#
@@ -1052,6 +1069,70 @@ test_expect_success 'successful retry after http-error: origin get' '
 '
 
 #################################################################
+# So far we have confirmed that gvfs-helper can recover from a network
+# error (with retries, since the cache-server was disabled in all of
+# the above tests).  Try again with fallback turned on.
+#
+# With mayhem "http_503" turned on both the cache and origin server
+# will always throw a 503 error.
+#
+# Confirm that we tried to make six connections: we should hit the
+# cache-server 3 times (one initial attempt and two retries) and then
+# try the origin server 3 times.
+#
+#################################################################
+
+test_expect_success 'http-error: 503 Service Unavailable (with retry and fallback)' '
+	test_when_finished "per_test_cleanup" &&
+	start_gvfs_protocol_server_with_mayhem http_503 &&
+
+	test_expect_code $GH__ERROR_CODE__HTTP_503 \
+		git -C "$REPO_T1" gvfs-helper \
+		--cache-server=trust \
+		--remote=origin \
+		--fallback \
+		get \
+		--max-retries=2 \
+		<"$OIDS_FILE" >OUT.output 2>OUT.stderr &&
+
+	stop_gvfs_protocol_server &&
+
+	test_grep "error: get: (http:503)" OUT.stderr &&
+	verify_connection_count 6
+'
+
+#################################################################
+# Now repeat the above, but explicitly turn off fallback.
+#
+# Again, we use mayhem "http_503".  However, with fallback turned
+# off, we will only attempt the 3 connections to the cache server.
+# We will not try to hit the origin server.
+#
+# So we should only see a total of 3 connections rather than the
+# six in the previous test.
+#
+#################################################################
+
+test_expect_success 'http-error: 503 Service Unavailable (with retry and no-fallback)' '
+	test_when_finished "per_test_cleanup" &&
+	start_gvfs_protocol_server_with_mayhem http_503 &&
+
+	test_expect_code $GH__ERROR_CODE__HTTP_503 \
+		git -C "$REPO_T1" gvfs-helper \
+		--cache-server=trust \
+		--remote=origin \
+		--no-fallback \
+		get \
+		--max-retries=2 \
+		<"$OIDS_FILE" >OUT.output 2>OUT.stderr &&
+
+	stop_gvfs_protocol_server &&
+
+	test_grep "error: get: (http:503)" OUT.stderr &&
+	verify_connection_count 3
+'
+
+#################################################################
 # Test HTTP Auth
 #
 #################################################################
@@ -1214,6 +1295,87 @@ test_expect_success 'integration: fully implicit: diff 2 commits' '
 		diff $(cat m1.branch)..$(cat m3.branch) \
 		>OUT.output 2>OUT.stderr
 '
+
+# T1 should be considered contaminated at this point.
+
+#################################################################
+# gvfs-helper.exe defaults to no fallback.
+# gvfs-helper-client.c defaults to adding `--fallback` to child process.
+#
+# `gvfs.fallback` was added to change the default behavior in the
+# gvfs-helper-client.c code to add either `--fallback` or `--no-fallback`
+# (for origin server load reasons).
+#
+# When `gvfs.fallback` is unset, we default to TRUE and pass `--fallback`.
+# Otherwise, we use the boolean value to decide.
+#
+# NOTE: We DO NOT attempt to count connection requests in the
+# following tests.  Since we are using a normal `git` command to drive
+# the `gvfs-helper-client.c` code (and spawn `git-gvfs-helper.exe`) we
+# cannot make assumptions on the number of child processes or
+# reqeusts.  The "promisor" logic may drive one or more single-item
+# GETs or a series of bulk POST attempts.  Therefore, we must rely
+# only on the result of the command and (implicitly) whether all
+# missing objects were resolved. We use mayhem features to selectively
+# break the cache and origin servers.
+#################################################################
+
+test_expect_success 'integration: implicit-get: http_503: diff 2 commits' '
+	test_when_finished "per_test_cleanup" &&
+
+	# Tell both servers to always send 503.
+	start_gvfs_protocol_server_with_mayhem http_503 &&
+
+	# Implicitly demand-load everything without any pre-seeding.
+	# (We cannot tell from whether fallback was used or not in this
+	# limited test.)
+	#
+	test_must_fail \
+		git -C "$REPO_T2" -c core.useGVFSHelper=true \
+			diff $(cat m1.branch)..$(cat m3.branch) \
+			>OUT.output 2>OUT.stderr &&
+
+	stop_gvfs_protocol_server
+'
+
+test_expect_success 'integration: implicit-get: cache_http_503,no-fallback: diff 2 commits' '
+	test_when_finished "per_test_cleanup" &&
+
+	# Tell cache server to send 503 and origin server to send 200.
+	start_gvfs_protocol_server_with_mayhem cache_http_503 &&
+
+	# Implicitly demand-load everything without any pre-seeding.
+	# This should fail because we do not allow fallback.
+	#
+	test_must_fail \
+		git -C "$REPO_T2" \
+			-c core.useGVFSHelper=true \
+			-c gvfs.fallback=false \
+			diff $(cat m1.branch)..$(cat m3.branch) \
+			>OUT.output 2>OUT.stderr &&
+
+	stop_gvfs_protocol_server
+'
+
+test_expect_success 'integration: implicit-get: cache_http_503,with-fallback: diff 2 commits' '
+	test_when_finished "per_test_cleanup" &&
+
+	# Tell cache server to send 503 and origin server to send 200.
+	start_gvfs_protocol_server_with_mayhem cache_http_503 &&
+
+	# Implicitly demand-load everything without any pre-seeding.
+	#
+	git -C "$REPO_T2" \
+		-c core.useGVFSHelper=true \
+		-c gvfs.fallback=true \
+		diff $(cat m1.branch)..$(cat m3.branch) \
+		>OUT.output 2>OUT.stderr &&
+
+	stop_gvfs_protocol_server
+'
+
+# T2 should be considered contaminated at this point.
+
 
 #################################################################
 # Duplicate packfile tests.

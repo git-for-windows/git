@@ -3,3 +3,8 @@ gvfs.cache-server::
 
 gvfs.sharedcache::
 	TODO
+
+gvfs.fallback::
+	If set to `false`, then never fallback to the origin server when the cache
+	server fails to connect. This will alert users to failures with the cache
+	server, but avoid causing throttling on the origin server.
