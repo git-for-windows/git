@@ -64,13 +64,20 @@ test_expect_success 'git survey (default)' '
 	-----------------------------------------------------
 
 	REFERENCES SUMMARY
-	========================
-	,       Ref Type | Count
-	-----------------+------
-	,       Branches |     1
-	     Remote refs |     0
-	      Tags (all) |     2
-	Tags (annotated) |     2
+	==================================
+	,                 Ref Type | Count
+	---------------------------+------
+	,                 Branches |     1
+	,              Remote refs |     0
+	,               Tags (all) |     2
+	,         Tags (annotated) |     2
+	,            Symbolic refs |     1
+	,               Loose refs |     4
+	,              Packed refs |     0
+	  Max local refname length |    15
+	 Sum local refnames length |    46
+	 Max remote refname length |     0
+	Sum remote refnames length |     0
 
 	REACHABLE OBJECT SUMMARY
 	========================
