@@ -4,6 +4,10 @@ survey.*::
 	background with these options.
 +
 --
+	survey.namerev::
+		Boolean to show/hide `git name-rev` information for each
+		reported commit and the containing commit of each
+		reported tree and blob.
 	verbose::
 		This boolean value implies the `--[no-]verbose` option.
 	progress::
@@ -11,4 +15,33 @@ survey.*::
 	top::
 		This integer value implies `--top=<N>`, specifying the
 		number of entries in the detail tables.
+	showBlobSizes::
+		A non-negative integer value.  Requests details on the
+		<n> largest file blobs by size in bytes.  Provides a
+		default value for `--blob-sizes=<n>` in
+		linkgit:git-survey[1].
+	showCommitParents::
+		A non-negative integer value.  Requests details on the
+		<n> commits with the most number of parents.  Provides a
+		default value for `--commit-parents=<n>` in
+		linkgit:git-survey[1].
+	showCommitSizes::
+		A non-negative integer value.  Requests details on the
+		<n> largest commits by size in bytes.  Generally, these
+		are the commits with the largest commit messages.
+		Provides a default value for `--commit-sizes=<n>` in
+		linkgit:git-survey[1].
+	showTreeEntries::
+		A non-negative integer value.  Requests details on the
+		<n> trees (directories) with the most number of entries
+		(files and subdirectories).  Provides a default value
+		for `--tree-entries=<n>` in linkgit:git-survey[1].
+	showTreeSizes::
+		A non-negative integer value.  Requests details on the
+		<n> largest trees (directories) by size in bytes.  This
+		will set will usually be equal to the
+		`survey.showTreeEntries` set, but may be skewed by very
+		long file or subdirectory entry names.  Provides a
+		default value for `--tree-sizes=<n>` in
+		linkgit:git-survey[1].
 --

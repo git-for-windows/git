@@ -32,6 +32,11 @@ OPTIONS
 --progress::
 	Show progress.  This is automatically enabled when interactive.
 
+--name-rev::
+--no-name-rev::
+	Print `git name-rev` output for each commit, tree, and blob.
+	Defaults to true.
+
 Ref Selection
 ~~~~~~~~~~~~~
 
@@ -59,6 +64,32 @@ only refs for the given options are added.
 --other::
 	Add notes (`refs/notes/`) and stashes (`refs/stash/`) to the set.
 
+Large Item Selection
+~~~~~~~~~~~~~~~~~~~~
+
+The following options control the optional display of large items under
+various dimensions of scale.  The OID of the largest `n` objects will be
+displayed in reverse sorted order.  For each, `n` defaults to 10.
+
+--commit-parents::
+	Shows the OIDs of the commits with the most parent commits.
+
+--commit-sizes::
+	Shows the OIDs of the largest commits by size in bytes.  This is
+	usually the ones with the largest commit messages.
+
+--tree-entries::
+	Shows the OIDs of the trees with the most number of entries.  These
+	are the directories with the most number of files or subdirectories.
+
+--tree-sizes::
+	Shows the OIDs of the largest trees by size in bytes.  This set
+	will usually be the same as the vector of number of entries unless
+	skewed by very long entry names.
+
+--blob-sizes::
+	Shows the OIDs of the largest blobs by size in bytes.
+
 OUTPUT
 ------
 
@@ -77,6 +108,11 @@ Reachable Object Summary
 
 The reachable object summary shows the total number of each kind of Git
 object, including tags, commits, trees, and blobs.
+
+CONFIGURATION
+-------------
+
+include::config/survey.adoc[]
 
 GIT
 ---
