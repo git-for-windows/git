@@ -1551,13 +1551,37 @@ char *xdg_config_home_for(const char *subdir, const char *filename)
 	config_home = getenv("XDG_CONFIG_HOME");
 	if (config_home && *config_home)
 		ret = mkpathdup("%s/%s/%s", config_home, subdir, filename);
-	else if ((home = getenv("HOME")))
-		ret = mkpathdup("%s/.config/%s/%s", home, subdir, filename);
-	else
-		return NULL;
+	else {
+		home = getenv("HOME");
+		ret = home && *home ?
+			mkpathdup("%s/.config/%s/%s", home, subdir, filename) :
+			NULL;
+
+#ifdef WIN32
+		{
+			const char *appdata = getenv("APPDATA");
+
+			if (appdata && *appdata) {
+				char *appdata_config =
+					mkpathdup("%s/Git/%s", appdata, filename);
+
+				if (file_exists(appdata_config)) {
+					if (ret && file_exists(ret))
+						warning("'%s' was ignored because '%s' exists.",
+							ret, appdata_config);
+					free(ret);
+					ret = appdata_config;
+				} else {
+					free(appdata_config);
+				}
+			}
+		}
+#endif
+	}
 
 #ifdef GIT_WINDOWS_NATIVE
-	convert_slashes(ret);
+	if (ret)
+		convert_slashes(ret);
 #endif
 	return ret;
 }
