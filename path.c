@@ -1544,23 +1544,48 @@ int looks_like_command_line_option(const char *str)
 
 char *xdg_config_home_for(const char *subdir, const char *filename)
 {
-	char *ret;
 	const char *home, *config_home;
+	char *home_config = NULL;
 
 	assert(subdir);
 	assert(filename);
 	config_home = getenv("XDG_CONFIG_HOME");
-	if (config_home && *config_home)
-		ret = mkpathdup("%s/%s/%s", config_home, subdir, filename);
-	else if ((home = getenv("HOME")))
-		ret = mkpathdup("%s/.config/%s/%s", home, subdir, filename);
-	else
-		return NULL;
+	if (config_home && *config_home) {
+		char *ret = mkpathdup("%s/%s/%s", config_home, subdir, filename);
+#ifdef GIT_WINDOWS_NATIVE
+		convert_slashes(ret);
+#endif
+		return ret;
+	}
+
+	home = getenv("HOME");
+	if (home && *home)
+		home_config = mkpathdup("%s/.config/%s/%s", home, subdir, filename);
+
+	#ifdef WIN32
+	{
+		const char *appdata = getenv("APPDATA");
+		if (appdata && *appdata) {
+			char *appdata_config = mkpathdup("%s/Git/%s", appdata, filename);
+			if (file_exists(appdata_config)) {
+				if (home_config && file_exists(home_config))
+					warning("'%s' was ignored because '%s' exists.", home_config, appdata_config);
+				free(home_config);
+#ifdef GIT_WINDOWS_NATIVE
+				convert_slashes(appdata_config);
+#endif
+				return appdata_config;
+			}
+			free(appdata_config);
+		}
+	}
+	#endif
 
 #ifdef GIT_WINDOWS_NATIVE
-	convert_slashes(ret);
+	if (home_config)
+		convert_slashes(home_config);
 #endif
-	return ret;
+	return home_config;
 }
 
 char *xdg_config_home(const char *filename)
