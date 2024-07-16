@@ -155,6 +155,9 @@ test_expect_success 'mv refuses to move sparse-to-non-sparse' '
 
 test_expect_success 'recursive mv refuses to move (possible) sparse' '
 	test_when_finished rm -rf b c e sub2 &&
+
+	git config advice.sparseIndexExpanded false &&
+
 	git reset --hard &&
 	# Without cone mode, "sub" and "sub2" do not match
 	git sparse-checkout set sub/dir sub2/dir &&

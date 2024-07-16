@@ -701,6 +701,7 @@ test_expect_success 'pattern-checks: contained glob characters' '
 
 test_expect_success BSLASHPSPEC 'pattern-checks: escaped characters' '
 	git clone repo escaped &&
+	git -C escaped config advice.sparseIndexExpanded false &&
 	TREEOID=$(git -C escaped rev-parse HEAD:folder1) &&
 	NEWTREE=$(git -C escaped mktree <<-EOF
 	$(git -C escaped ls-tree HEAD)
