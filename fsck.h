@@ -133,6 +133,12 @@ int fsck_error_cb_print_missing_gitmodules(struct fsck_options *o,
 					   enum fsck_msg_id msg_id,
 					   const char *message);
 
+int fsck_refs_error_function(struct fsck_options *options,
+			     void *fsck_report,
+			     enum fsck_msg_type msg_type,
+			     enum fsck_msg_id msg_id,
+			     const char *message);
+
 struct fsck_object_report {
 	const struct object_id *oid;
 	enum object_type object_type;
@@ -180,6 +186,9 @@ struct fsck_options {
 	.gitattributes_found = OIDSET_INIT, \
 	.gitattributes_done = OIDSET_INIT, \
 	.error_func = fsck_error_cb_print_missing_gitmodules, \
+}
+#define FSCK_REFS_OPTIONS_DEFAULT { \
+	.error_func = fsck_refs_error_function, \
 }
 
 /* descend in all linked child objects
