@@ -138,6 +138,12 @@ struct fsck_object_report {
 	enum object_type object_type;
 };
 
+struct fsck_ref_report {
+	const char *path;
+	const struct object_id *oid;
+	const char *referent;
+};
+
 struct fsck_options {
 	fsck_walk_func walk;
 	fsck_error error_func;
@@ -215,6 +221,16 @@ int fsck_tag_standalone(const struct object_id *oid, const char *buffer,
  * checks.
  */
 int fsck_finish(struct fsck_options *options);
+
+/*
+ * Report an error or warning for refs.
+ */
+__attribute__((format (printf, 4, 5)))
+int fsck_report_ref(struct fsck_options *options,
+		    struct fsck_ref_report *report,
+		    enum fsck_msg_id msg_id,
+		    const char *fmt, ...);
+
 
 /*
  * Subsystem for storing human-readable names for each object.
