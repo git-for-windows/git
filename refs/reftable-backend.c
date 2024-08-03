@@ -493,8 +493,12 @@ static int reftable_ref_iterator_advance(struct ref_iterator *ref_iterator)
 				refs->base.repo->hash_algo);
 			break;
 		case REFTABLE_REF_SYMREF:
-			if (!refs_resolve_ref_unsafe(&iter->refs->base, iter->ref.refname,
-						     RESOLVE_REF_READING, &iter->oid, &flags))
+			iter->base.referent = refs_resolve_ref_unsafe(&iter->refs->base,
+								      iter->ref.refname,
+								      RESOLVE_REF_READING,
+								      &iter->oid,
+								      &flags);
+			if (!iter->base.referent)
 				oidclr(&iter->oid, refs->base.repo->hash_algo);
 			break;
 		default:
