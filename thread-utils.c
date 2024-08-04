@@ -18,6 +18,67 @@
 #  endif
 #endif
 
+#ifdef GIT_WINDOWS_NATIVE
+/// defines the GetLogicalProcessorInformationEx function
+typedef BOOL (*WINAPI glpie_t)(
+	LOGICAL_PROCESSOR_RELATIONSHIP,
+	PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX,
+	PDWORD);
+
+// Classic way to get number of cores in windows.
+static size_t get_windows_compatible_n_cores() {
+	SYSTEM_INFO info;
+	GetSystemInfo(&info);
+	if ((int)info.dwNumberOfProcessors > 0)
+		return (int)info.dwNumberOfProcessors;
+}
+
+/*
+ * Windows NUMA support is particular
+ * https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getlogicalprocessorinformationex#remarks
+ *
+ * New api here:
+ * https://learn.microsoft.com/en-us/windows/win32/procthread/numa-support
+ */
+static size_t get_windows_numa_n_cores() {
+	uint8_t *buffer = NULL;
+	size_t n_cores = 0;
+	DWORD length = 0;
+	HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
+
+	glpie_t GetLogicalProcessorInformationEx = (glpie_t)GetProcAddress(kernel32, "GetLogicalProcessorInformationEx");
+	if (!GetLogicalProcessorInformationEx) {
+		return 0;
+	}
+
+	GetLogicalProcessorInformationEx(RelationAll, NULL, &length);
+	if (length < 1 || GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+		return 0;
+	}
+
+	buffer = malloc(length);
+	if (!buffer || !GetLogicalProcessorInformationEx(RelationAll, (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)buffer, &length)) {
+		free(buffer);
+		return 0;
+	}
+
+	for (DWORD offset = 0; offset < length;) {
+		PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX info = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)(buffer + offset);
+		offset += info->Size;
+		if (info->Relationship != RelationProcessorCore) {
+			continue;
+		}
+		for (WORD group = 0; group < info->Processor.GroupCount; ++group) {
+			for (KAFFINITY mask = info->Processor.GroupMask[group].Mask; mask != 0; mask >>= 1) {
+				n_cores += mask & 1;
+			}
+		}
+	}
+	free(buffer);
+	return n_cores;
+}
+#endif
+
 int online_cpus(void)
 {
 #ifdef NO_PTHREADS
@@ -28,11 +89,11 @@ int online_cpus(void)
 #endif
 
 #ifdef GIT_WINDOWS_NATIVE
-	SYSTEM_INFO info;
-	GetSystemInfo(&info);
-
-	if ((int)info.dwNumberOfProcessors > 0)
-		return (int)info.dwNumberOfProcessors;
+	size_t n_cores = get_windows_numa_n_cores();
+	if (n_cores > 0) {
+		return n_cores;
+	}
+	return get_windows_compatible_n_cores();
 #elif defined(hpux) || defined(__hpux) || defined(_hpux)
 	struct pst_dynamic psd;
 
