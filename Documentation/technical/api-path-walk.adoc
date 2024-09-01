@@ -61,4 +61,5 @@ Examples
 
 See example usages in:
 	`t/helper/test-path-walk.c`,
+	`builtin/backfill.c`,
 	`builtin/pack-objects.c`
