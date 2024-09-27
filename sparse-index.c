@@ -377,6 +377,10 @@ void expand_index(struct index_state *istate, struct pattern_list *pl)
 	full = xcalloc(1, sizeof(struct index_state));
 	memcpy(full, istate, sizeof(struct index_state));
 
+	full->name_hash_initialized = 0;
+	memset(&full->name_hash, 0, sizeof(full->name_hash));
+	memset(&full->dir_hash, 0, sizeof(full->dir_hash));
+
 	/*
 	 * This slightly-misnamed 'full' index might still be sparse if we
 	 * are only modifying the list of sparse directories. This hinges
@@ -435,9 +439,15 @@ void expand_index(struct index_state *istate, struct pattern_list *pl)
 	}
 
 	/* Copy back into original index. */
+	if (istate->name_hash_initialized) {
+		hashmap_clear(&istate->name_hash);
+		hashmap_clear(&istate->dir_hash);
+	}
+
 	istate->name_hash_initialized = full->name_hash_initialized;
 	memcpy(&istate->name_hash, &full->name_hash, sizeof(full->name_hash));
 	memcpy(&istate->dir_hash, &full->dir_hash, sizeof(full->dir_hash));
+
 	istate->sparse_index = pl ? INDEX_PARTIALLY_SPARSE : INDEX_EXPANDED;
 	free(istate->cache);
 	istate->cache = full->cache;
