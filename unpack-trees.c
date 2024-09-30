@@ -1893,8 +1893,10 @@ static void update_sparsity_for_prefix(const char *prefix,
 	 *   the 'ensure_full_index(...)' below.
 	 */
 	if (!path_in_cone_mode_sparse_checkout(ce_prefix.buf, istate) &&
-	    index_name_pos(istate, ce_prefix.buf, ce_prefix.len) >= 0)
-		ensure_full_index(istate);
+	    index_name_pos(istate, ce_prefix.buf, ce_prefix.len) >= 0) {
+		const char *fmt = "could not find '%s' in index";
+		ensure_full_index_with_reason(istate, fmt, ce_prefix.buf);
+	}
 
 	strbuf_release(&ce_prefix);
 }

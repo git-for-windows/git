@@ -554,7 +554,9 @@ static int index_name_stage_pos(struct index_state *istate,
 		if (S_ISSPARSEDIR(ce->ce_mode) &&
 		    ce_namelen(ce) < namelen &&
 		    !strncmp(name, ce->name, ce_namelen(ce))) {
-			ensure_full_index(istate);
+			const char *fmt = "searching for '%s' and found parent dir '%s'";
+			ensure_full_index_with_reason(istate, fmt,
+						      name, ce->name);
 			return index_name_stage_pos(istate, name, namelen, stage, search_mode);
 		}
 	}

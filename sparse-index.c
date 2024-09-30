@@ -760,7 +760,9 @@ void expand_to_path(struct index_state *istate,
 			 * in the index, perhaps it exists within this
 			 * sparse-directory.  Expand accordingly.
 			 */
-			ensure_full_index(istate);
+			const char *fmt = "found index entry for '%s'";
+			ensure_full_index_with_reason(istate, fmt,
+						      path_mutable.buf);
 			break;
 		}
 
