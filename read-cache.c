@@ -2562,7 +2562,7 @@ int repo_index_has_changes(struct repository *repo,
 		return opt.flags.has_changes != 0;
 	} else {
 		/* TODO: audit for interaction with sparse-index. */
-		ensure_full_index(istate);
+		ensure_full_index_unaudited(istate);
 		for (i = 0; sb && i < istate->cache_nr; i++) {
 			if (i)
 				strbuf_addch(sb, ' ');
@@ -3856,7 +3856,7 @@ void overlay_tree_on_index(struct index_state *istate,
 
 	/* Hoist the unmerged entries up to stage #3 to make room */
 	/* TODO: audit for interaction with sparse-index. */
-	ensure_full_index(istate);
+	ensure_full_index_unaudited(istate);
 	for (i = 0; i < istate->cache_nr; i++) {
 		struct cache_entry *ce = istate->cache[i];
 		if (!ce_stage(ce))

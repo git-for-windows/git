@@ -161,7 +161,7 @@ void unmerge_index(struct index_state *istate, const struct pathspec *pathspec,
 		return;
 
 	/* TODO: audit for interaction with sparse-index. */
-	ensure_full_index(istate);
+	ensure_full_index_unaudited(istate);
 
 	for_each_string_list_item(item, istate->resolve_undo) {
 		const char *path = item->string;
