@@ -262,7 +262,8 @@ static int read_from_tree(const struct pathspec *pathspec,
 	opt.add_remove = diff_addremove;
 
 	if (pathspec->nr && pathspec_needs_expanded_index(the_repository->index, pathspec))
-		ensure_full_index(the_repository->index);
+		ensure_full_index_with_reason(the_repository->index,
+					      "reset pathspec");
 
 	if (do_diff_cache(tree_oid, &opt))
 		return 1;

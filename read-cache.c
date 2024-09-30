@@ -2348,7 +2348,7 @@ int do_read_index(struct index_state *istate, const char *path, int must_exist)
 	 */
 	prepare_repo_settings(istate->repo);
 	if (istate->repo->settings.command_requires_full_index)
-		ensure_full_index(istate);
+		ensure_full_index_with_reason(istate, "incompatible builtin");
 	else
 		ensure_correct_sparsity(istate);
 
@@ -3182,7 +3182,7 @@ static int do_write_locked_index(struct index_state *istate,
 				   "%s", get_lock_file_path(lock));
 
 	if (was_full)
-		ensure_full_index(istate);
+		ensure_full_index_with_reason(istate, "re-expanding after write");
 
 	if (ret)
 		return ret;
@@ -3297,7 +3297,7 @@ static int write_shared_index(struct index_state *istate,
 				   the_repository, "%s", get_tempfile_path(*temp));
 
 	if (was_full)
-		ensure_full_index(istate);
+		ensure_full_index_with_reason(istate, "re-expanding after write");
 
 	if (ret)
 		return ret;

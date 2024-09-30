@@ -492,7 +492,8 @@ void ensure_correct_sparsity(struct index_state *istate)
 	if (is_sparse_index_allowed(istate, 0))
 		convert_to_sparse(istate, 0);
 	else
-		ensure_full_index(istate);
+		ensure_full_index_with_reason(istate,
+					      "sparse index not allowed");
 }
 
 struct path_found_data {
@@ -695,7 +696,8 @@ void clear_skip_worktree_from_present_files(struct index_state *istate)
 		return;
 
 	if (clear_skip_worktree_from_present_files_sparse(istate)) {
-		ensure_full_index(istate);
+		ensure_full_index_with_reason(istate,
+			"failed to clear skip-worktree while sparse");
 		clear_skip_worktree_from_present_files_full(istate);
 	}
 }
