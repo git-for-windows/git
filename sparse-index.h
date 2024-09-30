@@ -46,4 +46,12 @@ void expand_index(struct index_state *istate, struct pattern_list *pl);
 
 void ensure_full_index(struct index_state *istate);
 
+/**
+ * If there is a clear reason why the sparse index is being expanded, then
+ * trace the information for why the expansion is occurring.
+ */
+void ensure_full_index_with_reason(struct index_state *istate,
+				   const char *fmt,
+				   ...);
+
 #endif

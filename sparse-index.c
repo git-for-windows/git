@@ -465,6 +465,24 @@ void ensure_full_index(struct index_state *istate)
 	expand_index(istate, NULL);
 }
 
+void ensure_full_index_with_reason(struct index_state *istate,
+				   const char *fmt, ...)
+{
+	va_list ap;
+	struct strbuf why = STRBUF_INIT;
+	if (!istate)
+		BUG("ensure_full_index_with_reason() must get an index!");
+	if (istate->sparse_index == INDEX_EXPANDED)
+		return;
+
+	va_start(ap, fmt);
+	strbuf_vaddf(&why, fmt, ap);
+	trace2_data_string("sparse-index", istate->repo, "expansion-reason", why.buf);
+	va_end(ap);
+	strbuf_release(&why);
+	ensure_full_index(istate);
+}
+
 void ensure_correct_sparsity(struct index_state *istate)
 {
 	/*
