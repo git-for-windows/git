@@ -641,6 +641,8 @@ static int clear_skip_worktree_from_present_files_sparse(struct index_state *ist
 			if (path_found(ce->name, &data)) {
 				if (S_ISSPARSEDIR(ce->ce_mode)) {
 					to_restart = 1;
+					trace2_data_string("sparse-index", istate->repo,
+							   "skip-worktree sparsedir", ce->name);
 					break;
 				}
 				ce->ce_flags &= ~CE_SKIP_WORKTREE;
