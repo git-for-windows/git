@@ -466,7 +466,7 @@ static int restore_untracked(struct object_id *u_tree)
 
 	child_process_init(&cp);
 	cp.git_cmd = 1;
-	strvec_pushl(&cp.args, "checkout-index", "--all", NULL);
+	strvec_pushl(&cp.args, "checkout-index", "--all", "-f", NULL);
 	strvec_pushf(&cp.env, "GIT_INDEX_FILE=%s",
 		     stash_index_path.buf);
 
