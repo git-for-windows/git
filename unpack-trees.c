@@ -1893,8 +1893,10 @@ static void update_sparsity_for_prefix(const char *prefix,
 	 *   the 'ensure_full_index(...)' below.
 	 */
 	if (!path_in_cone_mode_sparse_checkout(ce_prefix.buf, istate) &&
-	    index_name_pos(istate, ce_prefix.buf, ce_prefix.len) >= 0)
-		ensure_full_index(istate);
+	    index_name_pos(istate, ce_prefix.buf, ce_prefix.len) >= 0) {
+		const char *fmt = "could not find '%s' in index";
+		ensure_full_index_with_reason(istate, fmt, ce_prefix.buf);
+	}
 
 	strbuf_release(&ce_prefix);
 }
@@ -1938,9 +1940,9 @@ int unpack_trees(unsigned len, struct tree_desc *t, struct unpack_trees_options 
 
 	prepare_repo_settings(repo);
 	if (repo->settings.command_requires_full_index) {
-		ensure_full_index(o->src_index);
+		ensure_full_index_with_reason(o->src_index, "incompatible builtin");
 		if (o->dst_index)
-			ensure_full_index(o->dst_index);
+			ensure_full_index_with_reason(o->dst_index, "incompatible builtin");
 	}
 
 	if (o->reset == UNPACK_RESET_OVERWRITE_UNTRACKED &&

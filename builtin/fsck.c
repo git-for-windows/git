@@ -816,7 +816,7 @@ static void fsck_index(struct index_state *istate, const char *index_path,
 	unsigned int i;
 
 	/* TODO: audit for interaction with sparse-index. */
-	ensure_full_index(istate);
+	ensure_full_index_unaudited(istate);
 	for (i = 0; i < istate->cache_nr; i++) {
 		unsigned int mode;
 		struct blob *blob;

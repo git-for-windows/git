@@ -1,6 +1,8 @@
 #ifndef SPARSE_INDEX_H__
 #define SPARSE_INDEX_H__
 
+#include "strbuf.h"
+
 /*
  * If performing an operation where the index is supposed to expand to a
  * full index, then disable the advice message by setting this global to
@@ -45,5 +47,17 @@ struct pattern_list;
 void expand_index(struct index_state *istate, struct pattern_list *pl);
 
 void ensure_full_index(struct index_state *istate);
+
+/**
+ * If there is a clear reason why the sparse index is being expanded, then
+ * trace the information for why the expansion is occurring.
+ */
+void ensure_full_index_with_reason(struct index_state *istate,
+				   const char *fmt,
+				   ...);
+
+#define ensure_full_index_unaudited(i) \
+	ensure_full_index_with_reason((i), \
+		"unaudited call (%s.%d)", __FILE__, __LINE__);
 
 #endif

@@ -2597,7 +2597,7 @@ static int read_and_refresh_cache(struct repository *r,
 	 * expand the sparse index.
 	 */
 	if (opts->strategy && strcmp(opts->strategy, "ort"))
-		ensure_full_index(r->index);
+		ensure_full_index_with_reason(r->index, "non-ort merge strategy");
 	return 0;
 }
 

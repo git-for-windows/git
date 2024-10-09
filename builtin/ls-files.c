@@ -425,7 +425,7 @@ static void show_files(struct repository *repo, struct dir_struct *dir)
 			 * so expansion will leave the first 'i' entries
 			 * alone.
 			 */
-			ensure_full_index(repo->index);
+			ensure_full_index_with_reason(repo->index, "ls-files");
 			ce = repo->index->cache[i];
 		}
 
