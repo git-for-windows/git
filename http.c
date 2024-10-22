@@ -1125,8 +1125,12 @@ static CURL *get_curl_handle(void)
 #endif
 		}
 
-		if (ssl_options)
+		if (ssl_options) {
 			curl_easy_setopt(result, CURLOPT_SSL_OPTIONS, ssl_options);
+#ifdef GIT_CURL_HAVE_CURLOPT_PROXY_SSL_OPTIONS
+			curl_easy_setopt(result, CURLOPT_PROXY_SSL_OPTIONS, ssl_options);
+#endif
+		}
 	}
 
 	if (http_proactive_auth != PROACTIVE_AUTH_NONE)
