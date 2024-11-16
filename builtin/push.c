@@ -619,6 +619,10 @@ int cmd_push(int argc,
 	else if (recurse_submodules == RECURSE_SUBMODULES_ONLY)
 		flags |= TRANSPORT_RECURSE_SUBMODULES_ONLY;
 
+	prepare_repo_settings(the_repository);
+	if (the_repository->settings.pack_use_path_walk)
+		flags |= TRANSPORT_PUSH_NO_REUSE_DELTA;
+
 	if (tags)
 		refspec_append(&rs, "refs/tags/*");
 
