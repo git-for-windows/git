@@ -292,10 +292,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
 		add_compile_definitions(_CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
 	endif()
 	include_directories(${CMAKE_SOURCE_DIR}/compat/win32)
+	include_directories(${CMAKE_SOURCE_DIR}/compat/mimalloc)
 	add_compile_definitions(HAVE_ALLOCA_H NO_POSIX_GOODIES NATIVE_CRLF NO_UNIX_SOCKETS WIN32
 				_CONSOLE DETECT_MSYS_TTY STRIP_EXTENSION=".exe"  NO_SYMLINK_HEAD UNRELIABLE_FSTAT
 				NOGDI OBJECT_CREATION_MODE=1 __USE_MINGW_ANSI_STDIO=0
-				USE_NED_ALLOCATOR OVERRIDE_STRDUP MMAP_PREVENTS_DELETE USE_WIN32_MMAP
+				USE_MIMALLOC OVERRIDE_STRDUP MMAP_PREVENTS_DELETE USE_WIN32_MMAP
 				HAVE_WPGMPTR ENSURE_MSYSTEM_IS_SET HAVE_RTLGENRANDOM)
 	list(APPEND compat_SOURCES
 		compat/mingw.c
@@ -308,7 +309,21 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
 		compat/win32/trace2_win32_process_info.c
 		compat/win32/dirent.c
 		compat/win32/wsl.c
-		compat/nedmalloc/nedmalloc.c
+		compat/mimalloc/alloc-aligned.c
+		compat/mimalloc/alloc.c
+		compat/mimalloc/arena.c
+		compat/mimalloc/bitmap.c
+		compat/mimalloc/heap.c
+		compat/mimalloc/init.c
+		compat/mimalloc/options.c
+		compat/mimalloc/os.c
+		compat/mimalloc/page.c
+		compat/mimalloc/prim/windows/prim.c
+		compat/mimalloc/random.c
+		compat/mimalloc/segment.c
+		compat/mimalloc/segment-cache.c
+		compat/mimalloc/segment-map.c
+		compat/mimalloc/stats.c
 		compat/strdup.c
 		compat/win32/fscache.c)
 	set(NO_UNIX_SOCKETS 1)
