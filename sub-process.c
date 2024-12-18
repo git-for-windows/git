@@ -60,6 +60,8 @@ void subprocess_stop(struct hashmap *hashmap, struct subprocess_entry *entry)
 	finish_command(&entry->process);
 
 	hashmap_remove(hashmap, &entry->ent, NULL);
+	FREE_AND_NULL(entry->to_free);
+	entry->cmd = NULL;
 }
 
 static void subprocess_exit_handler(struct child_process *process)
@@ -97,6 +99,7 @@ int subprocess_start(struct hashmap *hashmap, struct subprocess_entry *entry, co
 	process->trace2_child_class = "subprocess";
 
 	entry->cmd = process->args.v[0];
+	entry->to_free = NULL;
 
 	err = start_command(process);
 	if (err) {
@@ -142,11 +145,13 @@ int subprocess_start_strvec(struct hashmap *hashmap,
 	process->trace2_child_class = "subprocess";
 
 	sq_quote_argv_pretty(&quoted, argv->v);
-	entry->cmd = strbuf_detach(&quoted, NULL);
+	entry->cmd = entry->to_free = strbuf_detach(&quoted, NULL);
 
 	err = start_command(process);
 	if (err) {
 		error("cannot fork to run subprocess '%s'", entry->cmd);
+		FREE_AND_NULL(entry->to_free);
+		entry->cmd = NULL;
 		return err;
 	}
 
@@ -155,6 +160,8 @@ int subprocess_start_strvec(struct hashmap *hashmap,
 	err = startfn(entry);
 	if (err) {
 		error("initialization for subprocess '%s' failed", entry->cmd);
+		FREE_AND_NULL(entry->to_free);
+		entry->cmd = NULL;
 		subprocess_stop(hashmap, entry);
 		return err;
 	}

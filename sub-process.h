@@ -25,6 +25,12 @@
 struct subprocess_entry {
 	struct hashmap_entry ent;
 	const char *cmd;
+	/**
+	 * In case `cmd` is a `strdup()`ed value that needs to be released,
+	 * you can assign the pointer to `to_free` so that `subprocess_stop()`
+	 * will release it.
+	 */
+	char *to_free;
 	struct child_process process;
 };
 
