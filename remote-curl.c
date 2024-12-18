@@ -212,6 +212,7 @@ static int set_option(const char *name, size_t namelen, const char *value)
 		options.refetch = 1;
 		return 0;
 	} else if (!strncmp(name, "filter", namelen)) {
+		free(options.filter);
 		options.filter = xstrdup(value);
 		return 0;
 	} else if (!strncmp(name, "object-format", namelen)) {
