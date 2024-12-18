@@ -404,6 +404,7 @@ static int release_helper(struct transport *transport)
 	free(data->import_marks);
 	free(data->export_marks);
 	res = disconnect_helper(transport);
+	list_objects_filter_release(&data->transport_options.filter_options);
 	free(transport->data);
 	return res;
 }
