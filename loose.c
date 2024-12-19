@@ -67,6 +67,7 @@ static int load_one_loose_object_map(struct repository *repo, struct odb_source 
 	struct odb_source_files *files = odb_source_files_downcast(source);
 	struct strbuf buf = STRBUF_INIT, path = STRBUF_INIT;
 	FILE *fp;
+	int ret = -1;
 
 	if (!files->loose->map)
 		loose_object_map_init(&files->loose->map);
@@ -100,13 +101,12 @@ static int load_one_loose_object_map(struct repository *repo, struct odb_source 
 		insert_loose_map(source, &oid, &compat_oid);
 	}
 
-	strbuf_release(&buf);
-	strbuf_release(&path);
-	return errno ? -1 : 0;
+	ret = 0;
 err:
+	fclose(fp);
 	strbuf_release(&buf);
 	strbuf_release(&path);
-	return -1;
+	return ret;
 }
 
 int repo_read_loose_object_map(struct repository *repo)
