@@ -152,7 +152,7 @@ void run_diff_files(struct rev_info *revs, unsigned int option)
 			continue;
 
 		if (ce_stage(ce)) {
-			struct combine_diff_path *dpath;
+			struct combine_diff_path *dpath = NULL;
 			struct diff_filepair *pair;
 			unsigned int wt_mode = 0;
 			int num_compare_stages = 0;
@@ -164,6 +164,7 @@ void run_diff_files(struct rev_info *revs, unsigned int option)
 			else {
 				if (changed < 0) {
 					perror(ce->name);
+					free(dpath);
 					continue;
 				}
 				wt_mode = 0;
