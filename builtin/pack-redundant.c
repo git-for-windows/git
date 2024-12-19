@@ -536,7 +536,7 @@ static void scan_alt_odb_packs(void)
 
 static struct pack_list * add_pack(struct packed_git *p)
 {
-	struct pack_list l;
+	struct pack_list l = { NULL };
 	size_t off = 0, step;
 	const unsigned char *base;
 
