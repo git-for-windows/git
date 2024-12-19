@@ -26,6 +26,7 @@ struct send_pack_args {
 		force_update:1,
 		use_thin_pack:1,
 		use_ofs_delta:1,
+		no_reuse_delta:1,
 		dry_run:1,
 		/* One of the SEND_PACK_PUSH_CERT_* constants. */
 		push_cert:2,

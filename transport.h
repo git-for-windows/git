@@ -158,6 +158,7 @@ struct transport {
 #define TRANSPORT_RECURSE_SUBMODULES_ONLY	(1<<15)
 #define TRANSPORT_PUSH_FORCE_IF_INCLUDES	(1<<16)
 #define TRANSPORT_PUSH_AUTO_UPSTREAM		(1<<17)
+#define TRANSPORT_PUSH_NO_REUSE_DELTA		(1<<18)
 
 int transport_summary_width(const struct ref *refs);
 

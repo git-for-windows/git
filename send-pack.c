@@ -89,6 +89,8 @@ static int pack_objects(struct repository *r,
 		strvec_push(&po.args, "--shallow");
 	if (args->disable_bitmaps)
 		strvec_push(&po.args, "--no-use-bitmap-index");
+	if (args->no_reuse_delta)
+		strvec_push(&po.args, "--no-reuse-delta");
 	po.in = -1;
 	po.out = args->stateless_rpc ? -1 : fd;
 	po.git_cmd = 1;
