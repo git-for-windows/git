@@ -1660,14 +1660,14 @@ struct tm *localtime_r(const time_t *timep, struct tm *result)
 
 char *mingw_strbuf_realpath(struct strbuf *resolved, const char *path)
 {
-	wchar_t wpath[MAX_PATH];
+	wchar_t wpath[MAX_LONG_PATH];
 	HANDLE h;
 	DWORD ret;
 	int len;
 	const char *last_component = NULL;
 	char *append = NULL;
 
-	if (xutftowcs_path(wpath, path) < 0)
+	if (xutftowcs_long_path(wpath, path) < 0)
 		return NULL;
 
 	h = CreateFileW(wpath, 0,
@@ -3926,16 +3926,16 @@ static int acls_supported(const char *path)
 
 int is_path_owned_by_current_sid(const char *path, struct strbuf *report)
 {
-	WCHAR wpath[MAX_PATH];
+	WCHAR wpath[MAX_LONG_PATH];
 	PSID sid = NULL;
 	PSECURITY_DESCRIPTOR descriptor = NULL;
 	DWORD err;
 
-	static wchar_t home[MAX_PATH];
+	static wchar_t home[MAX_LONG_PATH];
 
 	int result = 0;
 
-	if (xutftowcs_path(wpath, path) < 0)
+	if (xutftowcs_long_path(wpath, path) < 0)
 		return 0;
 
 	/*
