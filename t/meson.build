@@ -2,6 +2,7 @@ clar_test_suites = [
   'unit-tests/u-ctype.c',
   'unit-tests/u-hash.c',
   'unit-tests/u-mem-pool.c',
+  'unit-tests/u-mingw.c',
   'unit-tests/u-prio-queue.c',
   'unit-tests/u-reftable-tree.c',
   'unit-tests/u-strvec.c',
