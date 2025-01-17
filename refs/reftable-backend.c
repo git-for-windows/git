@@ -1629,6 +1629,9 @@ static int reftable_be_transaction_finish(struct ref_store *ref_store UNUSED,
 	struct reftable_transaction_data *tx_data = transaction->backend_data;
 	int ret = 0;
 
+	if (tx_data->args)
+		tx_data->args->max_index = transaction->max_index;
+
 	for (size_t i = 0; i < tx_data->args_nr; i++) {
 		tx_data->args[i].max_index = transaction->max_index;
 
