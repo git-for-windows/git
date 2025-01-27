@@ -139,8 +139,8 @@ int cmd_backfill(int argc, const char **argv, const char *prefix, struct reposit
 		OPT_END(),
 	};
 
-	if (argc == 2 && !strcmp(argv[1], "-h"))
-		usage_with_options(builtin_backfill_usage, options);
+	show_usage_with_options_if_asked(argc, argv,
+					 builtin_backfill_usage, options);
 
 	argc = parse_options(argc, argv, prefix, options, builtin_backfill_usage,
 			     0);
