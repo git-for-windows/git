@@ -11,7 +11,7 @@ export TEST_PASSES_SANITIZE_LEAK
 . ./test-lib.sh
 
 test_expect_success 'git survey -h shows experimental warning' '
-	test_expect_code 129 git survey -h 2>usage &&
+	test_expect_code 129 git survey -h >usage &&
 	grep "EXPERIMENTAL!" usage
 '
 
