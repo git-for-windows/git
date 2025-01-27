@@ -186,21 +186,21 @@ test_expect_success 'base & topic, sparse' '
 	test-tool path-walk --stdin-pl -- base topic <patterns >out &&
 
 	cat >expect <<-EOF &&
-	COMMIT::$(git rev-parse topic)
-	COMMIT::$(git rev-parse base)
-	COMMIT::$(git rev-parse base~1)
-	COMMIT::$(git rev-parse base~2)
+	0:commit::$(git rev-parse topic)
+	0:commit::$(git rev-parse base)
+	0:commit::$(git rev-parse base~1)
+	0:commit::$(git rev-parse base~2)
 	commits:4
-	TREE::$(git rev-parse topic^{tree})
-	TREE::$(git rev-parse base^{tree})
-	TREE::$(git rev-parse base~1^{tree})
-	TREE::$(git rev-parse base~2^{tree})
-	TREE:left/:$(git rev-parse base:left)
-	TREE:left/:$(git rev-parse base~2:left)
+	1:tree::$(git rev-parse topic^{tree})
+	1:tree::$(git rev-parse base^{tree})
+	1:tree::$(git rev-parse base~1^{tree})
+	1:tree::$(git rev-parse base~2^{tree})
+	3:tree:left/:$(git rev-parse base:left)
+	3:tree:left/:$(git rev-parse base~2:left)
 	trees:6
-	BLOB:a:$(git rev-parse base~2:a)
-	BLOB:left/b:$(git rev-parse base~2:left/b)
-	BLOB:left/b:$(git rev-parse base:left/b)
+	2:blob:a:$(git rev-parse base~2:a)
+	4:blob:left/b:$(git rev-parse base~2:left/b)
+	4:blob:left/b:$(git rev-parse base:left/b)
 	blobs:3
 	tags:0
 	EOF
