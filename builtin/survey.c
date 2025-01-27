@@ -902,8 +902,8 @@ int cmd_survey(int argc, const char **argv, const char *prefix, struct repositor
 		OPT_END(),
 	};
 
-	if (argc == 2 && !strcmp(argv[1], "-h"))
-		usage_with_options(survey_usage, survey_options);
+	show_usage_with_options_if_asked(argc, argv,
+					 survey_usage, survey_options);
 
 	if (isatty(2))
 		color_fprintf_ln(stderr,
