@@ -25,18 +25,23 @@ int iterator_next(struct reftable_iterator *it, struct reftable_record *rec)
 	return it->ops->next(it->iter_arg, rec);
 }
 
-static int empty_iterator_seek(void *arg UNUSED, struct reftable_record *want UNUSED)
+static int empty_iterator_seek(void *arg, struct reftable_record *want)
 {
+	REFTABLE_UNUSED(arg);
+	REFTABLE_UNUSED(want);
 	return 0;
 }
 
-static int empty_iterator_next(void *arg UNUSED, struct reftable_record *rec UNUSED)
+static int empty_iterator_next(void *arg, struct reftable_record *rec)
 {
+	REFTABLE_UNUSED(arg);
+	REFTABLE_UNUSED(rec);
 	return 1;
 }
 
-static void empty_iterator_close(void *arg UNUSED)
+static void empty_iterator_close(void *arg)
 {
+	REFTABLE_UNUSED(arg);
 }
 
 static struct reftable_iterator_vtable empty_vtable = {
@@ -143,11 +148,12 @@ static int indexed_table_ref_iter_next_block(struct indexed_table_ref_iter *it)
 	return 0;
 }
 
-static int indexed_table_ref_iter_seek(void *p UNUSED,
-				       struct reftable_record *want UNUSED)
+static int indexed_table_ref_iter_seek(void *p,
+				       struct reftable_record *want)
 {
-	BUG("seeking indexed table is not supported");
-	return -1;
+	REFTABLE_UNUSED(p);
+	REFTABLE_UNUSED(want);
+	return REFTABLE_API_ERROR;
 }
 
 static int indexed_table_ref_iter_next(void *p, struct reftable_record *rec)

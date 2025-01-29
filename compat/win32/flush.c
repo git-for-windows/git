@@ -1,6 +1,6 @@
 #include "git-compat-util.h"
 #include <winternl.h>
-#include "lazyload.h"
+#include "compat/win32/lazyload.h"
 
 int win32_fsync_no_flush(int fd)
 {

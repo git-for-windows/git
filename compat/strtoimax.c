@@ -1,4 +1,4 @@
-#include "../git-compat-util.h"
+#include "git-compat-util.h"
 
 intmax_t gitstrtoimax (const char *nptr, char **endptr, int base)
 {

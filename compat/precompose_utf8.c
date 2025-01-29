@@ -7,13 +7,13 @@
 #define USE_THE_REPOSITORY_VARIABLE
 
 #include "git-compat-util.h"
+#include "compat/precompose_utf8.h"
 #include "config.h"
 #include "environment.h"
 #include "gettext.h"
 #include "path.h"
 #include "strbuf.h"
 #include "utf8.h"
-#include "precompose_utf8.h"
 
 typedef char *iconv_ibp;
 static const char *repo_encoding = "UTF-8";

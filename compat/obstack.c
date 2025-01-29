@@ -19,7 +19,7 @@
 
 #include "git-compat-util.h"
 #include <gettext.h>
-#include "obstack.h"
+#include "compat/obstack.h"
 
 /* NOTE BEFORE MODIFYING THIS FILE: This version number must be
    incremented whenever callers compiled using an old obstack.h can no

@@ -7,8 +7,8 @@
  * no need for double-checking.
  */
 
-#include "../../git-compat-util.h"
-#include "pthread.h"
+#include "git-compat-util.h"
+#include "compat/win32/pthread.h"
 
 #include <errno.h>
 #include <limits.h>

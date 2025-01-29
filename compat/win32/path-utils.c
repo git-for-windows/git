@@ -1,7 +1,7 @@
 #define USE_THE_REPOSITORY_VARIABLE
 
-#include "../../git-compat-util.h"
-#include "../../environment.h"
+#include "git-compat-util.h"
+#include "environment.h"
 
 int win32_has_dos_drive_prefix(const char *path)
 {

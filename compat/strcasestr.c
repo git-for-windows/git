@@ -1,4 +1,4 @@
-#include "../git-compat-util.h"
+#include "git-compat-util.h"
 
 char *gitstrcasestr(const char *haystack, const char *needle)
 {

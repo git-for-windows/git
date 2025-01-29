@@ -1,6 +1,6 @@
 #ifndef __clang__
 #include <dispatch/dispatch.h>
-#include "fsm-darwin-gcc.h"
+#include "compat/fsmonitor/fsm-darwin-gcc.h"
 #else
 #include <CoreFoundation/CoreFoundation.h>
 #include <CoreServices/CoreServices.h>
@@ -24,8 +24,8 @@
 #endif
 
 #include "git-compat-util.h"
+#include "compat/fsmonitor/fsm-listen.h"
 #include "fsmonitor-ll.h"
-#include "fsm-listen.h"
 #include "fsmonitor--daemon.h"
 #include "fsmonitor-path-utils.h"
 #include "gettext.h"

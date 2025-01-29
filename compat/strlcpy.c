@@ -1,4 +1,4 @@
-#include "../git-compat-util.h"
+#include "git-compat-util.h"
 
 size_t gitstrlcpy(char *dest, const char *src, size_t size)
 {

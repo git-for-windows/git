@@ -9,7 +9,7 @@
  *  fopen after including git-compat-util.h is inadequate in this case.
  */
 #define SUPPRESS_FOPEN_REDEFINITION
-#include "../git-compat-util.h"
+#include "git-compat-util.h"
 
 FILE *git_fopen(const char *path, const char *mode)
 {

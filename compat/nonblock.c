@@ -1,5 +1,5 @@
 #include "git-compat-util.h"
-#include "nonblock.h"
+#include "compat/nonblock.h"
 
 #ifdef O_NONBLOCK
 
@@ -14,7 +14,7 @@ int enable_pipe_nonblock(int fd)
 
 #elif defined(GIT_WINDOWS_NATIVE)
 
-#include "win32.h"
+#include "compat/win32.h"
 
 int enable_pipe_nonblock(int fd)
 {

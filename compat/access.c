@@ -1,5 +1,6 @@
 #define COMPAT_CODE_ACCESS
-#include "../git-compat-util.h"
+
+#include "git-compat-util.h"
 
 /* Do the same thing access(2) does, but use the effective uid,
  * and don't make the mistake of telling root that any file is

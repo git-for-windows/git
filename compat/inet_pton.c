@@ -15,7 +15,7 @@
  * WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include "../git-compat-util.h"
+#include "git-compat-util.h"
 
 #ifndef NS_INT16SZ
 #define NS_INT16SZ       2

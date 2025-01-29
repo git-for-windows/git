@@ -1,7 +1,7 @@
 #include "git-compat-util.h"
+#include "compat/fsmonitor/fsm-listen.h"
 #include "config.h"
 #include "fsmonitor-ll.h"
-#include "fsm-listen.h"
 #include "fsmonitor--daemon.h"
 #include "gettext.h"
 #include "simple-ipc.h"

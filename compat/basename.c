@@ -1,5 +1,5 @@
-#include "../git-compat-util.h"
-#include "../strbuf.h"
+#include "git-compat-util.h"
+#include "strbuf.h"
 
 /* Adapted from libiberty's basename.c.  */
 char *gitbasename (char *path)
