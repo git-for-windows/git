@@ -30,6 +30,8 @@ struct refspec_item {
 	char *raw;
 };
 
+struct string_list;
+
 #define REFSPEC_FETCH 1
 #define REFSPEC_PUSH 0
 
@@ -70,5 +72,44 @@ struct strvec;
  */
 void refspec_ref_prefixes(const struct refspec *rs,
 			  struct strvec *ref_prefixes);
+
+/*
+ * Check whether a name matches any negative refspec in rs. Returns 1 if the
+ * name matches at least one negative refspec, and 0 otherwise.
+ */
+int omit_name_by_refspec(const char *name, struct refspec *rs);
+
+/*
+ * Checks whether a name matches a pattern and optionally generates a result.
+ * Returns 1 if the name matches the pattern, 0 otherwise.
+ */
+int match_name_with_pattern(const char *key, const char *name,
+				   const char *value, char **result);
+
+/*
+ * Queries a refspec for a match and updates the query item.
+ * Returns 0 on success, -1 if no match is found or negative refspec matches.
+ */
+int query_refspecs(struct refspec *rs, struct refspec_item *query);
+
+/*
+ * Queries a refspec for all matches and appends results to the provided string
+ * list.
+ */
+void query_refspecs_multiple(struct refspec *rs,
+				    struct refspec_item *query,
+				    struct string_list *results);
+
+/*
+ * Remove all entries in the input list which match any negative refspec in
+ * the refspec list.
+ */
+struct ref *apply_negative_refspecs(struct ref *ref_map, struct refspec *rs);
+
+/*
+ * Applies refspecs to a name and returns the corresponding destination.
+ * Returns the destination string if a match is found, NULL otherwise.
+ */
+char *apply_refspecs(struct refspec *rs, const char *name);
 
 #endif /* REFSPEC_H */
