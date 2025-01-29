@@ -14,11 +14,7 @@
 const char git_version_string[] = GIT_VERSION;
 const char git_built_from_commit_string[] = GIT_BUILT_FROM_COMMIT;
 
-/*
- * Trim and replace each character with ascii code below 32 or above
- * 127 (included) using a dot '.' character.
- */
-static void redact_non_printables(struct strbuf *buf)
+void redact_non_printables(struct strbuf *buf)
 {
 	strbuf_trim(buf);
 	for (size_t i = 0; i < buf->len; i++) {
