@@ -125,3 +125,10 @@ transfer.bundleURI::
 transfer.advertiseObjectInfo::
 	When `true`, the `object-info` capability is advertised by
 	servers. Defaults to false.
+
+transfer.advertiseOSVersion::
+	When set to `true` on the server, the server will advertise its
+	`os-version` capability to the client. On the client side, if set
+	to `true`, it will advertise its `os-version` capability to the
+	server only if the server also advertises its `os-version` capability.
+	Defaults to true.
