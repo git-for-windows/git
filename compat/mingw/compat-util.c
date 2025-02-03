@@ -23,7 +23,7 @@
 #include <sspi.h>
 #include "../write-or-die.h"
 #include "../repository.h"
-#include "win32/fscache.h"
+#include "compat/win32/fscache.h"
 
 #define HCAST(type, handle) ((type)(intptr_t)handle)
 
