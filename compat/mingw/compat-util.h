@@ -1,7 +1,7 @@
 #ifndef COMPAT_MINGW_COMPAT_UTIL_H
 #define COMPAT_MINGW_COMPAT_UTIL_H
 
-#include "posix.h"
+#include "compat/mingw/posix.h"
 
 extern int core_fscache;
 int are_long_paths_enabled(void);
