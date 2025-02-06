@@ -276,6 +276,9 @@ static int check_or_sanitize_refname(const char *refname, int flags,
 {
 	int component_len, component_count = 0;
 
+	if (!is_valid_path(refname))
+		return -1;
+
 	if (!strcmp(refname, "@")) {
 		/* Refname is a single character '@'. */
 		if (sanitized)
