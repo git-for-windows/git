@@ -3648,11 +3648,14 @@ int xwcstoutf(char *utf, const wchar_t *wcs, size_t utflen)
 }
 
 #ifdef ENSURE_MSYSTEM_IS_SET
+#if !defined(RUNTIME_PREFIX) || !defined(HAVE_WPGMPTR)
+static size_t append_system_bin_dirs(char *path UNUSED, size_t size UNUSED)
+{
+	return 0;
+}
+#else
 static size_t append_system_bin_dirs(char *path, size_t size)
 {
-#if !defined(RUNTIME_PREFIX) || !defined(HAVE_WPGMPTR)
-	return 0;
-#else
 	char prefix[32768];
 	const char *slash;
 	size_t len = xwcstoutf(prefix, _wpgmptr, sizeof(prefix)), off = 0;
@@ -3684,8 +3687,8 @@ static size_t append_system_bin_dirs(char *path, size_t size)
 	off += xsnprintf(path + off, size - off,
 			 "%.*s\\usr\\bin;", (int)len, prefix);
 	return off;
-#endif
 }
+#endif
 #endif
 
 static int is_system32_path(const char *path)
