@@ -8,7 +8,7 @@
 
 struct dirent {
 	unsigned char d_type; /* file type to prevent lstat after readdir */
-	char d_name[FLEX_ARRAY]; /* file name */
+	char d_name[/* FLEX_ARRAY */]; /* file name */
 };
 
 /*
