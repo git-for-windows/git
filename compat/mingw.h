@@ -41,7 +41,8 @@ static inline void convert_slashes(char *path)
 }
 struct strbuf;
 int mingw_is_mount_point(struct strbuf *path);
-#define is_mount_point mingw_is_mount_point
+extern int (*win32_is_mount_point)(struct strbuf *path);
+#define is_mount_point win32_is_mount_point
 #define PATH_SEP ';'
 char *mingw_query_user_email(void);
 #define query_user_email mingw_query_user_email
