@@ -857,7 +857,8 @@ static void survey_phase_objects(struct survey_context *ctx)
 	ctx->progress_nr = 0;
 	ctx->progress_total = 0;
 	if (ctx->opts.show_progress)
-		ctx->progress = start_progress(_("Walking objects"), 0);
+		ctx->progress = start_progress(ctx->repo,
+					       _("Walking objects"), 0);
 	walk_objects_by_path(&info);
 	stop_progress(&ctx->progress);
 
