@@ -292,4 +292,9 @@ int mingw_have_unix_sockets(void);
 #define have_unix_sockets mingw_have_unix_sockets
 #endif
 
+/*
+ * Check current process is inside Windows Container.
+ */
+int is_inside_windows_container(void);
+
 #endif /* COMPAT_MINGW_COMPAT_UTIL_H */
