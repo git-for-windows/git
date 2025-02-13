@@ -597,7 +597,8 @@ static void do_load_refs(struct survey_context *ctx,
 
 	if (ctx->opts.show_progress) {
 		ctx->progress_total = 0;
-		ctx->progress = start_progress(_("Scanning refs..."), 0);
+		ctx->progress = start_progress(ctx->repo,
+					       _("Scanning refs..."), 0);
 	}
 
 	filter_refs(ref_array, &filter, FILTER_REFS_KIND_MASK);
