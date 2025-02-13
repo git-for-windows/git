@@ -844,7 +844,8 @@ static void survey_phase_objects(struct survey_context *ctx)
 	ctx->progress_nr = 0;
 	ctx->progress_total = ctx->ref_array.nr;
 	if (ctx->opts.show_progress)
-		ctx->progress = start_progress(_("Preparing object walk"),
+		ctx->progress = start_progress(ctx->repo,
+					       _("Preparing object walk"),
 					       ctx->progress_total);
 	for (int i = 0; i < ctx->ref_array.nr; i++) {
 		struct ref_array_item *item = ctx->ref_array.items[i];
