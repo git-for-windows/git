@@ -557,7 +557,7 @@ int mingw_unlink(const char *pathname, int handle_in_use_error)
 			return 0;
 
 		if (!handle_in_use_error)
-			return ret;
+			return -1;
 	} while (retry_ask_yes_no(&tries, "Unlink of file '%s' failed. "
 			"Should I try again?", pathname));
 	return -1;
