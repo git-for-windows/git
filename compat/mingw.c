@@ -2937,7 +2937,7 @@ repeat:
 	if (gle == ERROR_ACCESS_DENIED) {
 		if (is_inside_windows_container()) {
 			/* Fall back to copy to destination & remove source */
-			if (CopyFileW(wpold, wpnew, FALSE) && !mingw_unlink(pold))
+			if (CopyFileW(wpold, wpnew, FALSE) && !mingw_unlink(pold, 1))
 				return 0;
 			gle = GetLastError();
 		} else if ((attrsold = GetFileAttributesW(wpold)) & FILE_ATTRIBUTE_READONLY) {
