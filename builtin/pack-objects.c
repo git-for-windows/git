@@ -3260,7 +3260,8 @@ static void find_deltas_by_region(struct object_entry *list,
 	progress_nr = regions[nr - 1].start + regions[nr - 1].nr;
 
 	if (progress)
-		progress_state = start_progress(_("Compressing objects by path"),
+		progress_state = start_progress(the_repository,
+						_("Compressing objects by path"),
 						progress_nr);
 
 	while (nr--)
@@ -3339,7 +3340,8 @@ static void ll_find_deltas_by_region(struct object_entry *list,
 	CALLOC_ARRAY(p, delta_search_threads);
 
 	if (progress)
-		progress_state = start_progress(_("Compressing objects by path"),
+		progress_state = start_progress(the_repository,
+						_("Compressing objects by path"),
 						progress_nr);
 	/* Partition the work amongst work threads. */
 	for (i = 0; i < delta_search_threads; i++) {
