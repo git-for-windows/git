@@ -344,10 +344,8 @@ static int setup_pending_objects(struct path_walk_info *info,
 		struct object *obj = pending->item;
 
 		/* Commits will be picked up by revision walk. */
-		if (obj->type == OBJ_COMMIT || obj->flags & SEEN)
+		if (obj->type == OBJ_COMMIT)
 			continue;
-
-		obj->flags |= SEEN;
 
 		/* Navigate annotated tag object chains. */
 		while (obj->type == OBJ_TAG) {
