@@ -666,6 +666,7 @@ done:
 	reftable_block_done(&footer);
 	reftable_block_done(&header);
 	if (err) {
+		reftable_free(r->name);
 		reftable_free(r);
 		block_source_close(source);
 	}
