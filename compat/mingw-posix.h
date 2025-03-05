@@ -195,6 +195,9 @@ int sigaction(int sig, struct sigaction *in, struct sigaction *out);
 int link(const char *oldpath, const char *newpath);
 int uname(struct utsname *buf);
 int readlink(const char *path, char *buf, size_t bufsiz);
+struct index_state;
+int mingw_create_symlink(struct index_state *index, const char *target, const char *link);
+#define create_symlink mingw_create_symlink
 
 /*
  * replacements of existing functions
