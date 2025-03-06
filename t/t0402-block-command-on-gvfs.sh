@@ -22,7 +22,6 @@ not_with_gvfs fsck
 not_with_gvfs gc
 not_with_gvfs gc --auto
 not_with_gvfs prune
-not_with_gvfs repack
 not_with_gvfs submodule status
 not_with_gvfs update-index --index-version 2
 not_with_gvfs update-index --skip-worktree
@@ -34,6 +33,16 @@ test_expect_success 'test gc --auto succeeds when disabled via config' '
 	test_config core.gvfs true &&
 	test_config gc.auto 0 &&
 	git gc --auto
+'
+
+test_expect_success 'test repack fails with VFS bit enabled' '
+	test_config core.gvfs true &&
+	test_must_fail git repack
+'
+
+test_expect_success 'test repack succeeds with VFS bit disabled' '
+	test_config core.gvfs 150 &&
+	git repack
 '
 
 test_done

@@ -713,7 +713,7 @@ static struct cmd_struct commands[] = {
 	{ "remote", cmd_remote, RUN_SETUP },
 	{ "remote-ext", cmd_remote_ext, NO_PARSEOPT },
 	{ "remote-fd", cmd_remote_fd, NO_PARSEOPT },
-	{ "repack", cmd_repack, RUN_SETUP | BLOCK_ON_GVFS_REPO },
+	{ "repack", cmd_repack, RUN_SETUP | BLOCK_ON_VFS_ENABLED },
 	{ "replace", cmd_replace, RUN_SETUP },
 	{ "replay", cmd_replay, RUN_SETUP },
 	{ "repo", cmd_repo, RUN_SETUP },
