@@ -4,6 +4,8 @@
 #include "git-compat-util.h"
 #include "reftable/reftable-writer.h"
 
+void t_reftable__initialize(void);
+
 struct reftable_buf;
 
 void t_reftable_set_hash(uint8_t *p, int i, enum reftable_hash id);

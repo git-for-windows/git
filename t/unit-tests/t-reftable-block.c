@@ -7,6 +7,7 @@ https://developers.google.com/open-source/licenses/bsd
 */
 
 #include "test-lib.h"
+#include "lib-reftable.h"
 #include "reftable/block.h"
 #include "reftable/blocksource.h"
 #include "reftable/constants.h"
@@ -374,6 +375,7 @@ static void t_index_block_read_write(void)
 
 int cmd_main(int argc UNUSED, const char *argv[] UNUSED)
 {
+	t_reftable__initialize();
 	TEST(t_index_block_read_write(), "read-write operations on index blocks work");
 	TEST(t_log_block_read_write(), "read-write operations on log blocks work");
 	TEST(t_obj_block_read_write(), "read-write operations on obj blocks work");

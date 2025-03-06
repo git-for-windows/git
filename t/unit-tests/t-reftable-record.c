@@ -7,6 +7,7 @@
 */
 
 #include "test-lib.h"
+#include "lib-reftable.h"
 #include "reftable/basics.h"
 #include "reftable/constants.h"
 #include "reftable/record.h"
@@ -567,6 +568,7 @@ static void t_reftable_index_record_roundtrip(void)
 
 int cmd_main(int argc UNUSED, const char *argv[] UNUSED)
 {
+	t_reftable__initialize();
 	TEST(t_reftable_ref_record_comparison(), "comparison operations work on ref record");
 	TEST(t_reftable_log_record_comparison(), "comparison operations work on log record");
 	TEST(t_reftable_index_record_comparison(), "comparison operations work on index record");

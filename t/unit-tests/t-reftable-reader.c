@@ -90,6 +90,7 @@ static int t_reader_reseek(void)
 
 int cmd_main(int argc UNUSED, const char *argv[] UNUSED)
 {
+	t_reftable__initialize();
 	TEST(t_reader_seek_once(), "reader can seek once");
 	TEST(t_reader_reseek(), "reader can reseek multiple times");
 	return test_done();
