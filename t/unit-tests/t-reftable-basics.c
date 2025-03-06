@@ -7,6 +7,7 @@ https://developers.google.com/open-source/licenses/bsd
 */
 
 #include "test-lib.h"
+#include "lib-reftable.h"
 #include "reftable/basics.h"
 
 struct integer_needle_lesseq_args {
@@ -27,6 +28,7 @@ static void *realloc_stub(void *p UNUSED, size_t size UNUSED)
 
 int cmd_main(int argc UNUSED, const char *argv[] UNUSED)
 {
+	t_reftable__initialize();
 	if_test ("binary search with binsearch works") {
 		int haystack[] = { 2, 4, 6, 8, 10 };
 		struct {

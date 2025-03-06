@@ -7,6 +7,7 @@ https://developers.google.com/open-source/licenses/bsd
 */
 
 #include "test-lib.h"
+#include "lib-reftable.h"
 #include "reftable/constants.h"
 #include "reftable/pq.h"
 #include "strbuf.h"
@@ -153,6 +154,7 @@ static void t_merged_iter_pqueue_top(void)
 
 int cmd_main(int argc UNUSED, const char *argv[] UNUSED)
 {
+	t_reftable__initialize();
 	TEST(t_pq_record(), "pq works with record-based comparison");
 	TEST(t_pq_index(), "pq works with index-based comparison");
 	TEST(t_merged_iter_pqueue_top(), "merged_iter_pqueue_top works");

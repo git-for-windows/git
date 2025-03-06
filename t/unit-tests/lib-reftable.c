@@ -1,10 +1,26 @@
 #define DISABLE_SIGN_COMPARE_WARNINGS
 
+#include "git-compat-util.h"
+
+/*
+ * Save pointers to the custom allocator, if any: `reftable/basics.h` (included
+ * by `lib-reftable.h`) will simply #undef these if they had been defined, and
+ * the information would then be lost.
+ */
+static void *(*git_malloc)(size_t) = malloc;
+static void *(*git_realloc)(void *, size_t) = realloc;
+static void (*git_free)(void *) = free;
+
 #include "lib-reftable.h"
 #include "test-lib.h"
 #include "reftable/constants.h"
 #include "reftable/writer.h"
 #include "strbuf.h"
+
+void t_reftable__initialize(void)
+{
+	reftable_set_alloc(git_malloc, git_realloc, git_free);
+}
 
 void t_reftable_set_hash(uint8_t *p, int i, enum reftable_hash id)
 {

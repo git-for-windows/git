@@ -1418,6 +1418,7 @@ static void t_reftable_invalid_limit_updates(void)
 
 int cmd_main(int argc UNUSED, const char *argv[] UNUSED)
 {
+	t_reftable__initialize();
 	TEST(t_empty_add(), "empty addition to stack");
 	TEST(t_read_file(), "read_lines works");
 	TEST(t_reflog_expire(), "expire reflog entries");

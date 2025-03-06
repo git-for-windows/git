@@ -957,6 +957,7 @@ static void t_corrupt_table(void)
 
 int cmd_main(int argc UNUSED, const char *argv[] UNUSED)
 {
+	t_reftable__initialize();
 	TEST(t_buffer(), "strbuf works as blocksource");
 	TEST(t_corrupt_table(), "read-write on corrupted table");
 	TEST(t_corrupt_table_empty(), "read-write on an empty table");
