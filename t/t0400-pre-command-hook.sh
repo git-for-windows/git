@@ -54,4 +54,15 @@ test_expect_success 'in a subdirectory, using an alias' '
 	test_line_count = 2 sub/log
 '
 
+test_expect_success 'with core.hooksPath' '
+	mkdir -p .git/alternateHooks &&
+	write_script .git/alternateHooks/pre-command <<-EOF &&
+	echo "alternate" >\$(git rev-parse --git-dir)/pre-command.out
+	EOF
+	write_script .git/hooks/pre-command <<-EOF &&
+	echo "original" >\$(git rev-parse --git-dir)/pre-command.out
+	EOF
+	git -c core.hooksPath=.git/alternateHooks status &&
+	test "alternate" = "$(cat .git/pre-command.out)"
+'
 test_done
