@@ -700,7 +700,7 @@ static struct cmd_struct commands[] = {
 	{ "pack-refs", cmd_pack_refs, RUN_SETUP },
 	{ "patch-id", cmd_patch_id, RUN_SETUP_GENTLY | NO_PARSEOPT },
 	{ "pickaxe", cmd_blame, RUN_SETUP },
-	{ "prune", cmd_prune, RUN_SETUP | BLOCK_ON_GVFS_REPO},
+	{ "prune", cmd_prune, RUN_SETUP | BLOCK_ON_VFS_ENABLED },
 	{ "prune-packed", cmd_prune_packed, RUN_SETUP },
 	{ "pull", cmd_pull, RUN_SETUP | NEED_WORK_TREE },
 	{ "push", cmd_push, RUN_SETUP },
