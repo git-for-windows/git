@@ -656,7 +656,7 @@ static struct cmd_struct commands[] = {
 	{ "for-each-ref", cmd_for_each_ref, RUN_SETUP },
 	{ "for-each-repo", cmd_for_each_repo, RUN_SETUP_GENTLY },
 	{ "format-patch", cmd_format_patch, RUN_SETUP },
-	{ "fsck", cmd_fsck, RUN_SETUP | BLOCK_ON_GVFS_REPO},
+	{ "fsck", cmd_fsck, RUN_SETUP | BLOCK_ON_VFS_ENABLED },
 	{ "fsck-objects", cmd_fsck, RUN_SETUP },
 	{ "fsmonitor--daemon", cmd_fsmonitor__daemon, RUN_SETUP },
 	{ "gc", cmd_gc, RUN_SETUP },
