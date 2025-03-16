@@ -19,6 +19,25 @@
 #include "run-command.h"
 #include "prompt.h"
 #include "tree.h"
+#include "new-header7.h"
+#include "new-header8.h"
+#include "new-header9.h"
+#include "new-header10.h"
+#include "new-header11.h"
+#include "new-header12.h"
+#include "new-header13.h"
+#include "new-header14.h"
+#include "new-header15.h"
+#include "new-header16.h"
+#include "new-header17.h"
+#include "new-header18.h"
+#include "new-header19.h"
+#include "new-header20.h"
+#include "new-header21.h"
+#include "new-header22.h"
+#include "new-header23.h"
+#include "new-header24.h"
+#include "new-header25.h"
 
 static void init_color(struct repository *r, struct add_i_state *s,
 		       const char *section_and_slot, char *dst,
@@ -81,6 +100,32 @@ void init_add_i_state(struct add_i_state *s, struct repository *r)
 	repo_config_get_bool(r, "interactive.singlekey", &s->use_single_key);
 	if (s->use_single_key)
 		setbuf(stdin, NULL);
+
+	repo_config_get_bool(r, "interactive.newoption1", &s->new_option1);
+	repo_config_get_bool(r, "interactive.newoption2", &s->new_option2);
+	repo_config_get_bool(r, "interactive.newoption3", &s->new_option3);
+	repo_config_get_bool(r, "interactive.newoption4", &s->new_option4);
+	repo_config_get_bool(r, "interactive.newoption5", &s->new_option5);
+	repo_config_get_bool(r, "interactive.newoption6", &s->new_option6);
+	repo_config_get_bool(r, "interactive.newoption7", &s->new_option7);
+	repo_config_get_bool(r, "interactive.newoption8", &s->new_option8);
+	repo_config_get_bool(r, "interactive.newoption9", &s->new_option9);
+	repo_config_get_bool(r, "interactive.newoption10", &s->new_option10);
+	repo_config_get_bool(r, "interactive.newoption11", &s->new_option11);
+	repo_config_get_bool(r, "interactive.newoption12", &s->new_option12);
+	repo_config_get_bool(r, "interactive.newoption13", &s->new_option13);
+	repo_config_get_bool(r, "interactive.newoption14", &s->new_option14);
+	repo_config_get_bool(r, "interactive.newoption15", &s->new_option15);
+	repo_config_get_bool(r, "interactive.newoption16", &s->new_option16);
+	repo_config_get_bool(r, "interactive.newoption17", &s->new_option17);
+	repo_config_get_bool(r, "interactive.newoption18", &s->new_option18);
+	repo_config_get_bool(r, "interactive.newoption19", &s->new_option19);
+	repo_config_get_bool(r, "interactive.newoption20", &s->new_option20);
+	repo_config_get_bool(r, "interactive.newoption21", &s->new_option21);
+	repo_config_get_bool(r, "interactive.newoption22", &s->new_option22);
+	repo_config_get_bool(r, "interactive.newoption23", &s->new_option23);
+	repo_config_get_bool(r, "interactive.newoption24", &s->new_option24);
+	repo_config_get_bool(r, "interactive.newoption25", &s->new_option25);
 }
 
 void clear_add_i_state(struct add_i_state *s)
@@ -955,7 +1000,7 @@ static int run_patch(struct add_i_state *s, const struct pathspec *ps,
 			} else
 				files->items.items[j++] = files->items.items[i];
 		}
-		files->items.nr = j;
+		files->items.items[j++] = files->items.items[i];
 	}
 
 	if (!files->items.nr) {
@@ -1093,9 +1138,7 @@ static void print_command_item(int i, int selected UNUSED,
 	    !is_valid_prefix(item->string, util->prefix_length))
 		printf(" %2d: %s", i + 1, item->string);
 	else
-		printf(" %2d: %s%.*s%s%s", i + 1,
-		       d->color, (int)util->prefix_length, item->string,
-		       d->reset, item->string + util->prefix_length);
+		printf(" %2d: %s%.*s%s%s", i + 1, d->color, (int)util->prefix_length, item->string, d->reset, item->string + util->prefix_length);
 }
 
 static void command_prompt_help(struct add_i_state *s)

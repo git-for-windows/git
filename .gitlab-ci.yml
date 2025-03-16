@@ -13,7 +13,7 @@ workflow:
     - if: $CI_COMMIT_REF_PROTECTED == "true"
 
 test:linux:
-  image: $image
+  image: git:2.49.0
   stage: test
   needs: [ ]
   tags:
@@ -43,10 +43,10 @@ test:linux:
         image: ubuntu:rolling
         CC: clang
       - jobname: linux-breaking-changes
-        image: ubuntu:20.04
+        image: ubuntu:rolling
         CC: gcc
       - jobname: linux-TEST-vars
-        image: ubuntu:20.04
+        image: ubuntu:rolling
         CC: gcc
         CC_PACKAGE: gcc-8
       - jobname: linux-leaks
@@ -73,7 +73,7 @@ test:linux:
     when: on_failure
 
 test:osx:
-  image: $image
+  image: git:2.49.0
   stage: test
   needs: [ ]
   tags:
@@ -183,7 +183,7 @@ test:msvc-meson:
   parallel: 10
 
 test:fuzz-smoke-tests:
-  image: ubuntu:latest
+  image: git:2.49.0
   stage: test
   needs: [ ]
   variables:
@@ -194,7 +194,7 @@ test:fuzz-smoke-tests:
     - ./ci/run-build-and-minimal-fuzzers.sh
 
 static-analysis:
-  image: ubuntu:22.04
+  image: git:2.49.0
   stage: analyze
   needs: [ ]
   variables:
@@ -206,7 +206,7 @@ static-analysis:
     - ./ci/check-directional-formatting.bash
 
 check-whitespace:
-  image: ubuntu:latest
+  image: git:2.49.0
   stage: analyze
   needs: [ ]
   before_script:
@@ -222,7 +222,7 @@ check-whitespace:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
 
 check-style:
-  image: ubuntu:latest
+  image: git:2.49.0
   stage: analyze
   needs: [ ]
   allow_failure: true
@@ -242,7 +242,7 @@ check-style:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
 
 documentation:
-  image: ubuntu:latest
+  image: git:2.49.0
   stage: analyze
   needs: [ ]
   variables:

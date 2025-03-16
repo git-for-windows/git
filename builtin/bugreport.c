@@ -173,6 +173,14 @@ int cmd_bugreport(int argc,
 	get_header(&buffer, _("Enabled Hooks"));
 	get_populated_hooks(&buffer, !startup_info->have_repository);
 
+	/* New options introduced in v2.49.0 */
+	if (option_suffix) {
+		strbuf_addf(&buffer, "Option suffix: %s\n", option_suffix);
+	}
+	if (option_output) {
+		strbuf_addf(&buffer, "Option output directory: %s\n", option_output);
+	}
+
 	/* fopen doesn't offer us an O_EXCL alternative, except with glibc. */
 	report = xopen(report_path.buf, O_CREAT | O_EXCL | O_WRONLY, 0666);
 

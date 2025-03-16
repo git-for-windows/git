@@ -142,7 +142,7 @@ fi
 ## Configure body starts here.
 
 AC_PREREQ(2.59)
-AC_INIT([git], [@GIT_VERSION@], [git@vger.kernel.org])
+AC_INIT([git], [2.49.0], [git@vger.kernel.org])
 
 AC_CONFIG_SRCDIR([git.c])
 
@@ -289,7 +289,7 @@ AS_HELP_STRING([],           [ARG can be also prefix for libpcre library and hea
     else
 	USE_LIBPCRE2=YesPlease
 	LIBPCREDIR=$withval
-	AC_MSG_NOTICE([Setting LIBPCREDIR to $LIBPCREDIR])
+	AC_MSG_NOTICE([Setting LIBPCREDIR to $withval])
         dnl USE_LIBPCRE2 can still be modified below, so don't substitute
         dnl it yet.
 	GIT_CONF_SUBST([LIBPCREDIR])
