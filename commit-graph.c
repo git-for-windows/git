@@ -2561,6 +2561,7 @@ int write_commit_graph(struct odb_source *source,
 
 	g = prepare_commit_graph(ctx.r);
 	for (struct commit_graph *chain = g; chain; chain = chain->base_graph)
+		/* Intentional: codeql[cpp/stack-address-escape] */
 		g->topo_levels = &topo_levels;
 
 	if (flags & COMMIT_GRAPH_WRITE_BLOOM_FILTERS)
