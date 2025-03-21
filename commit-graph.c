@@ -2561,6 +2561,7 @@ int write_commit_graph(struct odb_source *source,
 
 	g = prepare_commit_graph(ctx.r);
 	for (struct commit_graph *chain = g; chain; chain = chain->base_graph)
+		/* Intentional: codeql[cpp/stack-address-escape] */
 		g->topo_levels = &topo_levels;
 
 	if (flags & COMMIT_GRAPH_WRITE_BLOOM_FILTERS)
@@ -2783,6 +2784,11 @@ static int verify_one_commit_graph(struct commit_graph *g,
 			g->hash_algo);
 
 		graph_commit = lookup_commit(r, &cur_oid);
+		if (!graph_commit) {
+			graph_report(_("failed to look up commit %s for commit-graph"),
+				     oid_to_hex(&cur_oid));
+			continue;
+		}
 		odb_commit = (struct commit *)create_object(r, &cur_oid, alloc_commit_node(r));
 		if (repo_parse_commit_internal(r, odb_commit, 0, 0)) {
 			graph_report(_("failed to parse commit %s from object database for commit-graph"),

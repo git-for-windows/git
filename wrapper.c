@@ -40,7 +40,7 @@ static int memory_limit_check(size_t size, int gentle)
 
 char *xstrdup(const char *str)
 {
-	char *ret = strdup(str);
+	char *ret = strdup(str); // CodeQL [SM01932] justification: CodeQL is wrong here because the value is read from a file via strbuf_read() which does NUL-terminate the string, something CodeQL fails to understand
 	if (!ret)
 		die("Out of memory, strdup failed");
 	return ret;

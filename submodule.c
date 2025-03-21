@@ -2512,11 +2512,11 @@ int get_superproject_working_tree(struct strbuf *buf)
 		 * The format is <mode> SP <hash> SP <stage> TAB <full name> \0,
 		 * We're only interested in the name after the tab.
 		 */
-		super_sub = strchr(sb.buf, '\t') + 1;
-		super_sub_len = strlen(super_sub);
+		super_sub = strchr(sb.buf, '\t') + 1; // CodeQL [SM01932] justification: CodeQL is wrong here because the value is read from a file via strbuf_read() which does NUL-terminate the string, something CodeQL fails to understand
+		super_sub_len = strlen(super_sub); // CodeQL [SM01932] justification: CodeQL is wrong here because the value is read from a file via strbuf_read() which does NUL-terminate the string, something CodeQL fails to understand
 
 		if (super_sub_len > cwd_len ||
-		    strcmp(&cwd[cwd_len - super_sub_len], super_sub))
+		    strcmp(&cwd[cwd_len - super_sub_len], super_sub)) // CodeQL [SM01932] justification: CodeQL is wrong here because the value is read from a file via strbuf_read() which does NUL-terminate the string, something CodeQL fails to understand
 			BUG("returned path string doesn't match cwd?");
 
 		super_wt = xstrdup(cwd);

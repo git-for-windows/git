@@ -926,7 +926,7 @@ static int fsck_commit(const struct object_id *oid,
 {
 	struct object_id tree_oid, parent_oid;
 	unsigned author_count;
-	int err;
+	int err = 0;
 	const char *buffer_begin = buffer;
 	const char *buffer_end = buffer + size;
 	const char *p;

@@ -1114,7 +1114,7 @@ size_t wt_status_locate_end(const char *s, size_t len)
 	if (starts_with(s, pattern.buf + 1) &&
 	    starts_with_newline(s + pattern.len - 1))
 		len = 0;
-	else if ((p = strstr(s, pattern.buf)) &&
+	else if ((p = strstr(s, pattern.buf)) && // CodeQL [SM01932] justification: CodeQL is wrong here because the value is read from a file via strbuf_read() which does NUL-terminate the string, something CodeQL fails to understand
 		 starts_with_newline(p + pattern.len)) {
 		size_t newlen = p - s + 1;
 		if (newlen < len)

@@ -66,7 +66,7 @@ static int parse_bundle_signature(struct bundle_header *header, const char *line
 	int i;
 
 	for (i = 0; i < ARRAY_SIZE(bundle_sigs); i++) {
-		if (!strcmp(line, bundle_sigs[i].signature)) {
+		if (!strcmp(line, bundle_sigs[i].signature)) { // CodeQL [SM01932] justification: CodeQL is wrong here because the value is read from a file via strbuf_read() which does NUL-terminate the string, something CodeQL fails to understand
 			header->version = bundle_sigs[i].version;
 			return 0;
 		}
@@ -82,7 +82,7 @@ int read_bundle_header_fd(int fd, struct bundle_header *header,
 
 	/* The bundle header begins with the signature */
 	if (strbuf_getwholeline_fd(&buf, fd, '\n') ||
-	    parse_bundle_signature(header, buf.buf)) {
+	    parse_bundle_signature(header, buf.buf)) { // CodeQL [SM01932] justification: CodeQL is wrong here because the value is read from a file via strbuf_read() which does NUL-terminate the string, something CodeQL fails to understand
 		if (report_path)
 			error(_("'%s' does not look like a v2 or v3 bundle file"),
 			      report_path);

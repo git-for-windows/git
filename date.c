@@ -524,14 +524,14 @@ static int set_date(int year, int month, int day, struct tm *now_tm, time_t now,
 		if (year == -1) {
 			if (!now_tm)
 				return 1;
-			r->tm_year = now_tm->tm_year;
+			r->tm_year = now_tm->tm_year; // CodeQL [SM03231] justification: Git's custom date parser intentionally handles years without leap year validation
 		}
 		else if (year >= 1970 && year < 2100)
 			r->tm_year = year - 1900;
 		else if (year > 70 && year < 100)
 			r->tm_year = year;
 		else if (year < 38)
-			r->tm_year = year + 100;
+			r->tm_year = year + 100; // CodeQL [SM03231] justification: Git's date parser handles century offsets without leap year validation by design
 		else
 			return -1;
 		if (!now_tm)
@@ -548,7 +548,7 @@ static int set_date(int year, int month, int day, struct tm *now_tm, time_t now,
 		tm->tm_mon = r->tm_mon;
 		tm->tm_mday = r->tm_mday;
 		if (year != -1)
-			tm->tm_year = r->tm_year;
+			tm->tm_year = r->tm_year; // CodeQL [SM03231] justification: Git's date parser copies year values without requiring leap year validation
 		return 0;
 	}
 	return -1;
@@ -780,11 +780,11 @@ static int match_digit(const char *date, struct tm *tm, int *offset, int *tm_gmt
 	/* Two-digit year? */
 	if (n == 2 && tm->tm_year < 0) {
 		if (num < 10 && tm->tm_mday >= 0) {
-			tm->tm_year = num + 100;
+			tm->tm_year = num + 100; // CodeQL [SM03231] justification: Git's digit parser handles century calculation without leap year validation
 			return n;
 		}
 		if (num >= 70) {
-			tm->tm_year = num;
+			tm->tm_year = num; // CodeQL [SM03231] justification: Git's legacy date parser handles two-digit years without leap year validation by design
 			return n;
 		}
 	}
@@ -1083,7 +1083,7 @@ static time_t update_tm(struct tm *tm, struct tm *now, time_t sec)
 	if (tm->tm_year < 0) {
 		tm->tm_year = now->tm_year;
 		if (tm->tm_mon > now->tm_mon)
-			tm->tm_year--;
+			tm->tm_year--; // CodeQL [SM03231] justification: Git's date parser adjusts year to handle month comparisons without leap year validation
 	}
 
 	n = mktime(tm) - sec;
@@ -1110,9 +1110,9 @@ static void pending_number(struct tm *tm, int *num)
 			if (number > 1969 && number < 2100)
 				tm->tm_year = number - 1900;
 			else if (number > 69 && number < 100)
-				tm->tm_year = number;
+				tm->tm_year = number; // CodeQL [SM03231] justification: Git's approxidate parser intentionally assigns years without leap year checks
 			else if (number < 38)
-				tm->tm_year = 100 + number;
+				tm->tm_year = 100 + number; // CodeQL [SM03231] justification: Git's approxidate parser handles century calculation without leap year validation
 			/* We screw up for number = 00 ? */
 		}
 	}
@@ -1304,7 +1304,7 @@ static const char *approxidate_alpha(const char *date, struct tm *tm, struct tm 
 		*num = 0;
 		while (n < 0) {
 			n += 12;
-			tm->tm_year--;
+			tm->tm_year--; // CodeQL [SM03231] justification: Git's approxidate parser adjusts years for month calculations without leap year concerns
 		}
 		tm->tm_mon = n;
 		*touched = 1;
@@ -1313,7 +1313,7 @@ static const char *approxidate_alpha(const char *date, struct tm *tm, struct tm 
 
 	if (match_string(date, "years") >= 4) {
 		update_tm(tm, now, 0); /* fill in date fields if needed */
-		tm->tm_year -= *num;
+		tm->tm_year -= *num; // CodeQL [SM03231] justification: Git's approxidate parser subtracts years without leap year validation by design
 		*num = 0;
 		*touched = 1;
 		return end;

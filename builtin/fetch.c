@@ -555,7 +555,7 @@ static struct ref *get_ref_map(struct remote *remote,
 		if (remote &&
 		    (remote->fetch.nr ||
 		     /* Note: has_merge implies non-NULL branch->remote_name */
-		     (has_merge && !strcmp(branch->remote_name, remote->name)))) {
+		     (has_merge && branch && !strcmp(branch->remote_name, remote->name)))) {
 			for (i = 0; i < remote->fetch.nr; i++) {
 				get_fetch_map(remote_refs, &remote->fetch.items[i], &tail, 0);
 				if (remote->fetch.items[i].dst &&
@@ -573,6 +573,7 @@ static struct ref *get_ref_map(struct remote *remote,
 			 * Note: has_merge implies non-NULL branch->remote_name
 			 */
 			if (has_merge &&
+			    branch &&
 			    !strcmp(branch->remote_name, remote->name))
 				add_merge_config(&ref_map, remote_refs, branch, &tail);
 		} else if (!prefetch) {
@@ -2595,6 +2596,11 @@ int cmd_fetch(int argc,
 			die(_("must supply remote when using --negotiate-only"));
 		gtransport = prepare_transport(remote, 1);
 		if (gtransport->smart_options) {
+			/*
+			 * Intentionally assign the address of a local variable
+			 * to a non-local struct's field.
+			 * codeql[cpp/stack-address-escape]
+			 */
 			gtransport->smart_options->acked_commits = &acked_commits;
 		} else {
 			warning(_("protocol does not support --negotiate-only, exiting"));

@@ -353,7 +353,7 @@ int refname_is_safe(const char *refname)
 		 * For example: refs/foo/../bar is safe but refs/foo/../../bar
 		 * is not.
 		 */
-		buf = xmallocz(restlen);
+		buf = xmallocz(restlen); // CodeQL [SM01952] justification: CodeQL fails to recognize that xmallocz() accounts for the NUL terminator, instead assuming malloc() semantics
 		result = !normalize_path_copy(buf, rest) && !strcmp(buf, rest);
 		free(buf);
 		return result;

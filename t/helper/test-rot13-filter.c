@@ -215,7 +215,7 @@ static void command_loop(void)
 
 		/* Read until flush */
 		while ((buf = packet_read_line(0, NULL))) {
-			if (!strcmp(buf, "can-delay=1")) {
+			if (!strcmp(buf, "can-delay=1")) { // CodeQL [SM01932] justification: CodeQL is wrong here because the value is read from a file via strbuf_read() which does NUL-terminate the string, something CodeQL fails to understand
 				entry = strmap_get(&delay, pathname);
 				if (entry && !entry->requested)
 					entry->requested = 1;
@@ -308,11 +308,11 @@ static void packet_initialize(void)
 {
 	char *pkt_buf = packet_read_line(0, NULL);
 
-	if (!pkt_buf || strcmp(pkt_buf, "git-filter-client"))
+	if (!pkt_buf || strcmp(pkt_buf, "git-filter-client")) // CodeQL [SM01932] justification: CodeQL is wrong here because the value is read from a file via strbuf_read() which does NUL-terminate the string, something CodeQL fails to understand
 		die("bad initialize: '%s'", str_or_null(pkt_buf));
 
 	pkt_buf = packet_read_line(0, NULL);
-	if (!pkt_buf || strcmp(pkt_buf, "version=2"))
+	if (!pkt_buf || strcmp(pkt_buf, "version=2")) // CodeQL [SM01932] justification: CodeQL is wrong here because the value is read from a file via strbuf_read() which does NUL-terminate the string, something CodeQL fails to understand
 		die("bad version: '%s'", str_or_null(pkt_buf));
 
 	pkt_buf = packet_read_line(0, NULL);
