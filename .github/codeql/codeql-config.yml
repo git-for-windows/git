@@ -1,0 +1,131 @@
+name: "CodeQL config"
+
+queries:
+  - uses: security-extended
+
+query-filters:
+  - exclude:
+    # yes, this extra indentation is intentional
+      # too common in Git's source code
+      id: cpp/trivial-switch
+  - exclude:
+      id: cpp/loop-variable-changed
+  - exclude:
+      # we override this locally with a modified version
+      id: cpp/non-constant-format
+  - exclude:
+      # Git does not consider this a problem
+      id: cpp/irregular-enum-init
+  - exclude:
+      # Git has many long functions, this alert would match too many
+      id: cpp/poorly-documented-function
+  - exclude:
+      # In Git, there is a lot of commented-out code
+      id: cpp/commented-out-code
+  - exclude:
+      # While it is true that long switch cases are hard to read and
+      # validate, Git has way too many for us to allow this query to
+      # churn out alerts left and right
+      id: cpp/long-switch
+  - exclude:
+      # CodeQL does not expect Git to heed the umask(), but it does
+      id: cpp/world-writable-file-creation
+  - exclude:
+      # Git uses the construct `if (<not this>) ; else ...` often, to
+      # avoid an extra indentation level. CodeQL does not like that.
+      id: cpp/empty-block
+  - exclude:
+      # This rule unfortunately triggers some false positives, e.g.
+      # where Git tries to redact URLs or where Git specifically
+      # asks for a password upon GIT_SSL_CERT_PASSWORD_PROTECTED.
+      id: cpp/user-controlled-bypass
+  - exclude:
+      # This rule fails to recognize that xmallocz() _specifically_
+      # makes room for a trailing NUL, and instead assumes that this
+      # function behaves like malloc(), which does not.
+      id: cpp/invalid-pointer-deref
+  - exclude:
+      # CodeQL fails to recognize that xmallocz() accounts for the NUL,
+      # instead assuming malloc() semantics.
+      id: cpp/no-space-for-terminator
+  - exclude:
+      # Git does exchange plain-text passwords via stdin/stdout e.g.
+      # with helpers in the credential protocol, or in credential-cache.
+      # This rule, though, assumes that writing to _any_ file descriptor
+      # is unsafe.
+      id: cpp/cleartext-storage-file
+  - exclude:
+      # When storing the value of the environment variable `PWD` as the
+      # current directory in absolute_pathdup(), or when allocating memory
+      # for a binary patch where the size is specified in the patch itself,
+      # CodeQL assumes that this can lead to a denial of service because
+      # of an unbounded size, but Git's code works as designed here.
+      id: cpp/uncontrolled-allocation-size
+  - exclude:
+      # lock_repo_for_gc() has admittedly obtuse logic to parse the
+      # process ID out of the `gc.pid` file, which is correct, but
+      # due to its construction throws a false positive here.
+      id: cpp/missing-check-scanf
+  - exclude:
+      # discard_cache_entry() overwrites the name in a FLEX_ARRAY struct
+      # if GIT_TEST_VALIDATE_INDEX_CACHE_ENTRIES is set, which CodeQL fails
+      # to recognize as valid.
+      id: cpp/overrun-write
+  - exclude:
+      # Since `time_t` can be signed or unsigned, there is unfortunately
+      # no way to avoid letting this rule report a potential
+      id: cpp/integer-multiplication-cast-to-long
+  - exclude:
+      # There are many, many legitimate code paths in Git where a path is
+      # constructed from an environment variable, e.g. GIT_DIR. Let's suppress
+      # this slightly overzealous query.
+      id: cpp/path-injection
+  - exclude:
+      # Git has 99 instances of this at the time of writing :-(
+      id: cpp/declaration-hides-variable
+  - exclude:
+      id: cpp/declaration-hides-parameter
+  - exclude:
+      id: cpp/local-variable-hides-global-variable
+  - exclude:
+      id: cpp/complex-condition
+  - exclude:
+      # Nested, long-winded switch statements are hard to read and hard
+      # to reason about. Looking at you, `format_commit_one()`.
+      id: cpp/complex-block
+  - exclude:
+      # There are four instances of this at time of writing, all intentional.
+      # However, it is very easy to introduce unintentional re-use of loop
+      # variable names, therefore we will most likely want to either change these
+      # instances or add suppressions.
+      id: cpp/nested-loops-with-same-variable
+  - exclude:
+      # zOMG so many FIXMEs
+      id: cpp/fixme-comment
+  - exclude:
+      # Git assumes quite a bit about the user's control of the current worktree
+      # Therefore, it kind of assumes that TOCTOU issues are not a thing when
+      # it comes to files.
+      id: cpp/toctou-race-condition
+  - exclude:
+      # Too many results in Git where the code was, however, intentionally written
+      # the way it is.
+      id: cpp/stack-address-escape
+  - exclude:
+      id: cpp/inconsistent-null-check
+  - exclude:
+      # This would trigger alerts in the functions in `help.c` that want to open
+      # external programs to show manual pages.
+      id: cpp/uncontrolled-process-operation
+  - exclude:
+      # The code in t/unit-tests/u-ctype.c implicitly exercises the `sane_istest()`
+      # macro extensively, and CodeQL seems to miss the cast to `(unsigned char)`,
+      # thereby mistaking the accesses for being past the end of the array (which
+      # is incorrect).
+      #
+      # Ideally, we would exclude test programs from CodeQL anyways, but
+      # unfortunately there is no Makefile rule in Git's code base to build only
+      # the production code, and CodeQL's `paths-ignore` directive described at
+      # https://docs.github.com/en/code-security/code-scanning/creating-an-advanced-setup-for-code-scanning/customizing-your-advanced-setup-for-code-scanning#specifying-directories-to-scan
+      # unfortunately is _ignored_ for compiled languages.
+      id: cpp/overflow-buffer
