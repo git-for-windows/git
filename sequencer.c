@@ -2960,7 +2960,7 @@ static int have_finished_the_last_pick(void)
 		}
 	}
 	/* If there is only one line then we are done */
-	eol = strchr(buf.buf, '\n');
+	eol = strchr(buf.buf, '\n'); // CodeQL [SM01932] justification: CodeQL is wrong here because the value is read from a file via strbuf_read() which does NUL-terminate the string, something CodeQL fails to understand
 	if (!eol || !eol[1])
 		ret = 1;
 
@@ -3193,9 +3193,9 @@ static int read_populate_opts(struct replay_opts *opts)
 
 		if (read_oneliner(&buf, rebase_path_allow_rerere_autoupdate(),
 				  READ_ONELINER_SKIP_IF_EMPTY)) {
-			if (!strcmp(buf.buf, "--rerere-autoupdate"))
+			if (!strcmp(buf.buf, "--rerere-autoupdate")) // CodeQL [SM01932] justification: CodeQL is wrong here because the value is read from a file via strbuf_read() which does NUL-terminate the string, something CodeQL fails to understand
 				opts->allow_rerere_auto = RERERE_AUTOUPDATE;
-			else if (!strcmp(buf.buf, "--no-rerere-autoupdate"))
+			else if (!strcmp(buf.buf, "--no-rerere-autoupdate")) // CodeQL [SM01932] justification: CodeQL is wrong here because the value is read from a file via strbuf_read() which does NUL-terminate the string, something CodeQL fails to understand
 				opts->allow_rerere_auto = RERERE_NOAUTOUPDATE;
 			strbuf_reset(&buf);
 		}
@@ -3240,7 +3240,7 @@ static int read_populate_opts(struct replay_opts *opts)
 				  READ_ONELINER_SKIP_IF_EMPTY)) {
 			const char *p = ctx->current_fixups.buf;
 			ctx->current_fixup_count = 1;
-			while ((p = strchr(p, '\n'))) {
+			while ((p = strchr(p, '\n'))) { // CodeQL [SM01932] justification: CodeQL is wrong here because the value is read from a file via strbuf_read() which does NUL-terminate the string, something CodeQL fails to understand
 				ctx->current_fixup_count++;
 				p++;
 			}

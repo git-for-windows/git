@@ -1875,7 +1875,7 @@ int cmd_commit(int argc,
 		if (!stat(git_path_merge_mode(the_repository), &statbuf)) {
 			if (strbuf_read_file(&sb, git_path_merge_mode(the_repository), 0) < 0)
 				die_errno(_("could not read MERGE_MODE"));
-			if (!strcmp(sb.buf, "no-ff"))
+			if (!strcmp(sb.buf, "no-ff")) // CodeQL [SM01932] justification: CodeQL is wrong here because the value is read from a file via strbuf_read() which does NUL-terminate the string, something CodeQL fails to understand
 				allow_fast_forward = 0;
 		}
 		if (allow_fast_forward)

@@ -120,7 +120,7 @@ static const char *get_repo_path_1(struct strbuf *path, int *is_bundle)
 				continue;
 			len = read_in_full(fd, signature, 8);
 			close(fd);
-			if (len != 8 || strncmp(signature, "gitdir: ", 8))
+			if (len != 8 || strncmp(signature, "gitdir: ", 8)) // CodeQL [SM01932] justification: CodeQL is wrong here because the value is read from a file via strbuf_read() which does NUL-terminate the string, something CodeQL fails to understand
 				continue;
 			dst = read_gitfile(path->buf);
 			if (dst) {

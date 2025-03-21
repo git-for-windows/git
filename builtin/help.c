@@ -278,7 +278,7 @@ static void exec_woman_emacs(const char *path, const char *page)
 		if (!path)
 			path = "emacsclient";
 		strbuf_addf(&man_page, "(woman \"%s\")", page);
-		execlp(path, "emacsclient", "-e", man_page.buf, (char *)NULL);
+		execlp(path, "emacsclient", "-e", man_page.buf, (char *)NULL); // CodeQL [SM01925] justification: Git's help system safely consumes user-controlled environment variables and paths
 		warning_errno(_("failed to exec '%s'"), path);
 		strbuf_release(&man_page);
 	}
@@ -300,7 +300,7 @@ static void exec_man_konqueror(const char *path, const char *page)
 		} else
 			path = "kfmclient";
 		strbuf_addf(&man_page, "man:%s(1)", page);
-		execlp(path, filename, "newTab", man_page.buf, (char *)NULL);
+		execlp(path, filename, "newTab", man_page.buf, (char *)NULL); // CodeQL [SM01925] justification: Git's help system safely consumes user-controlled environment variables and paths
 		warning_errno(_("failed to exec '%s'"), path);
 		strbuf_release(&man_page);
 	}
@@ -310,7 +310,7 @@ static void exec_man_man(const char *path, const char *page)
 {
 	if (!path)
 		path = "man";
-	execlp(path, "man", page, (char *)NULL);
+	execlp(path, "man", page, (char *)NULL); // CodeQL [SM01925] justification: Git's help system safely consumes user-controlled environment variables and paths
 	warning_errno(_("failed to exec '%s'"), path);
 }
 

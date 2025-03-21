@@ -33,70 +33,70 @@
 
 void test_ctype__isspace(void)
 {
-	TEST_CHAR_CLASS(isspace, " \n\r\t");
+	TEST_CHAR_CLASS(isspace, " \n\r\t"); // CodeQL [SM01947] justification: Code implicitly exercises sane_istest() macro extensively; CodeQL misses the (unsigned char) cast, mistaking accesses for being past array end
 }
 
 void test_ctype__isdigit(void)
 {
-	TEST_CHAR_CLASS(isdigit, DIGIT);
+	TEST_CHAR_CLASS(isdigit, DIGIT); // CodeQL [SM01947] justification: Code implicitly exercises sane_istest() macro extensively; CodeQL misses the (unsigned char) cast, mistaking accesses for being past array end
 }
 
 void test_ctype__isalpha(void)
 {
-	TEST_CHAR_CLASS(isalpha, LOWER UPPER);
+	TEST_CHAR_CLASS(isalpha, LOWER UPPER); // CodeQL [SM01947] justification: Code implicitly exercises sane_istest() macro extensively; CodeQL misses the (unsigned char) cast, mistaking accesses for being past array end
 }
 
 void test_ctype__isalnum(void)
 {
-	TEST_CHAR_CLASS(isalnum, LOWER UPPER DIGIT);
+	TEST_CHAR_CLASS(isalnum, LOWER UPPER DIGIT); // CodeQL [SM01947] justification: Code implicitly exercises sane_istest() macro extensively; CodeQL misses the (unsigned char) cast, mistaking accesses for being past array end
 }
 
 void test_ctype__is_glob_special(void)
 {
-	TEST_CHAR_CLASS(is_glob_special, "*?[\\");
+	TEST_CHAR_CLASS(is_glob_special, "*?[\\"); // CodeQL [SM01947] justification: Code implicitly exercises sane_istest() macro extensively; CodeQL misses the (unsigned char) cast, mistaking accesses for being past array end
 }
 
 void test_ctype__is_regex_special(void)
 {
-	TEST_CHAR_CLASS(is_regex_special, "$()*+.?[\\^{|");
+	TEST_CHAR_CLASS(is_regex_special, "$()*+.?[\\^{|"); // CodeQL [SM01947] justification: Code implicitly exercises sane_istest() macro extensively; CodeQL misses the (unsigned char) cast, mistaking accesses for being past array end
 }
 
 void test_ctype__is_pathspec_magic(void)
 {
-	TEST_CHAR_CLASS(is_pathspec_magic, "!\"#%&',-/:;<=>@_`~");
+	TEST_CHAR_CLASS(is_pathspec_magic, "!\"#%&',-/:;<=>@_`~"); // CodeQL [SM01947] justification: Code implicitly exercises sane_istest() macro extensively; CodeQL misses the (unsigned char) cast, mistaking accesses for being past array end
 }
 
 void test_ctype__isascii(void)
 {
-	TEST_CHAR_CLASS(isascii, ASCII);
+	TEST_CHAR_CLASS(isascii, ASCII); // CodeQL [SM01947] justification: Code implicitly exercises sane_istest() macro extensively; CodeQL misses the (unsigned char) cast, mistaking accesses for being past array end
 }
 
 void test_ctype__islower(void)
 {
-	TEST_CHAR_CLASS(islower, LOWER);
+	TEST_CHAR_CLASS(islower, LOWER); // CodeQL [SM01947] justification: Code implicitly exercises sane_istest() macro extensively; CodeQL misses the (unsigned char) cast, mistaking accesses for being past array end
 }
 
 void test_ctype__isupper(void)
 {
-	TEST_CHAR_CLASS(isupper, UPPER);
+	TEST_CHAR_CLASS(isupper, UPPER); // CodeQL [SM01947] justification: Code implicitly exercises sane_istest() macro extensively; CodeQL misses the (unsigned char) cast, mistaking accesses for being past array end
 }
 
 void test_ctype__iscntrl(void)
 {
-	TEST_CHAR_CLASS(iscntrl, CNTRL);
+	TEST_CHAR_CLASS(iscntrl, CNTRL); // CodeQL [SM01947] justification: Code implicitly exercises sane_istest() macro extensively; CodeQL misses the (unsigned char) cast, mistaking accesses for being past array end
 }
 
 void test_ctype__ispunct(void)
 {
-	TEST_CHAR_CLASS(ispunct, PUNCT);
+	TEST_CHAR_CLASS(ispunct, PUNCT); // CodeQL [SM01947] justification: Code implicitly exercises sane_istest() macro extensively; CodeQL misses the (unsigned char) cast, mistaking accesses for being past array end
 }
 
 void test_ctype__isxdigit(void)
 {
-	TEST_CHAR_CLASS(isxdigit, DIGIT "abcdefABCDEF");
+	TEST_CHAR_CLASS(isxdigit, DIGIT "abcdefABCDEF"); // CodeQL [SM01947] justification: Code implicitly exercises sane_istest() macro extensively; CodeQL misses the (unsigned char) cast, mistaking accesses for being past array end
 }
 
 void test_ctype__isprint(void)
 {
-	TEST_CHAR_CLASS(isprint, LOWER UPPER DIGIT PUNCT " ");
+	TEST_CHAR_CLASS(isprint, LOWER UPPER DIGIT PUNCT " "); // CodeQL [SM01947] justification: Code implicitly exercises sane_istest() macro extensively; CodeQL misses the (unsigned char) cast, mistaking accesses for being past array end
 }

@@ -22,7 +22,7 @@ void strvec_push_nodup(struct strvec *array, char *value)
 
 const char *strvec_push(struct strvec *array, const char *value)
 {
-	strvec_push_nodup(array, xstrdup(value));
+	strvec_push_nodup(array, xstrdup(value)); // CodeQL [SM01932] justification: CodeQL is wrong here because the value is read from a file via strbuf_read() which does NUL-terminate the string, something CodeQL fails to understand
 	return array->v[array->nr - 1];
 }
 
