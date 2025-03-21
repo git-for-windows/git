@@ -5,6 +5,10 @@ on:
     tags:
       - 'v[0-9]*vfs*' # matches "v<number><any characters>vfs<any characters>"
 
+env:
+  DO_WIN_CODESIGN: ${{ secrets.WIN_CODESIGN_CERT_SECRET_NAME != '' && secrets.WIN_CODESIGN_PASS_SECRET_NAME != '' }}
+  DO_WIN_GPGSIGN: ${{ secrets.WIN_GPG_KEYGRIP_SECRET_NAME != '' && secrets.WIN_GPG_PRIVATE_SECRET_NAME != '' && secrets.WIN_GPG_PASSPHRASE_SECRET_NAME != '' }}
+
 jobs:
   # Check prerequisites for the workflow
   prereqs:
@@ -101,43 +105,62 @@ jobs:
           git remote add -f origin https://github.com/git-for-windows/git &&
           git fetch "https://github.com/${{github.repository}}" refs/tags/${tag_name}:refs/tags/${tag_name} &&
           git reset --hard ${tag_name}
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Download code signing secrets
+        id: codesign-secrets
+        if: env.DO_WIN_CODESIGN == 'true'
+        uses: ./.github/actions/akv-secret
+        with:
+          vault: ${{ secrets.AZURE_VAULT }}
+          secrets: |
+            ${{ secrets.WIN_CODESIGN_CERT_SECRET_NAME }} base64> home/.sig/codesign.p12
+            ${{ secrets.WIN_CODESIGN_PASS_SECRET_NAME }}       > home/.sig/codesign.pass
       - name: Prepare home directory for code-signing
-        env:
-          CODESIGN_P12: ${{secrets.CODESIGN_P12}}
-          CODESIGN_PASS: ${{secrets.CODESIGN_PASS}}
-        if: env.CODESIGN_P12 != '' && env.CODESIGN_PASS != ''
+        if: ${{ steps.codesign-secrets.outcome == 'success' }}
         shell: bash
         run: |
-          cd home &&
-          mkdir -p .sig &&
-          echo -n "$CODESIGN_P12" | tr % '\n' | base64 -d >.sig/codesign.p12 &&
-          echo -n "$CODESIGN_PASS" >.sig/codesign.pass
           git config --global alias.signtool '!sh "/usr/src/build-extra/signtool.sh"'
+      - name: Download GPG secrets
+        id: gpg-secrets
+        if: env.DO_WIN_GPGSIGN == 'true'
+        uses: ./.github/actions/akv-secret
+        with:
+          vault: ${{ secrets.AZURE_VAULT }}
+          secrets: |
+            ${{ secrets.WIN_GPG_KEYGRIP_SECRET_NAME }}       > $output:keygrip
+            ${{ secrets.WIN_GPG_PRIVATE_SECRET_NAME }} base64> $output:private-key
+            ${{ secrets.WIN_GPG_PASSPHRASE_SECRET_NAME }}    > $output:passphrase
       - name: Prepare home directory for GPG signing
-        if: env.GPGKEY != ''
+        if: ${{ steps.gpg-secrets.outputs.keygrip != '' && steps.gpg-secrets.outputs.private-key != '' }}
         shell: bash
         run: |
           # This section ensures that the identity for the GPG key matches the git user identity, otherwise
           # signing will fail
 
-          echo '${{secrets.PRIVGPGKEY}}' | tr % '\n' | gpg $GPG_OPTIONS --import &&
-          info="$(gpg --list-keys --with-colons "${GPGKEY%% *}" | cut -d : -f 1,10 | sed -n '/^uid/{s|uid:||p;q}')" &&
+          # Import the GPG private key
+          echo -n '${{ steps.gpg-secrets.outputs.private-key }}' | gpg $GPG_OPTIONS --import &&
+
+          info="$(gpg --list-keys --with-colons '${{ steps.gpg-secrets.outputs.keygrip }}' | cut -d : -f 1,10 | sed -n '/^uid/{s|uid:||p;q}')" &&
           git config --global user.name "${info% <*}" &&
           git config --global user.email "<${info#*<}"
-        env:
-          GPGKEY: ${{secrets.GPGKEY}}
       - name: Build mingw-w64-${{matrix.arch.toolchain}}-git
-        env:
-          GPGKEY: "${{secrets.GPGKEY}}"
         shell: bash
         run: |
           set -x
+
+          # Build the GPGKEY variable
+          export GPGKEY="${{ steps.gpg-secrets.outputs.keygrip }} --passphrase '${{ steps.gpg-secrets.outputs.passphrase }}' --yes --batch --no-tty --pinentry-mode loopback --digest-algo SHA256" &&
 
           # Make sure that there is a `/usr/bin/git` that can be used by `makepkg-mingw`
           printf '#!/bin/sh\n\nexec /${{matrix.arch.mingwprefix}}/bin/git.exe "$@"\n' >/usr/bin/git &&
 
           sh -x /usr/src/build-extra/please.sh build-mingw-w64-git --only-${{matrix.arch.name}} --build-src-pkg -o artifacts HEAD &&
-          if test -n "$GPGKEY"
+          if test -n "${{ steps.gpg-secrets.outputs.keygrip }}"
           then
             for tar in artifacts/*.tar*
             do
@@ -195,16 +218,31 @@ jobs:
         shell: bash
         run: |
           git clone --filter=blob:none --single-branch -b main https://github.com/git-for-windows/build-extra /usr/src/build-extra
+      - name: Log in to Azure
+        uses: azure/login@v2
+        if: env.DO_WIN_CODESIGN == 'true'
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Check out repository (for akv-secret Action)
+        if: env.DO_WIN_CODESIGN == 'true'
+        uses: actions/checkout@v4
+        with:
+          path: git
+      - name: Download code signing secrets
+        id: codesign-secrets
+        if: env.DO_WIN_CODESIGN == 'true'
+        uses: ./git/.github/actions/akv-secret
+        with:
+          vault: ${{ secrets.AZURE_VAULT }}
+          secrets: |
+            ${{ secrets.WIN_CODESIGN_CERT_SECRET_NAME }} base64> home/.sig/codesign.p12
+            ${{ secrets.WIN_CODESIGN_PASS_SECRET_NAME }}       > home/.sig/codesign.pass
       - name: Prepare home directory for code-signing
-        env:
-          CODESIGN_P12: ${{secrets.CODESIGN_P12}}
-          CODESIGN_PASS: ${{secrets.CODESIGN_PASS}}
-        if: env.CODESIGN_P12 != '' && env.CODESIGN_PASS != ''
+        if: ${{ steps.codesign-secrets.outcome == 'success' }}
         shell: bash
         run: |
-          mkdir -p home/.sig &&
-          echo -n "$CODESIGN_P12" | tr % '\n' | base64 -d >home/.sig/codesign.p12 &&
-          echo -n "$CODESIGN_PASS" >home/.sig/codesign.pass &&
           git config --global alias.signtool '!sh "/usr/src/build-extra/signtool.sh"'
       - name: Retarget auto-update to microsoft/git
         shell: bash
@@ -237,11 +275,16 @@ jobs:
 
           b=/usr/src/build-extra &&
 
-          sed -i -e '/^ *InstallAutoUpdater();$/a\
-              CustomPostInstall();' \
-            -e '/^ *UninstallAutoUpdater();$/a\
-              CustomPostUninstall();' \
-            $b/installer/install.iss &&
+          sed -i "# First, find the autoupdater parts in the install/uninstall steps
+            /if IsComponentInstalled('autoupdate')/{
+              # slurp in the next two lines, where the call to InstallAutoUpdater()/UninstallAutoUpdater() happens
+              N
+              N
+              # insert the corresponding CustomPostInstall()/CustomPostUninstall() call before that block
+              s/^\\([ \t]*\\)\(.*\\)\\(Install\\|Uninstall\\)\\(AutoUpdater\\)/\\1CustomPost\\3();\\n\\1\\2\\3\\4/
+            }" $b/installer/install.iss &&
+          grep CustomPostInstall $b/installer/install.iss &&
+          grep CustomPostUninstall $b/installer/install.iss &&
 
           cat >>$b/installer/helpers.inc.iss <<\EOF
 
@@ -304,11 +347,22 @@ jobs:
           fi &&
           openssl dgst -sha256 artifacts/${{matrix.type.fileprefix}}-*.exe | sed "s/.* //" >artifacts/sha-256.txt
       - name: Verify that .exe files are code-signed
-        if: env.CODESIGN_P12 != '' && env.CODESIGN_PASS != ''
-        shell: bash
+        if: env.DO_WIN_CODESIGN == 'true'
+        shell: pwsh
         run: |
-          PATH=$PATH:"/c/Program Files (x86)/Windows Kits/10/App Certification Kit/" \
-          signtool verify //pa artifacts/${{matrix.type.fileprefix}}-*.exe
+          $ret = 0
+          $files = Get-ChildItem -Path artifacts -Filter "${{matrix.type.fileprefix}}-*.exe"
+          foreach ($file in $files) {
+              $signature = Get-AuthenticodeSignature -FilePath $file.FullName
+              if ($signature.Status -eq 'Valid') {
+                  Write-Host "[ VALID ] $($file.FullName)"
+              } else {
+                  Write-Host "[INVALID] $($file.FullName)"
+                  Write-Host "  Message: $($signature.StatusMessage)"
+                  $ret = 1
+              }
+          }
+          exit $ret
       - name: Publish ${{matrix.type.name}}-${{matrix.arch.name}}
         uses: actions/upload-artifact@v4
         with:
