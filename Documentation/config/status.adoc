@@ -50,11 +50,11 @@ status.showUntrackedFiles::
 	systems. So, this variable controls how the commands display
 	the untracked files. Possible values are:
 +
---
+----
 * `no` - Show no untracked files.
 * `normal` - Show untracked files and directories.
 * `all` - Show also individual files in untracked directories.
---
+----
 +
 If this variable is not specified, it defaults to 'normal'.
 All usual spellings for Boolean value `true` are taken as `normal`
@@ -90,7 +90,7 @@ status.deserializeWait::
 	fall-back and compute status normally.  This will be overridden by
 	`--deserialize-wait=<value>` on the command line.
 +
---
+----
 * `fail` - cause git to exit with an error when the status cache file
 is stale; this is intended for testing and debugging.
 * `block` - cause git to spin and periodically retry the cache file
@@ -98,4 +98,4 @@ every 100 ms; this is intended to help coordinate with another git
 instance concurrently computing the cache file.
 * `no` - to immediately fall-back if cache file is stale.  This is the default.
 * `<timeout>` - time (in tenths of a second) to spin and retry.
---
+----

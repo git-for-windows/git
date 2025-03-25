@@ -3,7 +3,7 @@ survey.*::
 	command. The intention is that this command could be run in the
 	background with these options.
 +
---
+----
 	survey.namerev::
 		Boolean to show/hide `git name-rev` information for each
 		reported commit and the containing commit of each
@@ -44,4 +44,4 @@ survey.*::
 		long file or subdirectory entry names.  Provides a
 		default value for `--tree-sizes=<n>` in
 		linkgit:git-survey[1].
---
+----

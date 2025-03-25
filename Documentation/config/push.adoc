@@ -17,7 +17,7 @@ push.default::
 	(i.e. the fetch source is equal to the push destination),
 	`upstream` is probably what you want.  Possible values are:
 +
---
+----
 
 * `nothing` - do not push anything (error out) unless a refspec is
   given. This is primarily meant for people who want to
@@ -64,7 +64,7 @@ branches outside your control.
 This used to be the default, but not since Git 2.0 (`simple` is the
 new default).
 
---
+----
 
 push.followTags::
 	If set to true, enable `--follow-tags` option by default.  You
