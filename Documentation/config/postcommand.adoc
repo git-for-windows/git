@@ -1,0 +1,13 @@
+postCommand.strategy::
+	The `post-command` hook is run on every Git process by default. This
+	config option allows running the hook only conditionally, according
+	to these values:
++
+----
+`always`;;
+	run the `post-command` hook on every process (default).
+
+`worktree-change`;;
+	run the `post-command` hook only if the current process wrote to
+	the index and updated the worktree.
+----

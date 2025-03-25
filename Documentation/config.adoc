@@ -491,6 +491,8 @@ include::config/pack.adoc[]
 
 include::config/pager.adoc[]
 
+include::config/postcommand.adoc[]
+
 include::config/pretty.adoc[]
 
 include::config/promisor.adoc[]
