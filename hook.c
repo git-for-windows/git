@@ -347,6 +347,7 @@ int run_hooks_l(struct repository *r, const char *hook_name, ...)
 {
 	struct run_hooks_opt opt = RUN_HOOKS_OPT_INIT;
 	va_list ap;
+	int result;
 	const char *arg;
 
 	va_start(ap, hook_name);
@@ -354,5 +355,7 @@ int run_hooks_l(struct repository *r, const char *hook_name, ...)
 		strvec_push(&opt.args, arg);
 	va_end(ap);
 
-	return run_hooks_opt(r, hook_name, &opt);
+	result = run_hooks_opt(r, hook_name, &opt);
+	strvec_clear(&opt.args);
+	return result;
 }
