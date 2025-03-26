@@ -226,16 +226,6 @@ static inline const char *precompose_string_if_needed(const char *in)
 # include <sys/sysinfo.h>
 #endif
 
-#ifdef USE_MIMALLOC
-#include "mimalloc.h"
-#define malloc mi_malloc
-#define calloc mi_calloc
-#define realloc mi_realloc
-#define free mi_free
-#define strdup mi_strdup
-#define strndup mi_strndup
-#endif
-
 #ifndef PATH_SEP
 #define PATH_SEP ':'
 #endif
