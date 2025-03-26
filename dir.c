@@ -1150,8 +1150,13 @@ static int add_patterns(const char *fname, const char *base, int baselen,
 	 * on the file and defeats the purpose of the optimization here.  Since
 	 * symlinks are even more rare than .gitignore files, we force a fstat()
 	 * after our open() to get stat-data for the target file.
+	 *
+	 * Since `clang`'s `-Wunreachable-code` mode is clever, it would figure
+	 * out that on non-Windows platforms, this `lstat()` is unreachable.
+	 * We do want to keep the conditional block for the sake of Windows,
+	 * though, so let's use the `NOT_CONSTANT()` trick to suppress that error.
 	 */
-	if (is_fscache_enabled(fname)) {
+	if (NOT_CONSTANT(is_fscache_enabled(fname))) {
 		if (lstat(fname, &st) < 0) {
 			fd = -1;
 		} else {
