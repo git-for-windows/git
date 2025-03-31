@@ -33,6 +33,7 @@
 #define NO_PARSEOPT		(1<<5) /* parse-options is not used */
 #define DEPRECATED		(1<<6)
 #define BLOCK_ON_GVFS_REPO	(1<<7) /* command not allowed in GVFS repos */
+#define BLOCK_ON_VFS_ENABLED	(1<<8) /* command not allowed when virtual file system is used */
 
 struct cmd_struct {
 	const char *cmd;
@@ -568,6 +569,9 @@ static int run_builtin(struct cmd_struct *p, int argc, const char **argv, struct
 	if (!help && p->option & BLOCK_ON_GVFS_REPO && gvfs_config_is_set(repo, GVFS_BLOCK_COMMANDS))
 		die("'git %s' is not supported on a GVFS repo", p->cmd);
 
+	if (!help && p->option & BLOCK_ON_VFS_ENABLED && gvfs_config_is_set(repo, GVFS_USE_VIRTUAL_FILESYSTEM))
+		die("'git %s' is not supported when using the virtual file system", p->cmd);
+
 	if (run_pre_command_hook(the_repository, argv))
 		die("pre-command hook aborted command");
 
@@ -652,7 +656,7 @@ static struct cmd_struct commands[] = {
 	{ "for-each-ref", cmd_for_each_ref, RUN_SETUP },
 	{ "for-each-repo", cmd_for_each_repo, RUN_SETUP_GENTLY },
 	{ "format-patch", cmd_format_patch, RUN_SETUP },
-	{ "fsck", cmd_fsck, RUN_SETUP | BLOCK_ON_GVFS_REPO},
+	{ "fsck", cmd_fsck, RUN_SETUP | BLOCK_ON_VFS_ENABLED },
 	{ "fsck-objects", cmd_fsck, RUN_SETUP },
 	{ "fsmonitor--daemon", cmd_fsmonitor__daemon, RUN_SETUP },
 	{ "gc", cmd_gc, RUN_SETUP },
@@ -696,7 +700,7 @@ static struct cmd_struct commands[] = {
 	{ "pack-refs", cmd_pack_refs, RUN_SETUP },
 	{ "patch-id", cmd_patch_id, RUN_SETUP_GENTLY | NO_PARSEOPT },
 	{ "pickaxe", cmd_blame, RUN_SETUP },
-	{ "prune", cmd_prune, RUN_SETUP | BLOCK_ON_GVFS_REPO},
+	{ "prune", cmd_prune, RUN_SETUP | BLOCK_ON_VFS_ENABLED },
 	{ "prune-packed", cmd_prune_packed, RUN_SETUP },
 	{ "pull", cmd_pull, RUN_SETUP | NEED_WORK_TREE },
 	{ "push", cmd_push, RUN_SETUP },
@@ -709,7 +713,7 @@ static struct cmd_struct commands[] = {
 	{ "remote", cmd_remote, RUN_SETUP },
 	{ "remote-ext", cmd_remote_ext, NO_PARSEOPT },
 	{ "remote-fd", cmd_remote_fd, NO_PARSEOPT },
-	{ "repack", cmd_repack, RUN_SETUP | BLOCK_ON_GVFS_REPO },
+	{ "repack", cmd_repack, RUN_SETUP | BLOCK_ON_VFS_ENABLED },
 	{ "replace", cmd_replace, RUN_SETUP },
 	{ "replay", cmd_replay, RUN_SETUP },
 	{ "repo", cmd_repo, RUN_SETUP },
@@ -752,7 +756,7 @@ static struct cmd_struct commands[] = {
 #ifndef WITH_BREAKING_CHANGES
 	{ "whatchanged", cmd_whatchanged, RUN_SETUP | DEPRECATED },
 #endif
-	{ "worktree", cmd_worktree, RUN_SETUP | BLOCK_ON_GVFS_REPO },
+	{ "worktree", cmd_worktree, RUN_SETUP | BLOCK_ON_VFS_ENABLED },
 	{ "write-tree", cmd_write_tree, RUN_SETUP },
 };
 
