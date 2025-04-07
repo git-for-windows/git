@@ -16,7 +16,7 @@ trace2.eventTarget::
 	This variable controls the event target destination.
 	It may be overridden by the `GIT_TRACE2_EVENT` environment variable.
 	The following table shows possible values.
-+
+
 include::../trace2-target-values.adoc[]
 
 trace2.normalBrief::

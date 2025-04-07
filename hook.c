@@ -1,6 +1,7 @@
 #define USE_THE_REPOSITORY_VARIABLE
 
 #include "git-compat-util.h"
+#include "trace2/tr2_sid.h"
 #include "abspath.h"
 #include "environment.h"
 #include "advice.h"
@@ -176,6 +177,116 @@ static void run_hooks_opt_clear(struct run_hooks_opt *options)
 	strvec_clear(&options->args);
 }
 
+static char *get_post_index_change_sentinel_name(struct repository *r)
+{
+	struct strbuf path = STRBUF_INIT;
+	const char *sid = tr2_sid_get();
+	char *slash = strchr(sid, '/');
+
+	/*
+	 * Name is based on top-level SID, so children can indicate that
+	 * the top-level process should run the post-command hook.
+	 */
+	if (slash)
+		*slash = 0;
+
+	/*
+	 * Do not write to hooks directory, as it could be redirected
+	 * somewhere like the source tree.
+	 */
+	repo_git_path_replace(r, &path, "info/index-change-%s.snt", sid);
+
+	return strbuf_detach(&path, NULL);
+}
+
+static int write_post_index_change_sentinel(struct repository *r)
+{
+	char *path = get_post_index_change_sentinel_name(r);
+	FILE *fp = xfopen(path, "w");
+
+	if (fp) {
+		fprintf(fp, "run post-command hook");
+		fclose(fp);
+	}
+
+	free(path);
+	return fp ? 0 : -1;
+}
+
+/**
+ * Try to delete the sentinel file for this repository. If that succeeds, then
+ * return 1.
+ */
+static int post_index_change_sentinel_exists(struct repository *r)
+{
+	char *path;
+	int res = 1;
+
+	/* It can't exist if we don't have a gitdir. */
+	if (!r->gitdir)
+		return 0;
+
+	path = get_post_index_change_sentinel_name(r);
+
+	if (unlink(path)) {
+		if (is_missing_file_error(errno))
+			res = 0;
+		else
+			warning_errno("failed to remove index-change sentinel file '%s'", path);
+	}
+
+	free(path);
+	return res;
+}
+
+static int check_worktree_change(const char *key, const char *value,
+				       UNUSED const struct config_context *ctx,
+				       void *data)
+{
+	int *enabled = data;
+
+	if (!strcmp(key, "postcommand.strategy") &&
+	    !strcasecmp(value, "worktree-change")) {
+		*enabled = 1;
+		return 1;
+	}
+
+	return 0;
+}
+
+/**
+ * See if we can replace the requested hook with an internal behavior.
+ * Returns 0 if the real hook should run. Returns nonzero if we instead
+ * executed custom internal behavior and the real hook should not run.
+ */
+static int handle_hook_replacement(struct repository *r,
+				   const char *hook_name,
+				   struct strvec *args)
+{
+	int enabled = 0;
+
+	read_early_config(r, check_worktree_change, &enabled);
+
+	if (!enabled)
+		return 0;
+
+	if (!strcmp(hook_name, "post-index-change")) {
+		/* Create a sentinel file only if the worktree changed. */
+		if (!strcmp(args->v[0], "1"))
+			write_post_index_change_sentinel(r);
+
+		/* We don't skip post-index-change hooks that exist. */
+		return 0;
+	}
+	if (!strcmp(hook_name, "post-command") &&
+	    !post_index_change_sentinel_exists(r)) {
+		/* We skip the post-command hook in this case. */
+		return 1;
+	}
+
+	return 0;
+}
+
 int run_hooks_opt(struct repository *r, const char *hook_name,
 		  struct run_hooks_opt *options)
 {
@@ -185,7 +296,7 @@ int run_hooks_opt(struct repository *r, const char *hook_name,
 		.hook_name = hook_name,
 		.options = options,
 	};
-	const char *hook_path = find_hook(r, hook_name);
+	const char *hook_path;
 	int ret = 0;
 	const struct run_process_parallel_opts opts = {
 		.tr2_category = "hook",
@@ -200,6 +311,12 @@ int run_hooks_opt(struct repository *r, const char *hook_name,
 
 		.data = &cb_data,
 	};
+
+	/* Interject hook behavior depending on strategy. */
+	if (r && handle_hook_replacement(r, hook_name, &options->args))
+		return 0;
+
+	hook_path = find_hook(r, hook_name);
 
 	/*
 	 * Backwards compatibility hack in VFS for Git: when originally
@@ -252,6 +369,7 @@ int run_hooks_l(struct repository *r, const char *hook_name, ...)
 {
 	struct run_hooks_opt opt = RUN_HOOKS_OPT_INIT;
 	va_list ap;
+	int result;
 	const char *arg;
 
 	va_start(ap, hook_name);
@@ -259,5 +377,7 @@ int run_hooks_l(struct repository *r, const char *hook_name, ...)
 		strvec_push(&opt.args, arg);
 	va_end(ap);
 
-	return run_hooks_opt(r, hook_name, &opt);
+	result = run_hooks_opt(r, hook_name, &opt);
+	strvec_clear(&opt.args);
+	return result;
 }

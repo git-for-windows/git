@@ -19,7 +19,7 @@ overridden via the environment variable `GIT_SSH_VARIANT`.
 The current command-line parameters used for each variant are as
 follows:
 +
---
+----
 
 * `ssh` - [-p port] [-4] [-6] [-o option] [username@]host command
 
@@ -29,7 +29,7 @@ follows:
 
 * `tortoiseplink` - [-P port] [-4] [-6] -batch [username@]host command
 
---
+----
 +
 Except for the `simple` variant, command-line parameters are likely to
 change as git gains new features.

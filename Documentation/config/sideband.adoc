@@ -4,7 +4,7 @@ sideband.allowControlCharacters::
 	unwanted ANSI escape sequences from being sent to the terminal. Use
 	this config setting to override this behavior:
 +
---
+----
 	color::
 		Allow ANSI color sequences, line feeds and horizontal tabs,
 		but mask all other control characters. This is the default.
@@ -13,4 +13,4 @@ sideband.allowControlCharacters::
 		horizontal tabs.
 	true::
 		Allow all control characters to be sent to the terminal.
---
+----
