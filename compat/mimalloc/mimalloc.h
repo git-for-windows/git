@@ -95,7 +95,7 @@ terms of the MIT license. A copy of the license can be found in the file
 // Includes
 // ------------------------------------------------------
 
-#include "git-compat-util.h"
+#include "compat/posix.h"
 
 #include <stdbool.h>    // bool
 #include <stdint.h>     // INTPTR_MAX
