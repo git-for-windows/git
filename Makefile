@@ -2176,13 +2176,13 @@ ifdef USE_MIMALLOC
 		compat/mimalloc/bitmap.o \
 		compat/mimalloc/heap.o \
 		compat/mimalloc/init.o \
+		compat/mimalloc/libc.o \
 		compat/mimalloc/options.o \
 		compat/mimalloc/os.o \
 		compat/mimalloc/page.o \
 		compat/mimalloc/random.o \
-		compat/mimalloc/prim/windows/prim.o \
+		compat/mimalloc/prim/prim.o \
 		compat/mimalloc/segment.o \
-		compat/mimalloc/segment-cache.o \
 		compat/mimalloc/segment-map.o \
 		compat/mimalloc/stats.o
 
@@ -2201,7 +2201,8 @@ $(MIMALLOC_OBJS): COMPAT_CFLAGS += \
 	-Wno-pedantic \
 	-Wno-declaration-after-statement \
 	-Wno-old-style-definition \
-	-Wno-missing-prototypes
+	-Wno-missing-prototypes \
+	-Wno-implicit-function-declaration
 endif
 endif
 
