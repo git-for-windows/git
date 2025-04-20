@@ -2196,6 +2196,7 @@ $(MIMALLOC_OBJS): COMPAT_CFLAGS += -DBANNED_H
 $(MIMALLOC_OBJS): COMPAT_CFLAGS += \
 	-Wno-attributes \
 	-Wno-unknown-pragmas \
+	-Wno-unused-function \
 	-Wno-array-bounds
 
 ifdef DEVELOPER
