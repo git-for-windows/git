@@ -269,6 +269,29 @@ test_expect_success 'scalar reconfigure --all with detached HEADs' '
 	done
 '
 
+test_expect_success 'verify http.<url>.version=HTTP/1.1 for ADO URLs' '
+	test_when_finished rm -rf test-http-url-config &&
+
+	# Create a test repository
+	git init test-http-url-config &&
+
+	# Test both URL types
+	for url in "https://test@dev.azure.com/test/project/_git/repo" \
+		   "https://contoso.visualstudio.com/project/_git/repo"
+	do
+		# Set URL as remote
+		git -C test-http-url-config config set remote.origin.url "$url" &&
+
+		# Run scalar reconfigure
+		scalar reconfigure test-http-url-config &&
+
+		# Verify URL-specific HTTP version setting
+		git -C test-http-url-config config "http.$url.version" >actual &&
+		echo "HTTP/1.1" >expect &&
+		test_cmp expect actual || return 1
+	done
+'
+
 test_expect_success '`reconfigure -a` removes stale config entries' '
 	git init stale/src &&
 	scalar register stale &&
@@ -406,6 +429,11 @@ test_expect_success '`scalar clone` with GVFS-enabled server' '
 		test-tool sha1)" &&
 	echo "$(pwd)/.scalarCache/$cache_key" >expect &&
 	git -C using-gvfs/src config gvfs.sharedCache >actual &&
+	test_cmp expect actual &&
+
+	: verify that URL-specific HTTP version setting is configured for GVFS URLs in clone &&
+	git -C using-gvfs/src config "http.http://$HOST_PORT/.version" >actual &&
+	echo "HTTP/1.1" >expect &&
 	test_cmp expect actual &&
 
 	second=$(git rev-parse --verify second:second.t) &&
