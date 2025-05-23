@@ -448,6 +448,10 @@ test_expect_success '`scalar clone` with GVFS-enabled server' '
 	)
 '
 
+test_expect_success 'fetch <non-existent> does not hang in gvfs-helper' '
+	test_must_fail git -C using-gvfs/src fetch origin does-not-exist
+'
+
 test_expect_success '`scalar clone --no-gvfs-protocol` skips gvfs/config' '
 	# the fake cache server requires fake authentication &&
 	git config --global core.askPass true &&
