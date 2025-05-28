@@ -1109,16 +1109,32 @@ static CURL *get_curl_handle(void)
 		curl_easy_setopt(result, CURLOPT_SSL_CIPHER_LIST,
 				ssl_cipherlist);
 
-	if (ssl_cert)
-		curl_easy_setopt(result, CURLOPT_SSLCERT, ssl_cert);
 	if (ssl_cert_type)
 		curl_easy_setopt(result, CURLOPT_SSLCERTTYPE, ssl_cert_type);
+	if (ssl_cert) {
+		curl_easy_setopt(result, CURLOPT_SSLCERT, ssl_cert);
+		if (istarts_with(ssl_cert, "pkcs11:")) {
+			if (ssl_cert_type && strcasecmp(ssl_cert_type, "eng")){
+				warning(_("Using non \"ENG\" type for a pkcs11 uri sslcert"));
+			}
+			curl_easy_setopt(result, CURLOPT_SSLCERTTYPE, "ENG");
+			curl_easy_setopt(result, CURLOPT_SSLENGINE, "pkcs11");
+		}
+	}
 	if (has_cert_password())
 		curl_easy_setopt(result, CURLOPT_KEYPASSWD, cert_auth.password);
-	if (ssl_key)
-		curl_easy_setopt(result, CURLOPT_SSLKEY, ssl_key);
 	if (ssl_key_type)
 		curl_easy_setopt(result, CURLOPT_SSLKEYTYPE, ssl_key_type);
+	if (ssl_key) {
+		curl_easy_setopt(result, CURLOPT_SSLKEY, ssl_key);
+		if (istarts_with(ssl_cert, "pkcs11:")) {
+			if (ssl_cert_type && strcasecmp(ssl_cert_type, "eng")){
+				warning(_("Using non \"ENG\" type for a pkcs11 uri sslkey"));
+			}
+			curl_easy_setopt(result, CURLOPT_SSLCERTTYPE, "ENG");
+			curl_easy_setopt(result, CURLOPT_SSLENGINE, "pkcs11");
+		}
+	}
 	if (ssl_capath)
 		curl_easy_setopt(result, CURLOPT_CAPATH, ssl_capath);
 	if (ssl_pinnedkey)
