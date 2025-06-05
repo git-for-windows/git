@@ -6,7 +6,7 @@
 #include "hex.h"
 #include "object.h"
 #include "object-name.h"
-#include "object-store.h"
+#include "odb.h"
 #include "parse-options.h"
 #include "path-walk.h"
 #include "progress.h"
