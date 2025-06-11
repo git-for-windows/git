@@ -22,6 +22,8 @@
 
 static struct fscache *fscache;
 
+static struct fscache *fscache;
+
 /*
  * Mostly randomly chosen maximum thread counts: we
  * cap the parallelism to 20 threads, and we want
