@@ -12,7 +12,7 @@
 #include "sigchain.h"
 #include "strbuf.h"
 #include "urlmatch.h"
-#include "git-compat-util.h"
+#include "environment.h"
 #include "trace2.h"
 #include "repository.h"
 
