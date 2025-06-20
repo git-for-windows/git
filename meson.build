@@ -645,6 +645,7 @@ builtin_sources = [
   'builtin/repack.c',
   'builtin/replace.c',
   'builtin/replay.c',
+  'builtin/repo-info.c',
   'builtin/rerere.c',
   'builtin/reset.c',
   'builtin/rev-list.c',
