@@ -95,7 +95,6 @@ struct sigaction {
 	sig_handler_t sa_handler;
 	unsigned sa_flags;
 };
-#define SA_RESTART 0
 
 struct itimerval {
 	struct timeval it_value, it_interval;

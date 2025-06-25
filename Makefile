@@ -37,6 +37,9 @@ include shared.mak
 # when attempting to read from an fopen'ed directory (or even to fopen
 # it at all).
 #
+# Define USE_NON_POSIX_SIGNAL if don't have support for SA_RESTART or
+# prefer to use ANSI C signal() over POSIX sigaction()
+#
 # Define OPEN_RETURNS_EINTR if your open() system call may return EINTR
 # when a signal is received (as opposed to restarting).
 #
@@ -1810,6 +1813,9 @@ endif
 ifdef FREAD_READS_DIRECTORIES
 	COMPAT_CFLAGS += -DFREAD_READS_DIRECTORIES
 	COMPAT_OBJS += compat/fopen.o
+endif
+ifdef USE_NON_POSIX_SIGNAL
+	COMPAT_CFLAGS += -DUSE_NON_POSIX_SIGNAL
 endif
 ifdef OPEN_RETURNS_EINTR
 	COMPAT_CFLAGS += -DOPEN_RETURNS_EINTR
