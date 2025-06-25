@@ -1133,12 +1133,27 @@ static void set_signal_handler(struct sigaction *psa)
 	sigaction(SIGCHLD, psa, NULL);
 }
 
+static void set_sa_restart(struct sigaction *psa, int enable)
+{
+	if (enable)
+		psa->sa_flags |= SA_RESTART;
+	else
+		psa->sa_flags &= ~SA_RESTART;
+	sigaction(SIGCHLD, psa, NULL);
+}
+
 #else
 
 static void set_signal_handler(struct sigaction *psa UNUSED)
 {
 	signal(SIGCHLD, child_handler);
 }
+
+static void set_sa_restart(struct sigaction *psa UNUSED, int enable UNUSED)
+{
+}
+
+#endif
 
 static int service_loop(struct socketlist *socklist)
 {
@@ -1157,6 +1172,7 @@ static int service_loop(struct socketlist *socklist)
 	for (;;) {
 		check_dead_children();
 
+		set_sa_restart(&sa, 0);
 		if (poll(pfd, socklist->nr, -1) < 0) {
 			if (errno != EINTR) {
 				logerror("Poll failed, resuming: %s",
@@ -1165,6 +1181,7 @@ static int service_loop(struct socketlist *socklist)
 			}
 			continue;
 		}
+		set_sa_restart(&sa, 1);
 
 		for (size_t i = 0; i < socklist->nr; i++) {
 			if (pfd[i].revents & POLLIN) {
