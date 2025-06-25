@@ -2148,6 +2148,18 @@ if headers_to_check.length() != 0 and compiler.get_argument_syntax() == 'gcc'
   alias_target('check-headers', hdr_check)
 endif
 
+clang_format = find_program('clang-format', required: false)
+if clang_format.found()
+  run_target('style',
+    command: [
+      'git', 'clang-format',
+      '--style', 'file',
+      '--diff',
+      '--extensions', 'c,h'
+    ]
+  )
+endif
+
 foreach key, value : {
   'DIFF': diff.full_path(),
   'GIT_SOURCE_DIR': meson.project_source_root(),
