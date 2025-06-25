@@ -862,6 +862,23 @@ fi
 GIT_CONF_SUBST([ICONV_OMITS_BOM])
 fi
 
+# Define USE_NON_POSIX_SIGNAL if don't have support for SA_RESTART or
+# prefer using ANSI C signal() over POSIX sigaction()
+
+AC_CACHE_CHECK([whether SA_RESTART is supported], [ac_cv_siginterrupt], [
+	AC_COMPILE_IFELSE(
+		[AC_LANG_PROGRAM([#include <signal.h>], [[
+		#ifdef SA_RESTART
+		#endif
+		siginterrupt(SIGCHLD, 1)
+		]])],[ac_cv_siginterrupt=yes],[
+			ac_cv_siginterrupt=no
+			USE_NON_POSIX_SIGNAL=UnfortunatelyYes
+		]
+	)
+])
+GIT_CONF_SUBST([USE_NON_POSIX_SIGNAL])
+
 ## Checks for typedefs, structures, and compiler characteristics.
 AC_MSG_NOTICE([CHECKS for typedefs, structures, and compiler characteristics])
 #
