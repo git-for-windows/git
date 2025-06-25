@@ -912,14 +912,19 @@ static void handle(int incoming, struct sockaddr *addr, socklen_t addrlen)
 		add_child(&cld, addr, addrlen);
 }
 
-static void child_handler(int signo UNUSED)
+static void child_handler(int signo MAYBE_UNUSED)
 {
 	/*
-	 * Otherwise empty handler because systemcalls will get interrupted
-	 * upon signal receipt
-	 * SysV needs the handler to be rearmed
+	 * Otherwise empty handler because systemcalls should get interrupted
+	 * upon signal receipt.
 	 */
-	signal(SIGCHLD, child_handler);
+#ifdef USE_NON_POSIX_SIGNAL
+	/*
+	 * SysV needs the handler to be rearmed, but this is known
+	 * to trigger infinite recursion crashes at least in AIX.
+	 */
+	signal(signo, child_handler);
+#endif
 }
 
 static int set_reuse_addr(int sockfd)
@@ -1118,8 +1123,26 @@ static void socksetup(struct string_list *listen_addr, int listen_port, struct s
 	}
 }
 
+#ifndef USE_NON_POSIX_SIGNAL
+
+static void set_signal_handler(struct sigaction *psa)
+{
+	sigemptyset(&psa->sa_mask);
+	psa->sa_flags = SA_NOCLDSTOP | SA_RESTART;
+	psa->sa_handler = child_handler;
+	sigaction(SIGCHLD, psa, NULL);
+}
+
+#else
+
+static void set_signal_handler(struct sigaction *psa UNUSED)
+{
+	signal(SIGCHLD, child_handler);
+}
+
 static int service_loop(struct socketlist *socklist)
 {
+	struct sigaction sa;
 	struct pollfd *pfd;
 
 	CALLOC_ARRAY(pfd, socklist->nr);
@@ -1129,7 +1152,7 @@ static int service_loop(struct socketlist *socklist)
 		pfd[i].events = POLLIN;
 	}
 
-	signal(SIGCHLD, child_handler);
+	set_signal_handler(&sa);
 
 	for (;;) {
 		check_dead_children();
