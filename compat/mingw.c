@@ -3175,7 +3175,7 @@ int sigaction(int sig, struct sigaction *in, struct sigaction *out)
 		return error("sigaction only implemented for SIGALRM");
 	}
 	if (out) {
-		errno = EINVAL,
+		errno = EINVAL;
 		return error("sigaction: param 3 != NULL not implemented");
 	}
 
