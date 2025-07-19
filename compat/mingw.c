@@ -875,7 +875,7 @@ int mingw_open (const char *filename, int oflags, ...)
 	 * and fail to get config value
 	 */
 	if (append_atomically < 0 && the_repository && the_repository->commondir &&
-		git_config_get_bool("windows.appendatomically", &append_atomically))
+		repo_config_get_bool(the_repository, "windows.appendatomically", &append_atomically))
 		append_atomically = 1;
 
 	if (append_atomically && (oflags & O_APPEND) &&
