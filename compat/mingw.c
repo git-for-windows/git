@@ -295,7 +295,7 @@ int are_long_paths_enabled(void)
 
 		if (the_repository->config &&
 		    the_repository->config->hash_initialized &&
-		    git_config_get_bool("core.longpaths", &enabled) < 0)
+		    repo_config_get_bool(the_repository, "core.longpaths", &enabled) < 0)
 			enabled = 0;
 	}
 
