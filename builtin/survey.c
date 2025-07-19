@@ -560,7 +560,7 @@ static int survey_load_config_cb(const char *var, const char *value,
 
 static void survey_load_config(struct survey_context *ctx)
 {
-	git_config(survey_load_config_cb, ctx);
+	repo_config(the_repository, survey_load_config_cb, ctx);
 }
 
 static void do_load_refs(struct survey_context *ctx,
