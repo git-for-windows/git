@@ -37,7 +37,7 @@ static char *do_askpass(const char *cmd, const char *prompt)
 		return NULL;
 	}
 
-	strbuf_setlen(&buffer, strcspn(buffer.buf, "\r\n"));
+	strbuf_setlen(&buffer, strcspn(buffer.buf, "\r\n")); // CodeQL [SM01932] justification: CodeQL is wrong here because the value is read from a file via strbuf_read() which does NUL-terminate the string, something CodeQL fails to understand
 
 	return buffer.buf;
 }

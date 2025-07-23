@@ -434,20 +434,20 @@ static void am_load(struct am_state *state)
 	}
 
 	read_state_file(&sb, state, "keep", 1);
-	if (!strcmp(sb.buf, "t"))
+	if (!strcmp(sb.buf, "t")) // CodeQL [SM01932] justification: CodeQL is wrong here because the value is read from a file via strbuf_read() which does NUL-terminate the string, something CodeQL fails to understand
 		state->keep = KEEP_TRUE;
-	else if (!strcmp(sb.buf, "b"))
+	else if (!strcmp(sb.buf, "b")) // CodeQL [SM01932] justification: CodeQL is wrong here because the value is read from a file via strbuf_read() which does NUL-terminate the string, something CodeQL fails to understand
 		state->keep = KEEP_NON_PATCH;
 	else
 		state->keep = KEEP_FALSE;
 
 	read_state_file(&sb, state, "messageid", 1);
-	state->message_id = !strcmp(sb.buf, "t");
+	state->message_id = !strcmp(sb.buf, "t"); // CodeQL [SM01932] justification: CodeQL is wrong here because the value is read from a file via strbuf_read() which does NUL-terminate the string, something CodeQL fails to understand
 
 	read_state_file(&sb, state, "scissors", 1);
-	if (!strcmp(sb.buf, "t"))
+	if (!strcmp(sb.buf, "t")) // CodeQL [SM01932] justification: CodeQL is wrong here because the value is read from a file via strbuf_read() which does NUL-terminate the string, something CodeQL fails to understand
 		state->scissors = SCISSORS_TRUE;
-	else if (!strcmp(sb.buf, "f"))
+	else if (!strcmp(sb.buf, "f")) // CodeQL [SM01932] justification: CodeQL is wrong here because the value is read from a file via strbuf_read() which does NUL-terminate the string, something CodeQL fails to understand
 		state->scissors = SCISSORS_FALSE;
 	else
 		state->scissors = SCISSORS_UNSET;
@@ -455,12 +455,12 @@ static void am_load(struct am_state *state)
 	read_state_file(&sb, state, "quoted-cr", 1);
 	if (!*sb.buf)
 		state->quoted_cr = quoted_cr_unset;
-	else if (mailinfo_parse_quoted_cr_action(sb.buf, &state->quoted_cr) != 0)
+	else if (mailinfo_parse_quoted_cr_action(sb.buf, &state->quoted_cr) != 0) // CodeQL [SM01932] justification: CodeQL is wrong here because the value is read from a file via strbuf_read() which does NUL-terminate the string, something CodeQL fails to understand
 		die(_("could not parse %s"), am_path(state, "quoted-cr"));
 
 	read_state_file(&sb, state, "apply-opt", 1);
 	strvec_clear(&state->git_apply_opts);
-	if (sq_dequote_to_strvec(sb.buf, &state->git_apply_opts) < 0)
+	if (sq_dequote_to_strvec(sb.buf, &state->git_apply_opts) < 0) // CodeQL [SM01932] justification: CodeQL is wrong here because the value is read from a file via strbuf_read() which does NUL-terminate the string, something CodeQL fails to understand
 		die(_("could not parse %s"), am_path(state, "apply-opt"));
 
 	state->rebasing = !!file_exists(am_path(state, "rebasing"));

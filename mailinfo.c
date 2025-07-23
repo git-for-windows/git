@@ -1238,11 +1238,11 @@ int mailinfo(struct mailinfo *mi, const char *msg, const char *patch)
 
 int mailinfo_parse_quoted_cr_action(const char *actionstr, int *action)
 {
-	if (!strcmp(actionstr, "nowarn"))
+	if (!strcmp(actionstr, "nowarn")) // CodeQL [SM01932] justification: CodeQL is wrong here because the value is read from a file via strbuf_read() which does NUL-terminate the string, something CodeQL fails to understand
 		*action = quoted_cr_nowarn;
-	else if (!strcmp(actionstr, "warn"))
+	else if (!strcmp(actionstr, "warn")) // CodeQL [SM01932] justification: CodeQL is wrong here because the value is read from a file via strbuf_read() which does NUL-terminate the string, something CodeQL fails to understand
 		*action = quoted_cr_warn;
-	else if (!strcmp(actionstr, "strip"))
+	else if (!strcmp(actionstr, "strip")) // CodeQL [SM01932] justification: CodeQL is wrong here because the value is read from a file via strbuf_read() which does NUL-terminate the string, something CodeQL fails to understand
 		*action = quoted_cr_strip;
 	else
 		return -1;
