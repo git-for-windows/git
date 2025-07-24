@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: ["cpp"]
+        language: ["cpp", "javascript"]
 
     steps:
       - name: Checkout repository
@@ -57,10 +57,10 @@ jobs:
       - name: publish sarif for debugging
         uses: actions/upload-artifact@v4
         with:
-          name: sarif-results
+          name: sarif-results-${{ matrix.language }}
           path: sarif-results
 
       - name: Upload SARIF
         uses: github/codeql-action/upload-sarif@v3
         with:
-         sarif_file: sarif-results/cpp.sarif
+         sarif_file: sarif-results/${{ matrix.language }}.sarif

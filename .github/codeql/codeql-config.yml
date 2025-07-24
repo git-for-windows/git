@@ -3,6 +3,9 @@ name: "CodeQL config"
 queries:
   - uses: security-extended
 
+paths-ignore:
+  - gitweb/**/*.js # GitWeb is not distributed
+
 query-filters:
   - exclude:
     # yes, this extra indentation is intentional
