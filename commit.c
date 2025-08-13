@@ -567,9 +567,14 @@ int repo_parse_commit_internal(struct repository *r,
 	int flags = OBJECT_INFO_LOOKUP_REPLACE | OBJECT_INFO_SKIP_FETCH_OBJECT |
 		    OBJECT_INFO_DIE_IF_CORRUPT;
 
-	/* But the GVFS Protocol _does_ support missing commits! */
+	/*
+	 * But the GVFS Protocol _does_ support missing commits!
+	 * And the idea with VFS for Git is to re-download corrupted objects,
+	 * not to fail!
+	 */
 	if (gvfs_config_is_set(r, GVFS_MISSING_OK))
-		flags ^= OBJECT_INFO_SKIP_FETCH_OBJECT;
+		flags &= ~(OBJECT_INFO_SKIP_FETCH_OBJECT |
+			   OBJECT_INFO_DIE_IF_CORRUPT);
 
 	if (!item)
 		return -1;
