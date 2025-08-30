@@ -106,6 +106,9 @@ static curl_global_sslset_type curl_global_sslset_func;
 typedef void (*curl_global_cleanup_type)(void);
 static curl_global_cleanup_type curl_global_cleanup_func;
 
+typedef CURLcode (*curl_global_trace_type)(const char *config);
+static curl_global_trace_type curl_global_trace_func;
+
 typedef struct curl_slist *(*curl_slist_append_type)(struct curl_slist *list, const char *data);
 static curl_slist_append_type curl_slist_append_func;
 
@@ -201,6 +204,7 @@ static void lazy_load_curl(void)
 	curl_global_init_func = (curl_global_init_type)load_function(libcurl, "curl_global_init");
 	curl_global_sslset_func = (curl_global_sslset_type)load_function(libcurl, "curl_global_sslset");
 	curl_global_cleanup_func = (curl_global_cleanup_type)load_function(libcurl, "curl_global_cleanup");
+	curl_global_trace_func = (curl_global_trace_type)load_function(libcurl, "curl_global_trace");
 	curl_slist_append_func = (curl_slist_append_type)load_function(libcurl, "curl_slist_append");
 	curl_slist_free_all_func = (curl_slist_free_all_type)load_function(libcurl, "curl_slist_free_all");
 	curl_easy_strerror_func = (curl_easy_strerror_type)load_function(libcurl, "curl_easy_strerror");
@@ -266,6 +270,12 @@ void curl_global_cleanup(void)
 {
 	lazy_load_curl();
 	curl_global_cleanup_func();
+}
+
+CURLcode curl_global_trace(const char *config)
+{
+	lazy_load_curl();
+	return curl_global_trace_func(config);
 }
 
 struct curl_slist *curl_slist_append(struct curl_slist *list, const char *data)
