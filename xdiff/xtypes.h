@@ -51,7 +51,7 @@ typedef struct s_xdfile {
 	long dstart, dend;
 	char *rchg;
 	long *rindex;
-	long nreff;
+	usize nreff;
 } xdfile_t;
 
 typedef struct s_xdfenv {
