@@ -23,7 +23,7 @@
 #if !defined(XTYPES_H)
 #define XTYPES_H
 
-
+#include <compat/rust_types.h>
 
 typedef struct s_chanode {
 	struct s_chanode *next;
