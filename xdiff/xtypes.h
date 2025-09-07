@@ -48,9 +48,9 @@ typedef struct s_xrecord {
 typedef struct s_xdfile {
 	xrecord_t *recs;
 	usize nrec;
-	long dstart, dend;
-	char *rchg;
-	long *rindex;
+	i32 dstart, dend;
+	u8 *rchg;
+	usize *rindex;
 	usize nreff;
 } xdfile_t;
 
