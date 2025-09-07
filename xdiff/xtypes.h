@@ -39,7 +39,7 @@ typedef struct s_chastore {
 } chastore_t;
 
 typedef struct s_xrecord {
-	char const *ptr;
+	u8 const *ptr;
 	long size;
 	unsigned long ha;
 } xrecord_t;
