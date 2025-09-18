@@ -172,9 +172,9 @@ void string_list_remove_empty_items(struct string_list *list, int free_util);
 /* Use these functions only on sorted lists: */
 
 /** Determine if the string_list has a given string or not. */
-int string_list_has_string(const struct string_list *list, const char *string);
-int string_list_find_insert_index(const struct string_list *list, const char *string,
-				  int negative_existing_index);
+bool string_list_has_string(const struct string_list *list, const char *string);
+size_t string_list_find_insert_index(const struct string_list *list, const char *string,
+				     bool *exact_match);
 
 /**
  * Insert a new element to the string_list. The returned pointer can
