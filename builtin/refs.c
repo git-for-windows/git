@@ -164,7 +164,7 @@ out:
 }
 
 static int cmd_refs_optimize(int argc, const char **argv, const char *prefix,
-			   struct repository *repo)
+			     struct repository *repo)
 {
 	static char const * const refs_optimize_usage[] = {
 		REFS_OPTIMIZE_USAGE,
