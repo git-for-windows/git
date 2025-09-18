@@ -1330,3 +1330,31 @@ void test_reftable_stack__invalid_limit_updates(void)
 	reftable_stack_destroy(st);
 	clear_dir(dir);
 }
+
+void test_reftable_stack__non_seq_update_indices(void)
+{
+	struct reftable_write_options opts = { 0 };
+	struct reftable_stack *st1 = NULL;
+	char *dir = get_tmp_dir(__LINE__);
+
+	struct reftable_ref_record ref1 = {
+		.refname = (char *)"HEAD",
+		.update_index = 1,
+		.value_type = REFTABLE_REF_SYMREF,
+		.value.symref = (char *)"master",
+	};
+	struct reftable_ref_record ref2 = {
+		.refname = (char *)"branch2",
+		.update_index = 3,
+		.value_type = REFTABLE_REF_SYMREF,
+		.value.symref = (char *)"master",
+	};
+
+	cl_assert_equal_i(reftable_new_stack(&st1, dir, &opts), 0);
+	cl_assert_equal_i(reftable_stack_add(st1, write_test_ref, &ref1, 0), 0);
+	cl_assert_equal_i(reftable_stack_add(st1, write_test_ref, &ref2, 0),
+			  REFTABLE_FORMAT_ERROR);
+
+	reftable_stack_destroy(st1);
+	clear_dir(dir);
+}

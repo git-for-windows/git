@@ -109,11 +109,9 @@ static int fd_read_lines(int fd, char ***namesp)
 	}
 	buf[size] = 0;
 
-	*namesp = parse_names(buf, size);
-	if (!*namesp) {
-		err = REFTABLE_OUT_OF_MEMORY_ERROR;
+	*namesp = parse_names(buf, size, &err);
+	if (!*namesp)
 		goto done;
-	}
 
 done:
 	reftable_free(buf);
@@ -240,6 +238,7 @@ static int reftable_stack_reload_once(struct reftable_stack *st,
 				      int reuse_open)
 {
 	size_t cur_len = !st->merged ? 0 : st->merged->tables_len;
+	const struct reftable_table *prev_table = NULL;
 	struct reftable_table **cur = NULL;
 	struct reftable_table **reused = NULL;
 	struct reftable_table **new_tables = NULL;
@@ -319,6 +318,14 @@ static int reftable_stack_reload_once(struct reftable_stack *st,
 
 		new_tables[new_tables_len] = table;
 		new_tables_len++;
+
+		/* table's update indices must be sequential */
+		if (prev_table && (prev_table->max_update_index != table->min_update_index - 1)) {
+			err = REFTABLE_FORMAT_ERROR;
+			goto done;
+		}
+
+		prev_table = table;
 	}
 
 	/* success! */

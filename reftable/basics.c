@@ -195,7 +195,7 @@ size_t names_length(const char **names)
 	return p - names;
 }
 
-char **parse_names(char *buf, int size)
+char **parse_names(char *buf, int size, int *err)
 {
 	char **names = NULL;
 	size_t names_cap = 0;
@@ -205,30 +205,40 @@ char **parse_names(char *buf, int size)
 
 	while (p < end) {
 		char *next = strchr(p, '\n');
-		if (next && next < end) {
+		if (!next) {
+			*err = REFTABLE_FORMAT_ERROR;
+			goto done;
+		} else if (next < end) {
 			*next = 0;
 		} else {
 			next = end;
 		}
+
 		if (p < next) {
 			if (REFTABLE_ALLOC_GROW(names, names_len + 1,
-						names_cap))
-				goto err;
+						names_cap)) {
+				*err = REFTABLE_OUT_OF_MEMORY_ERROR;
+				goto done;
+			}
 
 			names[names_len] = reftable_strdup(p);
-			if (!names[names_len++])
-				goto err;
+			if (!names[names_len++]) {
+				*err = REFTABLE_OUT_OF_MEMORY_ERROR;
+				goto done;
+			}
 		}
 		p = next + 1;
 	}
 
-	if (REFTABLE_ALLOC_GROW(names, names_len + 1, names_cap))
-		goto err;
+	if (REFTABLE_ALLOC_GROW(names, names_len + 1, names_cap)) {
+		*err = REFTABLE_OUT_OF_MEMORY_ERROR;
+		goto done;
+	}
 	names[names_len] = NULL;
 
 	return names;
 
-err:
+done:
 	for (size_t i = 0; i < names_len; i++)
 		reftable_free(names[i]);
 	reftable_free(names);
