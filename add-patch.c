@@ -956,6 +956,9 @@ static int split_hunk(struct add_p_state *s, struct file_diff *file_diff,
 			* sizeof(*hunk));
 	hunk = file_diff->hunk + hunk_index;
 	hunk->splittable_into = 1;
+#ifdef WITH_BREAKING_CHANGES
+	hunk->use = UNDECIDED_HUNK;
+#endif
 	memset(hunk + 1, 0, (splittable_into - 1) * sizeof(*hunk));
 
 	header = &hunk->header;
@@ -1057,7 +1060,11 @@ next_hunk_line:
 
 		hunk++;
 		hunk->splittable_into = 1;
+#ifdef WITH_BREAKING_CHANGES
+		hunk->use = UNDECIDED_HUNK;
+#else
 		hunk->use = hunk[-1].use;
+#endif
 		header = &hunk->header;
 
 		header->old_count = header->new_count = context_line_count;
@@ -1184,19 +1191,29 @@ static ssize_t recount_edited_hunk(struct add_p_state *s, struct hunk *hunk,
 {
 	struct hunk_header *header = &hunk->header;
 	size_t i;
+	char ch, marker = ' ';
 
+	hunk->splittable_into = 0;
 	header->old_count = header->new_count = 0;
 	for (i = hunk->start; i < hunk->end; ) {
-		switch(normalize_marker(&s->plain.buf[i])) {
+		ch = normalize_marker(&s->plain.buf[i]);
+		switch (ch) {
 		case '-':
 			header->old_count++;
+			if (marker == ' ')
+				hunk->splittable_into++;
+			marker = ch;
 			break;
 		case '+':
 			header->new_count++;
+			if (marker == ' ')
+				hunk->splittable_into++;
+			marker = ch;
 			break;
 		case ' ':
 			header->old_count++;
 			header->new_count++;
+			marker = ch;
 			break;
 		}
 

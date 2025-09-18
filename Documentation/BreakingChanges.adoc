@@ -171,6 +171,11 @@ JGit, libgit2 and Gitoxide need to support it.
   matches the default branch name used in new repositories by many of the
   big Git forges.
 
+* The behavior of "git add -p" has been changed so that splitting a
+  hunk that has already been marked as selected or unselected will now
+  prompt the user to select each of the new hunks created by the
+  split instead of them inheriting their state from the original hunk.
+
 === Removals
 
 * Support for grafting commits has long been superseded by git-replace(1).
