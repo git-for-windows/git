@@ -42,6 +42,17 @@ test_expect_success 'git stash -p' '
 	verify_state dir/foo work head
 '
 
+test_expect_success 'git stash -p with stash.index' '
+	test_config stash.index true &&
+	set_state HEAD HEADfile_work HEADfile_index &&
+	set_state dir/foo work index &&
+	test_write_lines y n y | git stash save -p &&
+	git reset --hard &&
+	git stash apply &&
+	verify_state HEAD HEADfile_work HEADfile_index &&
+	verify_state dir/foo head index
+'
+
 test_expect_success 'git stash -p --no-keep-index' '
 	set_state HEAD HEADfile_work HEADfile_index &&
 	set_state bar bar_work bar_index &&

@@ -7,7 +7,7 @@ test_description='Test git stash --include-untracked'
 
 . ./test-lib.sh
 
-test_expect_success 'stash save --include-untracked some dirty working directory' '
+setup() {
 	echo 1 >file &&
 	git add file &&
 	test_tick &&
@@ -23,6 +23,10 @@ test_expect_success 'stash save --include-untracked some dirty working directory
 	git stash --include-untracked &&
 	git diff-files --quiet &&
 	git diff-index --cached --quiet HEAD
+}
+
+test_expect_success 'stash save --include-untracked some dirty working directory' '
+	setup
 '
 
 test_expect_success 'stash save --include-untracked cleaned the untracked files' '
@@ -87,7 +91,6 @@ test_expect_success 'stash save --patch --all fails' '
 
 test_expect_success 'clean up untracked/untracked file to prepare for next tests' '
 	git clean --force --quiet
-
 '
 
 test_expect_success 'stash pop after save --include-untracked leaves files untracked again' '
@@ -107,6 +110,32 @@ test_expect_success 'stash pop after save --include-untracked leaves files untra
 	test_cmp expect_file2 file2 &&
 	echo untracked >untracked_expect &&
 	test_cmp untracked_expect untracked/untracked
+'
+
+test_expect_success 'stash pop after save --include-untracked leaves files untracked again with stash.index' '
+	git init repo &&
+	test_when_finished rm -r repo &&
+	(
+		cd repo &&
+		git config stash.index true &&
+		setup &&
+		cat >expect <<-EOF &&
+		MM file
+		?? HEAD
+		?? actual
+		?? expect
+		?? file2
+		?? untracked/
+		EOF
+
+		git stash pop &&
+		git status --porcelain >actual &&
+		test_cmp expect actual &&
+		echo 1 >expect_file2 &&
+		test_cmp expect_file2 file2 &&
+		echo untracked >untracked_expect &&
+		test_cmp untracked_expect untracked/untracked
+	)
 '
 
 test_expect_success 'clean up untracked/ directory to prepare for next tests' '
@@ -217,6 +246,22 @@ test_expect_success 'stash push with $IFS character' '
 	test_path_is_file foo &&
 	test_path_is_file bar &&
 	git stash pop &&
+	test_path_is_file "foo bar" &&
+	test_path_is_file foo &&
+	test_path_is_file bar
+'
+
+test_expect_success 'stash push with $IFS character with stash.index' '
+	test_config stash.index true &&
+	>"foo bar" &&
+	>foo &&
+	>bar &&
+	git add foo* &&
+	git stash push --include-untracked -- "foo b*" &&
+	test_path_is_missing "foo bar" &&
+	test_path_is_file foo &&
+	test_path_is_file bar &&
+	git stash pop --no-index &&
 	test_path_is_file "foo bar" &&
 	test_path_is_file foo &&
 	test_path_is_file bar
