@@ -68,6 +68,12 @@
  */
 #define REF_DELETED_RMDIR (1 << 9)
 
+/*
+ * Used to indicate that the reflog-only update has been created via
+ * `split_head_update()`.
+ */
+#define REF_LOG_VIA_SPLIT (1 << 14)
+
 struct ref_lock {
 	char *ref_name;
 	struct lock_file lk;
@@ -648,6 +654,26 @@ static void unlock_ref(struct ref_lock *lock)
 }
 
 /*
+ * Check if the transaction has another update with a case-insensitive refname
+ * match.
+ *
+ * If the update is part of the transaction, we only check up to that index.
+ * Further updates are expected to call this function to match previous indices.
+ */
+static bool transaction_has_case_conflicting_update(struct ref_transaction *transaction,
+						    struct ref_update *update)
+{
+	for (size_t i = 0; i < transaction->nr; i++) {
+		if (transaction->updates[i] == update)
+			break;
+
+		if (!strcasecmp(transaction->updates[i]->refname, update->refname))
+			return true;
+	}
+	return false;
+}
+
+/*
  * Lock refname, without following symrefs, and set *lock_p to point
  * at a newly-allocated lock object. Fill in lock->old_oid, referent,
  * and type similarly to read_raw_ref().
@@ -677,16 +703,17 @@ static void unlock_ref(struct ref_lock *lock)
  * - Generate informative error messages in the case of failure
  */
 static enum ref_transaction_error lock_raw_ref(struct files_ref_store *refs,
-					       struct ref_update *update,
+					       struct ref_transaction *transaction,
 					       size_t update_idx,
 					       int mustexist,
 					       struct string_list *refnames_to_check,
-					       const struct string_list *extras,
 					       struct ref_lock **lock_p,
 					       struct strbuf *referent,
 					       struct strbuf *err)
 {
 	enum ref_transaction_error ret = REF_TRANSACTION_ERROR_GENERIC;
+	struct ref_update *update = transaction->updates[update_idx];
+	const struct string_list *extras = &transaction->refnames;
 	const char *refname = update->refname;
 	unsigned int *type = &update->type;
 	struct ref_lock *lock;
@@ -776,6 +803,24 @@ retry:
 			goto retry;
 		} else {
 			unable_to_lock_message(ref_file.buf, myerr, err);
+			if (myerr == EEXIST) {
+				if (ignore_case &&
+				    transaction_has_case_conflicting_update(transaction, update)) {
+					/*
+					 * In case-insensitive filesystems, ensure that conflicts within a
+					 * given transaction are handled. Pre-existing refs on a
+					 * case-insensitive system will be overridden without any issue.
+					 */
+					ret = REF_TRANSACTION_ERROR_CASE_CONFLICT;
+				} else {
+					/*
+					 * Pre-existing case-conflicting reference locks should also be
+					 * specially categorized to avoid failing all batched updates.
+					 */
+					ret = REF_TRANSACTION_ERROR_CREATE_EXISTS;
+				}
+			}
+
 			goto error_return;
 		}
 	}
@@ -831,6 +876,7 @@ retry:
 				goto error_return;
 			} else if (remove_dir_recursively(&ref_file,
 							  REMOVE_DIR_EMPTY_ONLY)) {
+				ret = REF_TRANSACTION_ERROR_NAME_CONFLICT;
 				if (refs_verify_refname_available(
 						    &refs->base, refname,
 						    extras, NULL, 0, err)) {
@@ -838,14 +884,14 @@ retry:
 					 * The error message set by
 					 * verify_refname_available() is OK.
 					 */
-					ret = REF_TRANSACTION_ERROR_NAME_CONFLICT;
 					goto error_return;
 				} else {
 					/*
-					 * We can't delete the directory,
-					 * but we also don't know of any
-					 * references that it should
-					 * contain.
+					 * Directory conflicts can occur if there
+					 * is an existing lock file in the directory
+					 * or if the filesystem is case-insensitive
+					 * and the directory contains a valid reference
+					 * but conflicts with the update.
 					 */
 					strbuf_addf(err, "there is a non-empty directory '%s' "
 						    "blocking reference '%s'",
@@ -867,8 +913,23 @@ retry:
 		 * If the ref did not exist and we are creating it, we have to
 		 * make sure there is no existing packed ref that conflicts
 		 * with refname. This check is deferred so that we can batch it.
+		 *
+		 * For case-insensitive filesystems, we should also check for F/D
+		 * conflicts between 'foo' and 'Foo/bar'. So let's lowercase
+		 * the refname.
 		 */
-		item = string_list_append(refnames_to_check, refname);
+		if (ignore_case) {
+			struct strbuf lower = STRBUF_INIT;
+
+			strbuf_addstr(&lower, refname);
+			strbuf_tolower(&lower);
+
+			item = string_list_append_nodup(refnames_to_check,
+							strbuf_detach(&lower, NULL));
+		} else {
+			item = string_list_append(refnames_to_check, refname);
+		}
+
 		item->util = xmalloc(sizeof(update_idx));
 		memcpy(item->util, &update_idx, sizeof(update_idx));
 	}
@@ -2421,9 +2482,10 @@ static enum ref_transaction_error split_head_update(struct ref_update *update,
 
 	new_update = ref_transaction_add_update(
 			transaction, "HEAD",
-			update->flags | REF_LOG_ONLY | REF_NO_DEREF,
+			update->flags | REF_LOG_ONLY | REF_NO_DEREF | REF_LOG_VIA_SPLIT,
 			&update->new_oid, &update->old_oid,
 			NULL, NULL, update->committer_info, update->msg);
+	new_update->parent_update = update;
 
 	/*
 	 * Add "HEAD". This insertion is O(N) in the transaction
@@ -2494,7 +2556,6 @@ static enum ref_transaction_error split_symref_update(struct ref_update *update,
 	 * done when new_update is processed.
 	 */
 	update->flags |= REF_LOG_ONLY | REF_NO_DEREF;
-	update->flags &= ~REF_HAVE_OLD;
 
 	return 0;
 }
@@ -2509,8 +2570,9 @@ static enum ref_transaction_error check_old_oid(struct ref_update *update,
 						struct object_id *oid,
 						struct strbuf *err)
 {
-	if (!(update->flags & REF_HAVE_OLD) ||
-		   oideq(oid, &update->old_oid))
+	if (update->flags & REF_LOG_ONLY ||
+	    !(update->flags & REF_HAVE_OLD) ||
+	    oideq(oid, &update->old_oid))
 		return 0;
 
 	if (is_null_oid(&update->old_oid)) {
@@ -2583,9 +2645,8 @@ static enum ref_transaction_error lock_ref_for_update(struct files_ref_store *re
 	if (lock) {
 		lock->count++;
 	} else {
-		ret = lock_raw_ref(refs, update, update_idx, mustexist,
-				   refnames_to_check, &transaction->refnames,
-				   &lock, &referent, err);
+		ret = lock_raw_ref(refs, transaction, update_idx, mustexist,
+				   refnames_to_check, &lock, &referent, err);
 		if (ret) {
 			char *reason;
 
@@ -2601,7 +2662,36 @@ static enum ref_transaction_error lock_ref_for_update(struct files_ref_store *re
 
 	update->backend_data = lock;
 
-	if (update->type & REF_ISSYMREF) {
+	if (update->flags & REF_LOG_VIA_SPLIT) {
+		struct ref_lock *parent_lock;
+
+		if (!update->parent_update)
+			BUG("split update without a parent");
+
+		parent_lock = update->parent_update->backend_data;
+
+		/*
+		 * Check that "HEAD" didn't racily change since we have looked
+		 * it up. If it did we must refuse to write the reflog entry.
+		 *
+		 * Note that this does not catch all races: if "HEAD" was
+		 * racily changed to point to one of the refs part of the
+		 * transaction then we would miss writing the split reflog
+		 * entry for "HEAD".
+		 */
+		if (!(update->type & REF_ISSYMREF) ||
+		    strcmp(update->parent_update->refname, referent.buf)) {
+			strbuf_addstr(err, "HEAD has been racily updated");
+			ret = REF_TRANSACTION_ERROR_GENERIC;
+			goto out;
+		}
+
+		if (update->flags & REF_HAVE_OLD) {
+			oidcpy(&lock->old_oid, &update->old_oid);
+		} else {
+			oidcpy(&lock->old_oid, &parent_lock->old_oid);
+		}
+	} else if (update->type & REF_ISSYMREF) {
 		if (update->flags & REF_NO_DEREF) {
 			/*
 			 * We won't be reading the referent as part of
@@ -2794,7 +2884,7 @@ static int files_transaction_prepare(struct ref_store *ref_store,
 			       "ref_transaction_prepare");
 	size_t i;
 	int ret = 0;
-	struct string_list refnames_to_check = STRING_LIST_INIT_NODUP;
+	struct string_list refnames_to_check = STRING_LIST_INIT_DUP;
 	char *head_ref = NULL;
 	int head_type;
 	struct files_transaction_backend_data *backend_data;
@@ -2977,6 +3067,20 @@ static int parse_and_write_reflog(struct files_ref_store *refs,
 				  struct ref_lock *lock,
 				  struct strbuf *err)
 {
+	struct object_id *old_oid = &lock->old_oid;
+
+	if (update->flags & REF_LOG_USE_PROVIDED_OIDS) {
+		if (!(update->flags & REF_HAVE_OLD) ||
+		    !(update->flags & REF_HAVE_NEW) ||
+		    !(update->flags & REF_LOG_ONLY)) {
+			strbuf_addf(err, _("trying to write reflog for '%s'"
+					   "with incomplete values"), update->refname);
+			return REF_TRANSACTION_ERROR_GENERIC;
+		}
+
+		old_oid = &update->old_oid;
+	}
+
 	if (update->new_target) {
 		/*
 		 * We want to get the resolved OID for the target, to ensure
@@ -2994,7 +3098,7 @@ static int parse_and_write_reflog(struct files_ref_store *refs,
 		}
 	}
 
-	if (files_log_ref_write(refs, lock->ref_name, &lock->old_oid,
+	if (files_log_ref_write(refs, lock->ref_name, old_oid,
 				&update->new_oid, update->committer_info,
 				update->msg, update->flags, err)) {
 		char *old_msg = strbuf_detach(err, NULL);
@@ -3062,7 +3166,8 @@ static int files_transaction_finish_initial(struct files_ref_store *refs,
 	for (i = 0; i < transaction->nr; i++) {
 		struct ref_update *update = transaction->updates[i];
 
-		if ((update->flags & REF_HAVE_OLD) &&
+		if (!(update->flags & REF_LOG_ONLY) &&
+		    (update->flags & REF_HAVE_OLD) &&
 		    !is_null_oid(&update->old_oid))
 			BUG("initial ref transaction with old_sha1 set");
 

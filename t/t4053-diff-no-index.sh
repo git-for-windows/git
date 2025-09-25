@@ -26,6 +26,23 @@ test_expect_success 'git diff --no-index directories' '
 	test_line_count = 14 cnt
 '
 
+test_expect_success 'git diff --no-index with -' '
+	cat >expect <<-\EOF &&
+	diff --git a/- b/-
+	new file mode 100644
+	--- /dev/null
+	+++ b/-
+	@@ -0,0 +1 @@
+	+frotz
+	EOF
+	(
+		cd a &&
+		echo frotz |
+		test_expect_code 1 git diff --no-index /dev/null - >../actual
+	) &&
+	test_cmp expect actual
+'
+
 test_expect_success 'git diff --no-index relative path outside repo' '
 	(
 		cd repo &&
@@ -316,6 +333,22 @@ test_expect_success 'diff --no-index rejects absolute pathspec' '
 
 test_expect_success 'diff --no-index with pathspec' '
 	test_expect_code 1 git diff --name-status --no-index a b 1 >actual &&
+	cat >expect <<-EOF &&
+	D	a/1
+	EOF
+	test_cmp expect actual
+'
+
+test_expect_success 'diff --no-index first path ending in slash with pathspec' '
+	test_expect_code 1 git diff --name-status --no-index a/ b 1 >actual &&
+	cat >expect <<-EOF &&
+	D	a/1
+	EOF
+	test_cmp expect actual
+'
+
+test_expect_success 'diff --no-index second path ending in slash with pathspec' '
+	test_expect_code 1 git diff --name-status --no-index a b/ 1 >actual &&
 	cat >expect <<-EOF &&
 	D	a/1
 	EOF
