@@ -711,8 +711,9 @@ static void increment_totals(struct survey_context *ctx,
 		oi.sizep = &object_length;
 		oi.disk_sizep = &disk_sizep;
 
-		if (oid_object_info_extended(ctx->repo, &oids->oid[i],
-					     &oi, oi_flags) < 0) {
+		if (odb_read_object_info_extended(ctx->repo->objects,
+						  &oids->oid[i], &oi,
+						  oi_flags) < 0) {
 			summary->num_missing++;
 		} else {
 			summary->nr++;
