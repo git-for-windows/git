@@ -642,9 +642,9 @@ static void survey_phase_refs(struct survey_context *ctx)
 		switch (item->kind) {
 		case FILTER_REFS_TAGS:
 			ctx->report.refs.tags_nr++;
-			if (oid_object_info(ctx->repo,
-					    &item->objectname,
-					    &size) == OBJ_TAG)
+			if (odb_read_object_info(ctx->repo->objects,
+						 &item->objectname,
+						 &size) == OBJ_TAG)
 				ctx->report.refs.tags_annotated_nr++;
 			break;
 
