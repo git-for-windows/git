@@ -1357,6 +1357,9 @@ static void emit_diff_symbol_from_struct(struct diff_options *o,
 	int len = eds->len;
 	unsigned flags = eds->flags;
 
+	if (o->dry_run)
+		return;
+
 	switch (s) {
 	case DIFF_SYMBOL_NO_LF_EOF:
 		context = diff_get_color_opt(o, DIFF_CONTEXT);
@@ -4426,7 +4429,7 @@ static void run_external_diff(const struct external_diff *pgm,
 {
 	struct child_process cmd = CHILD_PROCESS_INIT;
 	struct diff_queue_struct *q = &diff_queued_diff;
-	int quiet = !(o->output_format & DIFF_FORMAT_PATCH);
+	int quiet = !(o->output_format & DIFF_FORMAT_PATCH) || o->dry_run;
 	int rc;
 
 	/*
@@ -4621,7 +4624,8 @@ static void run_diff_cmd(const struct external_diff *pgm,
 		    p->status == DIFF_STATUS_RENAMED)
 			o->found_changes = 1;
 	} else {
-		fprintf(o->file, "* Unmerged path %s\n", name);
+		if (!o->dry_run)
+			fprintf(o->file, "* Unmerged path %s\n", name);
 		o->found_changes = 1;
 	}
 }
