@@ -15,5 +15,3 @@ export GIT_TEST_DEFAULT_REF_FORMAT
 
 pack_refs='refs optimize'
 . "$TEST_DIRECTORY"/pack-refs-tests.sh
-
-test_done

@@ -459,3 +459,5 @@ test_expect_success 'pack-refs does not store invalid peeled tag value' '
 		test_grep ! "^\^" .git/packed-refs
 	)
 '
+
+test_done
