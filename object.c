@@ -209,12 +209,11 @@ struct object *lookup_object_by_type(struct repository *r,
 
 enum peel_status peel_object(struct repository *r,
 			     const struct object_id *name,
-			     struct object_id *oid,
-			     unsigned flags)
+			     struct object_id *oid)
 {
 	struct object *o = lookup_unknown_object(r, name);
 
-	if (o->type == OBJ_NONE || flags & PEEL_OBJECT_VERIFY_OBJECT_TYPE) {
+	if (o->type == OBJ_NONE) {
 		int type = odb_read_object_info(r->objects, name, NULL);
 		if (type < 0 || !object_as_type(o, type, 0))
 			return PEEL_INVALID;
@@ -223,20 +222,7 @@ enum peel_status peel_object(struct repository *r,
 	if (o->type != OBJ_TAG)
 		return PEEL_NON_TAG;
 
-	while (o && o->type == OBJ_TAG) {
-		o = parse_object(r, &o->oid);
-		if (o && o->type == OBJ_TAG && ((struct tag *)o)->tagged) {
-			o = ((struct tag *)o)->tagged;
-
-			if (flags & PEEL_OBJECT_VERIFY_OBJECT_TYPE) {
-				int type = odb_read_object_info(r->objects, &o->oid, NULL);
-				if (type < 0 || !object_as_type(o, type, 0))
-					return PEEL_INVALID;
-			}
-		} else {
-			o = NULL;
-		}
-	}
+	o = deref_tag_noverify(r, o);
 	if (!o)
 		return PEEL_INVALID;
 

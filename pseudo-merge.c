@@ -221,25 +221,28 @@ void load_pseudo_merges_from_config(struct repository *r,
 	}
 }
 
-static int find_pseudo_merge_group_for_ref(const struct reference *ref, void *_data)
+static int find_pseudo_merge_group_for_ref(const char *refname,
+					   const char *referent UNUSED,
+					   const struct object_id *oid,
+					   int flags UNUSED,
+					   void *_data)
 {
 	struct bitmap_writer *writer = _data;
-	const struct object_id *maybe_peeled = ref->oid;
 	struct object_id peeled;
 	struct commit *c;
 	uint32_t i;
 	int has_bitmap;
 
-	if (!reference_get_peeled_oid(the_repository, ref, &peeled))
-		maybe_peeled = &peeled;
+	if (!peel_iterated_oid(the_repository, oid, &peeled))
+		oid = &peeled;
 
-	c = lookup_commit(the_repository, maybe_peeled);
+	c = lookup_commit(the_repository, oid);
 	if (!c)
 		return 0;
-	if (!packlist_find(writer->to_pack, maybe_peeled))
+	if (!packlist_find(writer->to_pack, oid))
 		return 0;
 
-	has_bitmap = bitmap_writer_has_bitmapped_object_id(writer, maybe_peeled);
+	has_bitmap = bitmap_writer_has_bitmapped_object_id(writer, oid);
 
 	for (i = 0; i < writer->pseudo_merge_groups.nr; i++) {
 		struct pseudo_merge_group *group;
@@ -249,7 +252,7 @@ static int find_pseudo_merge_group_for_ref(const struct reference *ref, void *_d
 		size_t j;
 
 		group = writer->pseudo_merge_groups.items[i].util;
-		if (regexec(group->pattern, ref->name, ARRAY_SIZE(captures),
+		if (regexec(group->pattern, refname, ARRAY_SIZE(captures),
 			    captures, 0))
 			continue;
 
@@ -266,7 +269,7 @@ static int find_pseudo_merge_group_for_ref(const struct reference *ref, void *_d
 			if (group_name.len)
 				strbuf_addch(&group_name, '-');
 
-			strbuf_add(&group_name, ref->name + match->rm_so,
+			strbuf_add(&group_name, refname + match->rm_so,
 				   match->rm_eo - match->rm_so);
 		}
 

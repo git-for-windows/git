@@ -217,17 +217,19 @@ static int show_default(void)
 	return 0;
 }
 
-static int show_reference(const struct reference *ref, void *cb_data UNUSED)
+static int show_reference(const char *refname, const char *referent UNUSED, const struct object_id *oid,
+			  int flag UNUSED, void *cb_data UNUSED)
 {
-	if (ref_excluded(&ref_excludes, ref->name))
+	if (ref_excluded(&ref_excludes, refname))
 		return 0;
-	show_rev(NORMAL, ref->oid, ref->name);
+	show_rev(NORMAL, oid, refname);
 	return 0;
 }
 
-static int anti_reference(const struct reference *ref, void *cb_data UNUSED)
+static int anti_reference(const char *refname, const char *referent UNUSED, const struct object_id *oid,
+			  int flag UNUSED, void *cb_data UNUSED)
 {
-	show_rev(REVERSED, ref->oid, ref->name);
+	show_rev(REVERSED, oid, refname);
 	return 0;
 }
 

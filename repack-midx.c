@@ -16,23 +16,25 @@ struct midx_snapshot_ref_data {
 	int preferred;
 };
 
-static int midx_snapshot_ref_one(const struct reference *ref, void *_data)
+static int midx_snapshot_ref_one(const char *refname UNUSED,
+				 const char *referent UNUSED,
+				 const struct object_id *oid,
+				 int flag UNUSED, void *_data)
 {
 	struct midx_snapshot_ref_data *data = _data;
-	const struct object_id *maybe_peeled = ref->oid;
 	struct object_id peeled;
 
-	if (!reference_get_peeled_oid(data->repo, ref, &peeled))
-		maybe_peeled = &peeled;
+	if (!peel_iterated_oid(data->repo, oid, &peeled))
+		oid = &peeled;
 
-	if (oidset_insert(&data->seen, maybe_peeled))
+	if (oidset_insert(&data->seen, oid))
 		return 0; /* already seen */
 
-	if (odb_read_object_info(data->repo->objects, maybe_peeled, NULL) != OBJ_COMMIT)
+	if (odb_read_object_info(data->repo->objects, oid, NULL) != OBJ_COMMIT)
 		return 0;
 
 	fprintf(data->f->fp, "%s%s\n", data->preferred ? "+" : "",
-		oid_to_hex(maybe_peeled));
+		oid_to_hex(oid));
 
 	return 0;
 }

@@ -934,7 +934,10 @@ static void free_submodules_data(struct string_list *submodules)
 	string_list_clear(submodules, 1);
 }
 
-static int has_remote(const struct reference *ref UNUSED, void *cb_data UNUSED)
+static int has_remote(const char *refname UNUSED,
+		      const char *referent UNUSED,
+		      const struct object_id *oid UNUSED,
+		      int flags UNUSED, void *cb_data UNUSED)
 {
 	return 1;
 }
@@ -1252,10 +1255,13 @@ int push_unpushed_submodules(struct repository *r,
 	return ret;
 }
 
-static int append_oid_to_array(const struct reference *ref, void *data)
+static int append_oid_to_array(const char *ref UNUSED,
+			       const char *referent UNUSED,
+			       const struct object_id *oid,
+			       int flags UNUSED, void *data)
 {
 	struct oid_array *array = data;
-	oid_array_append(array, ref->oid);
+	oid_array_append(array, oid);
 	return 0;
 }
 

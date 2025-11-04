@@ -831,14 +831,15 @@ static enum write_one_status write_one(struct hashfile *f,
 	return WRITE_ONE_WRITTEN;
 }
 
-static int mark_tagged(const struct reference *ref, void *cb_data UNUSED)
+static int mark_tagged(const char *path UNUSED, const char *referent UNUSED, const struct object_id *oid,
+		       int flag UNUSED, void *cb_data UNUSED)
 {
 	struct object_id peeled;
-	struct object_entry *entry = packlist_find(&to_pack, ref->oid);
+	struct object_entry *entry = packlist_find(&to_pack, oid);
 
 	if (entry)
 		entry->tagged = 1;
-	if (!reference_get_peeled_oid(the_repository, ref, &peeled)) {
+	if (!peel_iterated_oid(the_repository, oid, &peeled)) {
 		entry = packlist_find(&to_pack, &peeled);
 		if (entry)
 			entry->tagged = 1;
@@ -3304,13 +3305,13 @@ static void add_tag_chain(const struct object_id *oid)
 	}
 }
 
-static int add_ref_tag(const struct reference *ref, void *cb_data UNUSED)
+static int add_ref_tag(const char *tag UNUSED, const char *referent UNUSED, const struct object_id *oid,
+		       int flag UNUSED, void *cb_data UNUSED)
 {
 	struct object_id peeled;
 
-	if (!reference_get_peeled_oid(the_repository, ref, &peeled) &&
-	    obj_is_packed(&peeled))
-		add_tag_chain(ref->oid);
+	if (!peel_iterated_oid(the_repository, oid, &peeled) && obj_is_packed(&peeled))
+		add_tag_chain(oid);
 	return 0;
 }
 
@@ -4526,16 +4527,19 @@ static void record_recent_commit(struct commit *commit, void *data UNUSED)
 	oid_array_append(&recent_objects, &commit->object.oid);
 }
 
-static int mark_bitmap_preferred_tip(const struct reference *ref, void *data UNUSED)
+static int mark_bitmap_preferred_tip(const char *refname,
+				     const char *referent UNUSED,
+				     const struct object_id *oid,
+				     int flags UNUSED,
+				     void *data UNUSED)
 {
-	const struct object_id *maybe_peeled = ref->oid;
 	struct object_id peeled;
 	struct object *object;
 
-	if (!reference_get_peeled_oid(the_repository, ref, &peeled))
-		maybe_peeled = &peeled;
+	if (!peel_iterated_oid(the_repository, oid, &peeled))
+		oid = &peeled;
 
-	object = parse_object_or_die(the_repository, maybe_peeled, ref->name);
+	object = parse_object_or_die(the_repository, oid, refname);
 	if (object->type == OBJ_COMMIT)
 		object->flags |= NEEDS_BITMAP;
 

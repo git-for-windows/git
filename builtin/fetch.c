@@ -289,11 +289,13 @@ static struct refname_hash_entry *refname_hash_add(struct hashmap *map,
 	return ent;
 }
 
-static int add_one_refname(const struct reference *ref, void *cbdata)
+static int add_one_refname(const char *refname, const char *referent UNUSED,
+			   const struct object_id *oid,
+			   int flag UNUSED, void *cbdata)
 {
 	struct hashmap *refname_map = cbdata;
 
-	(void) refname_hash_add(refname_map, ref->name, ref->oid);
+	(void) refname_hash_add(refname_map, refname, oid);
 	return 0;
 }
 
@@ -1414,11 +1416,14 @@ static void set_option(struct transport *transport, const char *name, const char
 }
 
 
-static int add_oid(const struct reference *ref, void *cb_data)
+static int add_oid(const char *refname UNUSED,
+		   const char *referent UNUSED,
+		   const struct object_id *oid,
+		   int flags UNUSED, void *cb_data)
 {
 	struct oid_array *oids = cb_data;
 
-	oid_array_append(oids, ref->oid);
+	oid_array_append(oids, oid);
 	return 0;
 }
 

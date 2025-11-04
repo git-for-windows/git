@@ -426,19 +426,17 @@ int refs_ref_exists(struct ref_store *refs, const char *refname)
 					 NULL, NULL);
 }
 
-static int for_each_filter_refs(const struct reference *ref, void *data)
+static int for_each_filter_refs(const char *refname, const char *referent,
+				const struct object_id *oid,
+				int flags, void *data)
 {
 	struct for_each_ref_filter *filter = data;
 
-	if (wildmatch(filter->pattern, ref->name, 0))
+	if (wildmatch(filter->pattern, refname, 0))
 		return 0;
-	if (filter->prefix) {
-		struct reference skipped = *ref;
-		skip_prefix(skipped.name, filter->prefix, &skipped.name);
-		return filter->fn(&skipped, filter->cb_data);
-	} else {
-		return filter->fn(ref, filter->cb_data);
-	}
+	if (filter->prefix)
+		skip_prefix(refname, filter->prefix, &refname);
+	return filter->fn(refname, referent, oid, flags, filter->cb_data);
 }
 
 struct warn_if_dangling_data {
@@ -449,15 +447,17 @@ struct warn_if_dangling_data {
 	int dry_run;
 };
 
-static int warn_if_dangling_symref(const struct reference *ref, void *cb_data)
+static int warn_if_dangling_symref(const char *refname, const char *referent UNUSED,
+				   const struct object_id *oid UNUSED,
+				   int flags, void *cb_data)
 {
 	struct warn_if_dangling_data *d = cb_data;
 	const char *resolves_to, *msg;
 
-	if (!(ref->flags & REF_ISSYMREF))
+	if (!(flags & REF_ISSYMREF))
 		return 0;
 
-	resolves_to = refs_resolve_ref_unsafe(d->refs, ref->name, 0, NULL, NULL);
+	resolves_to = refs_resolve_ref_unsafe(d->refs, refname, 0, NULL, NULL);
 	if (!resolves_to
 	    || !string_list_has_string(d->refnames, resolves_to)) {
 		return 0;
@@ -466,7 +466,7 @@ static int warn_if_dangling_symref(const struct reference *ref, void *cb_data)
 	msg = d->dry_run
 		? _("%s%s will become dangling after %s is deleted\n")
 		: _("%s%s has become dangling after %s was deleted\n");
-	fprintf(d->fp, msg, d->indent, ref->name, resolves_to);
+	fprintf(d->fp, msg, d->indent, refname, resolves_to);
 	return 0;
 }
 
@@ -507,15 +507,8 @@ int refs_head_ref_namespaced(struct ref_store *refs, each_ref_fn fn, void *cb_da
 	int flag;
 
 	strbuf_addf(&buf, "%sHEAD", get_git_namespace());
-	if (!refs_read_ref_full(refs, buf.buf, RESOLVE_REF_READING, &oid, &flag)) {
-		struct reference ref = {
-			.name = buf.buf,
-			.oid = &oid,
-			.flags = flag,
-		};
-
-		ret = fn(&ref, cb_data);
-	}
+	if (!refs_read_ref_full(refs, buf.buf, RESOLVE_REF_READING, &oid, &flag))
+		ret = fn(buf.buf, NULL, &oid, flag, cb_data);
 	strbuf_release(&buf);
 
 	return ret;
@@ -1748,15 +1741,8 @@ int refs_head_ref(struct ref_store *refs, each_ref_fn fn, void *cb_data)
 	int flag;
 
 	if (refs_resolve_ref_unsafe(refs, "HEAD", RESOLVE_REF_READING,
-				    &oid, &flag)) {
-		struct reference ref = {
-			.name = "HEAD",
-			.oid = &oid,
-			.flags = flag,
-		};
-
-		return fn(&ref, cb_data);
-	}
+				    &oid, &flag))
+		return fn("HEAD", NULL, &oid, flag, cb_data);
 
 	return 0;
 }
@@ -2324,16 +2310,14 @@ int refs_optimize(struct ref_store *refs, struct pack_refs_opts *opts)
 	return refs->be->optimize(refs, opts);
 }
 
-int reference_get_peeled_oid(struct repository *repo,
-			     const struct reference *ref,
-			     struct object_id *peeled_oid)
+int peel_iterated_oid(struct repository *r, const struct object_id *base, struct object_id *peeled)
 {
-	if (ref->peeled_oid) {
-		oidcpy(peeled_oid, ref->peeled_oid);
-		return 0;
-	}
+	if (current_ref_iter &&
+	    (current_ref_iter->oid == base ||
+	     oideq(current_ref_iter->oid, base)))
+		return ref_iterator_peel(current_ref_iter, peeled);
 
-	return peel_object(repo, ref->oid, peeled_oid, 0) ? -1 : 0;
+	return peel_object(r, base, peeled) ? -1 : 0;
 }
 
 int refs_update_symref(struct ref_store *refs, const char *ref,
@@ -2705,7 +2689,7 @@ enum ref_transaction_error refs_verify_refnames_available(struct ref_store *refs
 
 			while ((ok = ref_iterator_advance(iter)) == ITER_OK) {
 				if (skip &&
-				    string_list_has_string(skip, iter->ref.name))
+				    string_list_has_string(skip, iter->refname))
 					continue;
 
 				if (transaction && ref_transaction_maybe_set_rejected(
@@ -2714,7 +2698,7 @@ enum ref_transaction_error refs_verify_refnames_available(struct ref_store *refs
 					continue;
 
 				strbuf_addf(err, _("'%s' exists; cannot create '%s'"),
-					    iter->ref.name, refname);
+					    iter->refname, refname);
 				goto cleanup;
 			}
 
@@ -2769,10 +2753,14 @@ struct do_for_each_reflog_help {
 	void *cb_data;
 };
 
-static int do_for_each_reflog_helper(const struct reference *ref, void *cb_data)
+static int do_for_each_reflog_helper(const char *refname,
+				     const char *referent UNUSED,
+				     const struct object_id *oid UNUSED,
+				     int flags UNUSED,
+				     void *cb_data)
 {
 	struct do_for_each_reflog_help *hp = cb_data;
-	return hp->fn(ref->name, hp->cb_data);
+	return hp->fn(refname, hp->cb_data);
 }
 
 int refs_for_each_reflog(struct ref_store *refs, each_reflog_fn fn, void *cb_data)
@@ -2988,24 +2976,25 @@ struct migration_data {
 	uint64_t index;
 };
 
-static int migrate_one_ref(const struct reference *ref, void *cb_data)
+static int migrate_one_ref(const char *refname, const char *referent UNUSED, const struct object_id *oid,
+			   int flags, void *cb_data)
 {
 	struct migration_data *data = cb_data;
 	struct strbuf symref_target = STRBUF_INIT;
 	int ret;
 
-	if (ref->flags & REF_ISSYMREF) {
-		ret = refs_read_symbolic_ref(data->old_refs, ref->name, &symref_target);
+	if (flags & REF_ISSYMREF) {
+		ret = refs_read_symbolic_ref(data->old_refs, refname, &symref_target);
 		if (ret < 0)
 			goto done;
 
-		ret = ref_transaction_update(data->transaction, ref->name, NULL, null_oid(the_hash_algo),
+		ret = ref_transaction_update(data->transaction, refname, NULL, null_oid(the_hash_algo),
 					     symref_target.buf, NULL,
 					     REF_SKIP_CREATE_REFLOG | REF_NO_DEREF, NULL, data->errbuf);
 		if (ret < 0)
 			goto done;
 	} else {
-		ret = ref_transaction_create(data->transaction, ref->name, ref->oid, NULL,
+		ret = ref_transaction_create(data->transaction, refname, oid, NULL,
 					     REF_SKIP_CREATE_REFLOG | REF_SKIP_OID_VERIFICATION,
 					     NULL, data->errbuf);
 		if (ret < 0)

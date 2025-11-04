@@ -154,19 +154,20 @@ static void add_to_known_names(const char *path,
 	}
 }
 
-static int get_name(const struct reference *ref, void *cb_data UNUSED)
+static int get_name(const char *path, const char *referent UNUSED, const struct object_id *oid,
+		    int flag UNUSED, void *cb_data UNUSED)
 {
 	int is_tag = 0;
 	struct object_id peeled;
 	int is_annotated, prio;
 	const char *path_to_match = NULL;
 
-	if (skip_prefix(ref->name, "refs/tags/", &path_to_match)) {
+	if (skip_prefix(path, "refs/tags/", &path_to_match)) {
 		is_tag = 1;
 	} else if (all) {
 		if ((exclude_patterns.nr || patterns.nr) &&
-		    !skip_prefix(ref->name, "refs/heads/", &path_to_match) &&
-		    !skip_prefix(ref->name, "refs/remotes/", &path_to_match)) {
+		    !skip_prefix(path, "refs/heads/", &path_to_match) &&
+		    !skip_prefix(path, "refs/remotes/", &path_to_match)) {
 			/* Only accept reference of known type if there are match/exclude patterns */
 			return 0;
 		}
@@ -208,10 +209,10 @@ static int get_name(const struct reference *ref, void *cb_data UNUSED)
 	}
 
 	/* Is it annotated? */
-	if (!reference_get_peeled_oid(the_repository, ref, &peeled)) {
-		is_annotated = !oideq(ref->oid, &peeled);
+	if (!peel_iterated_oid(the_repository, oid, &peeled)) {
+		is_annotated = !oideq(oid, &peeled);
 	} else {
-		oidcpy(&peeled, ref->oid);
+		oidcpy(&peeled, oid);
 		is_annotated = 0;
 	}
 
@@ -228,8 +229,7 @@ static int get_name(const struct reference *ref, void *cb_data UNUSED)
 	else
 		prio = 0;
 
-	add_to_known_names(all ? ref->name + 5 : ref->name + 10,
-			   &peeled, prio, ref->oid);
+	add_to_known_names(all ? path + 5 : path + 10, &peeled, prio, oid);
 	return 0;
 }
 

@@ -390,7 +390,8 @@ static void add_ref_to_island(kh_str_t *remote_islands, const char *island_name,
 	rl->hash += sha_core;
 }
 
-static int find_island_for_ref(const struct reference *ref, void *cb)
+static int find_island_for_ref(const char *refname, const char *referent UNUSED, const struct object_id *oid,
+			       int flags UNUSED, void *cb)
 {
 	struct island_load_data *ild = cb;
 
@@ -405,7 +406,7 @@ static int find_island_for_ref(const struct reference *ref, void *cb)
 
 	/* walk backwards to get last-one-wins ordering */
 	for (i = ild->nr - 1; i >= 0; i--) {
-		if (!regexec(&ild->rx[i], ref->name,
+		if (!regexec(&ild->rx[i], refname,
 			     ARRAY_SIZE(matches), matches, 0))
 			break;
 	}
@@ -427,10 +428,10 @@ static int find_island_for_ref(const struct reference *ref, void *cb)
 		if (island_name.len)
 			strbuf_addch(&island_name, '-');
 
-		strbuf_add(&island_name, ref->name + match->rm_so, match->rm_eo - match->rm_so);
+		strbuf_add(&island_name, refname + match->rm_so, match->rm_eo - match->rm_so);
 	}
 
-	add_ref_to_island(ild->remote_islands, island_name.buf, ref->oid);
+	add_ref_to_island(ild->remote_islands, island_name.buf, oid);
 	strbuf_release(&island_name);
 	return 0;
 }

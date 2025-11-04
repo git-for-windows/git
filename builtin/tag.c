@@ -153,7 +153,7 @@ static int verify_tag(const char *name, const char *ref UNUSED,
 		return -1;
 
 	if (format->format)
-		pretty_print_ref(name, oid, NULL, format);
+		pretty_print_ref(name, oid, format);
 
 	return 0;
 }

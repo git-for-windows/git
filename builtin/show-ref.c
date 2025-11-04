@@ -31,31 +31,31 @@ struct show_one_options {
 };
 
 static void show_one(const struct show_one_options *opts,
-		     const struct reference *ref)
+		     const char *refname, const struct object_id *oid)
 {
 	const char *hex;
 	struct object_id peeled;
 
-	if (!odb_has_object(the_repository->objects, ref->oid,
+	if (!odb_has_object(the_repository->objects, oid,
 			    HAS_OBJECT_RECHECK_PACKED | HAS_OBJECT_FETCH_PROMISOR))
-		die("git show-ref: bad ref %s (%s)", ref->name,
-		    oid_to_hex(ref->oid));
+		die("git show-ref: bad ref %s (%s)", refname,
+		    oid_to_hex(oid));
 
 	if (opts->quiet)
 		return;
 
-	hex = repo_find_unique_abbrev(the_repository, ref->oid, opts->abbrev);
+	hex = repo_find_unique_abbrev(the_repository, oid, opts->abbrev);
 	if (opts->hash_only)
 		printf("%s\n", hex);
 	else
-		printf("%s %s\n", hex, ref->name);
+		printf("%s %s\n", hex, refname);
 
 	if (!opts->deref_tags)
 		return;
 
-	if (!reference_get_peeled_oid(the_repository, ref, &peeled)) {
+	if (!peel_iterated_oid(the_repository, oid, &peeled)) {
 		hex = repo_find_unique_abbrev(the_repository, &peeled, opts->abbrev);
-		printf("%s %s^{}\n", hex, ref->name);
+		printf("%s %s^{}\n", hex, refname);
 	}
 }
 
@@ -66,25 +66,26 @@ struct show_ref_data {
 	int show_head;
 };
 
-static int show_ref(const struct reference *ref, void *cbdata)
+static int show_ref(const char *refname, const char *referent UNUSED, const struct object_id *oid,
+		    int flag UNUSED, void *cbdata)
 {
 	struct show_ref_data *data = cbdata;
 
-	if (data->show_head && !strcmp(ref->name, "HEAD"))
+	if (data->show_head && !strcmp(refname, "HEAD"))
 		goto match;
 
 	if (data->patterns) {
-		int reflen = strlen(ref->name);
+		int reflen = strlen(refname);
 		const char **p = data->patterns, *m;
 		while ((m = *p++) != NULL) {
 			int len = strlen(m);
 			if (len > reflen)
 				continue;
-			if (memcmp(m, ref->name + reflen - len, len))
+			if (memcmp(m, refname + reflen - len, len))
 				continue;
 			if (len == reflen)
 				goto match;
-			if (ref->name[reflen - len - 1] == '/')
+			if (refname[reflen - len - 1] == '/')
 				goto match;
 		}
 		return 0;
@@ -93,15 +94,18 @@ static int show_ref(const struct reference *ref, void *cbdata)
 match:
 	data->found_match++;
 
-	show_one(data->show_one_opts, ref);
+	show_one(data->show_one_opts, refname, oid);
 
 	return 0;
 }
 
-static int add_existing(const struct reference *ref, void *cbdata)
+static int add_existing(const char *refname,
+			const char *referent UNUSED,
+			const struct object_id *oid UNUSED,
+			int flag UNUSED, void *cbdata)
 {
 	struct string_list *list = (struct string_list *)cbdata;
-	string_list_insert(list, ref->name);
+	string_list_insert(list, refname);
 	return 0;
 }
 
@@ -175,18 +179,12 @@ static int cmd_show_ref__verify(const struct show_one_options *show_one_opts,
 
 		if ((starts_with(*refs, "refs/") || refname_is_safe(*refs)) &&
 		    !refs_read_ref(get_main_ref_store(the_repository), *refs, &oid)) {
-			struct reference ref = {
-				.name = *refs,
-				.oid = &oid,
-			};
-
-			show_one(show_one_opts, &ref);
-		} else if (!show_one_opts->quiet) {
-			die("'%s' - not a valid ref", *refs);
-		} else {
-			return 1;
+			show_one(show_one_opts, *refs, &oid);
 		}
-
+		else if (!show_one_opts->quiet)
+			die("'%s' - not a valid ref", *refs);
+		else
+			return 1;
 		refs++;
 	}
 
