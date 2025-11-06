@@ -1,4 +1,5 @@
-name: CI
+name: Osama Atef 
+
 
 on: [push, pull_request]
 
