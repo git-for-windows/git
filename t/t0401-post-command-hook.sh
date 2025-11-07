@@ -85,11 +85,7 @@ test_expect_success 'with post-index-change config' '
 	echo more stuff >>file &&
 	git addalias file &&
 	test_cmp expect post-index-change.out &&
-
-	# TODO: This is the opposite of what we want! We want this to
-	# be missing, but the current state has this happening in this
-	# way.
-	test_path_exists post-command.out &&
+	test_path_is_missing post-command.out &&
 
 	echo stuff >>file &&
 	# reset --hard updates the worktree.
@@ -100,20 +96,17 @@ test_expect_success 'with post-index-change config' '
 	test_cmp expect post-index-change.out &&
 	test_cmp expect post-command.out &&
 
-	# TODO: We want to skip the post-command hook here!
 	rm -f post-command.out &&
 	test_must_fail git && # get help text
-	test_path_exists post-command.out &&
+	test_path_is_missing post-command.out &&
 
-	# TODO: We want to skip the post-command hook here!
 	rm -f post-command.out &&
 	git version &&
-	test_path_exists post-command.out &&
+	test_path_is_missing post-command.out &&
 
-	# TODO: We want to skip the post-command hook here!
 	rm -f post-command.out &&
 	test_must_fail git typo &&
-	test_path_exists post-command.out
+	test_path_is_missing post-command.out
 '
 
 test_done

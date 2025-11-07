@@ -219,8 +219,14 @@ static int write_post_index_change_sentinel(struct repository *r)
  */
 static int post_index_change_sentinel_exists(struct repository *r)
 {
-	char *path = get_post_index_change_sentinel_name(r);
+	char *path;
 	int res = 1;
+
+	/* It can't exist if we don't have a gitdir. */
+	if (!r->gitdir)
+		return 0;
+
+	path = get_post_index_change_sentinel_name(r);
 
 	if (unlink(path)) {
 		if (is_missing_file_error(errno))
@@ -233,6 +239,21 @@ static int post_index_change_sentinel_exists(struct repository *r)
 	return res;
 }
 
+static int check_worktree_change(const char *key, const char *value,
+				       UNUSED const struct config_context *ctx,
+				       void *data)
+{
+	int *enabled = data;
+
+	if (!strcmp(key, "postcommand.strategy") &&
+	    !strcasecmp(value, "worktree-change")) {
+		*enabled = 1;
+		return 1;
+	}
+
+	return 0;
+}
+
 /**
  * See if we can replace the requested hook with an internal behavior.
  * Returns 0 if the real hook should run. Returns nonzero if we instead
@@ -242,9 +263,11 @@ static int handle_hook_replacement(struct repository *r,
 				   const char *hook_name,
 				   struct strvec *args)
 {
-	const char *strval;
-	if (repo_config_get_string_tmp(r, "postcommand.strategy", &strval) ||
-	    strcasecmp(strval, "worktree-change"))
+	int enabled = 0;
+
+	read_early_config(r, check_worktree_change, &enabled);
+
+	if (!enabled)
 		return 0;
 
 	if (!strcmp(hook_name, "post-index-change")) {
@@ -290,8 +313,7 @@ int run_hooks_opt(struct repository *r, const char *hook_name,
 	};
 
 	/* Interject hook behavior depending on strategy. */
-	if (r && r->gitdir &&
-	    handle_hook_replacement(r, hook_name, &options->args))
+	if (r && handle_hook_replacement(r, hook_name, &options->args))
 		return 0;
 
 	hook_path = find_hook(r, hook_name);
