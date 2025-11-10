@@ -65,7 +65,7 @@ int odb_source_loose_freshen_object(struct odb_source *source,
 				    const struct object_id *oid);
 
 int odb_source_loose_write_object(struct odb_source *source,
-				  const void *buf, unsigned long len,
+				  const void *buf, size_t len,
 				  enum object_type type, struct object_id *oid,
 				  struct object_id *compat_oid_in, unsigned flags);
 
