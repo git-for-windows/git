@@ -118,14 +118,15 @@ macos-*)
 	# brew install gnu-time
 	brew link --force gettext
 
-	mkdir -p "$CUSTOM_PATH"
-	wget -q "$P4WHENCE/bin.macosx12arm64/helix-core-server.tgz"
-	tar -xf helix-core-server.tgz -C "$CUSTOM_PATH" p4 p4d
-	rm helix-core-server.tgz
-	echo "$(tput setaf 6)Perforce Server Version$(tput sgr0)"
-	p4d -V
-	echo "$(tput setaf 6)Perforce Client Version$(tput sgr0)"
-	p4 -V
+	# Uncomment this block if you want to run `git p4` tests:
+	# mkdir -p "$CUSTOM_PATH"
+	# wget -q "$P4WHENCE/bin.macosx12arm64/helix-core-server.tgz"
+	# tar -xf helix-core-server.tgz -C "$CUSTOM_PATH" p4 p4d
+	# rm helix-core-server.tgz
+	# echo "$(tput setaf 6)Perforce Server Version$(tput sgr0)"
+	# p4d -V
+	# echo "$(tput setaf 6)Perforce Client Version$(tput sgr0)"
+	# p4 -V
 
 	case "$jobname" in
 	osx-meson)
