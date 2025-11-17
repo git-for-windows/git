@@ -1530,6 +1530,7 @@ UNIT_TEST_OBJS += $(UNIT_TEST_DIR)/test-lib.o
 
 RUST_SOURCES += src/hash.rs
 RUST_SOURCES += src/lib.rs
+RUST_SOURCES += src/loose.rs
 RUST_SOURCES += src/varint.rs
 
 GIT-VERSION-FILE: FORCE
