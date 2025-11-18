@@ -216,7 +216,7 @@ static void gh_client__update_packed_git(const char *line)
 
 	p = add_packed_git(the_repository, path.buf, path.len, is_local);
 	if (p)
-		packfile_store_add_pack_also_to_mru(the_repository, p);
+		packfile_store_add_pack(the_repository->objects->packfiles, p);
 	strbuf_release(&path);
 }
 
