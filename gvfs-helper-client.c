@@ -250,7 +250,6 @@ static int gh_client__objects__receive_response(
 		}
 
 		else if (starts_with(line, "packfile")) {
-			gh_client__update_packed_git(line);
 			ghc |= GHC__CREATED__PACKFILE;
 			nr_packfile++;
 		}
@@ -270,6 +269,9 @@ static int gh_client__objects__receive_response(
 			err = -1;
 		}
 	}
+
+	if (ghc & GHC__CREATED__PACKFILE)
+		packfile_store_reprepare(the_repository->objects->packfiles);
 
 	*p_ghc = ghc;
 	*p_nr_loose = nr_loose;
