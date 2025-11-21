@@ -1270,7 +1270,6 @@ elif host_machine.system() == 'windows'
 
   libgit_c_args += [
     '-DDETECT_MSYS_TTY',
-    '-DENSURE_MSYSTEM_IS_SET',
     '-DNATIVE_CRLF',
     '-DNOGDI',
     '-DNO_POSIX_GOODIES',
@@ -1279,6 +1278,18 @@ elif host_machine.system() == 'windows'
     '-D_CONSOLE_DETECT_MSYS_TTY',
     '-D__USE_MINGW_ANSI_STDIO=0',
   ]
+
+  msystem = get_option('msystem')
+  if msystem != ''
+    mingw_prefix = get_option('mingw_prefix')
+    if mingw_prefix == ''
+      mingw_prefix = '/' + msystem.to_lower()
+    endif
+    libgit_c_args += [
+      '-DENSURE_MSYSTEM_IS_SET="' + msystem + '"',
+      '-DMINGW_PREFIX="' + mingw_prefix + '"'
+    ]
+  endif
 
   libgit_dependencies += compiler.find_library('ntdll')
   libgit_include_directories += 'compat/win32'
