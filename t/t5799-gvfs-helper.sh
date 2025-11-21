@@ -1285,15 +1285,30 @@ test_expect_success 'integration: explicit commit/trees, implicit blobs: diff 2 
 		>OUT.output 2>OUT.stderr
 '
 
+trace_has_queue_oid () {
+	oid=$1
+	grep "gh_client__queue_oid: $oid"
+}
+
+trace_has_immediate_oid () {
+	oid=$1
+	grep "gh_client__get_immediate: $oid"
+}
+
 test_expect_success 'integration: fully implicit: diff 2 commits' '
 	test_when_finished "per_test_cleanup" &&
 	start_gvfs_protocol_server &&
 
 	# Implicitly demand-load everything without any pre-seeding.
 	#
+	GIT_TRACE2_EVENT="$(pwd)/diff-trace.txt" \
 	git -C "$REPO_T1" -c core.useGVFSHelper=true \
 		diff $(cat m1.branch)..$(cat m3.branch) \
-		>OUT.output 2>OUT.stderr
+		>OUT.output 2>OUT.stderr &&
+
+	oid=$(git -C "$REPO_SRC" rev-parse main:file9.txt.t) &&
+	trace_has_queue_oid $oid <diff-trace.txt &&
+	! trace_has_immediate_oid $oid <diff-trace.txt
 '
 
 # T1 should be considered contaminated at this point.

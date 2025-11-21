@@ -192,35 +192,6 @@ static void gh_client__update_loose_cache(const char *line)
 }
 
 /*
- * Update the packed-git list to include the newly created packfile.
- */
-static void gh_client__update_packed_git(const char *line)
-{
-	struct strbuf path = STRBUF_INIT;
-	const char *v1_filename;
-	struct packed_git *p;
-	int is_local;
-
-	if (!skip_prefix(line, "packfile ", &v1_filename))
-		BUG("update_packed_git: invalid line '%s'", line);
-
-	/*
-	 * ODB[0] is the local .git/objects.  All others are alternates.
-	 */
-	is_local = (gh_client__chosen_odb == the_repository->objects->sources);
-
-	strbuf_addf(&path, "%s/pack/%s",
-		    gh_client__chosen_odb->path, v1_filename);
-	strbuf_strip_suffix(&path, ".pack");
-	strbuf_addstr(&path, ".idx");
-
-	p = add_packed_git(the_repository, path.buf, path.len, is_local);
-	if (p)
-		packfile_store_add_pack(the_repository->objects->packfiles, p);
-	strbuf_release(&path);
-}
-
-/*
  * CAP_OBJECTS verbs return the same format response:
  *
  *    <odb>
@@ -279,7 +250,6 @@ static int gh_client__objects__receive_response(
 		}
 
 		else if (starts_with(line, "packfile")) {
-			gh_client__update_packed_git(line);
 			ghc |= GHC__CREATED__PACKFILE;
 			nr_packfile++;
 		}
@@ -299,6 +269,9 @@ static int gh_client__objects__receive_response(
 			err = -1;
 		}
 	}
+
+	if (ghc & GHC__CREATED__PACKFILE)
+		packfile_store_reprepare(the_repository->objects->packfiles);
 
 	*p_ghc = ghc;
 	*p_nr_loose = nr_loose;
