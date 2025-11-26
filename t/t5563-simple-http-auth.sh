@@ -793,4 +793,19 @@ test_expect_success SPNEGO 'http.emptyAuth=false skips Negotiate' '
 	test_line_count = 1 actual_401s
 '
 
+test_lazy_prereq NTLM 'curl --version | grep -q NTLM'
+
+test_expect_success NTLM 'access using NTLM auth' '
+	test_when_finished "per_test_cleanup" &&
+
+	set_credential_reply get <<-EOF &&
+	username=user
+	password=pwd
+	EOF
+
+	test_config_global credential.helper test-helper &&
+	GIT_TRACE_CURL=1 \
+	git ls-remote "$HTTPD_URL/ntlm_auth/repo.git"
+'
+
 test_done
