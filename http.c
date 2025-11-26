@@ -128,7 +128,8 @@ enum http_follow_config http_follow_config = HTTP_FOLLOW_INITIAL;
 
 static struct credential cert_auth = CREDENTIAL_INIT;
 static int ssl_cert_password_required;
-static unsigned long http_auth_methods = CURLAUTH_ANY;
+static unsigned long http_auth_any = CURLAUTH_ANY & ~CURLAUTH_NTLM;
+static unsigned long http_auth_methods;
 static int http_auth_methods_restricted;
 /* Modes for which empty_auth cannot actually help us. */
 static unsigned long empty_auth_useless =
@@ -429,6 +430,15 @@ static int http_options(const char *var, const char *value,
 		return 0;
 	}
 
+	if (!strcmp("http.allowntlmauth", var)) {
+		if (git_config_bool(var, value)) {
+			http_auth_any |= CURLAUTH_NTLM;
+		} else {
+			http_auth_any &= ~CURLAUTH_NTLM;
+		}
+		return 0;
+	}
+
 	if (!strcmp("http.schannelcheckrevoke", var)) {
 		if (value && !strcmp(value, "best-effort")) {
 			http_schannel_check_revoke_mode =
@@ -704,11 +714,11 @@ static void init_curl_proxy_auth(CURL *result)
 		if (i == ARRAY_SIZE(proxy_authmethods)) {
 			warning("unsupported proxy authentication method %s: using anyauth",
 					http_proxy_authmethod);
-			curl_easy_setopt(result, CURLOPT_PROXYAUTH, CURLAUTH_ANY);
+			curl_easy_setopt(result, CURLOPT_PROXYAUTH, http_auth_any);
 		}
 	}
 	else
-		curl_easy_setopt(result, CURLOPT_PROXYAUTH, CURLAUTH_ANY);
+		curl_easy_setopt(result, CURLOPT_PROXYAUTH, http_auth_any);
 }
 
 static int has_cert_password(void)
@@ -1091,7 +1101,7 @@ static CURL *get_curl_handle(void)
 #endif
 
 	curl_easy_setopt(result, CURLOPT_NETRC, CURL_NETRC_OPTIONAL);
-	curl_easy_setopt(result, CURLOPT_HTTPAUTH, CURLAUTH_ANY);
+	curl_easy_setopt(result, CURLOPT_HTTPAUTH, http_auth_any);
 
 #ifdef CURLGSSAPI_DELEGATION_FLAG
 	if (curl_deleg) {
@@ -1460,6 +1470,8 @@ void http_init(struct remote *remote, const char *url, int proactive_auth)
 		    starts_with(url, "https://"))
 			ssl_cert_password_required = 1;
 	}
+
+	http_auth_methods = http_auth_any;
 
 	curl_default = get_curl_handle();
 }
