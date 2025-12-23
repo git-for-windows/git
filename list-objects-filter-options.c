@@ -230,6 +230,41 @@ static void filter_spec_append_urlencode(
 		     filter->filter_spec.buf + orig_len);
 }
 
+char *list_objects_filter_combine(const struct string_list *specs)
+{
+	struct strbuf buf = STRBUF_INIT;
+
+	if (!specs->nr)
+		return NULL;
+
+	if (specs->nr == 1)
+		return xstrdup(specs->items[0].string);
+
+	strbuf_addstr(&buf, "combine:");
+
+	for (size_t i = 0; i < specs->nr; i++) {
+		const char *spec = specs->items[i].string;
+		if (i > 0)
+			strbuf_addch(&buf, '+');
+
+		strbuf_addstr_urlencode(&buf, spec, allow_unencoded);
+	}
+
+	return strbuf_detach(&buf, NULL);
+}
+
+void list_objects_filter_resolve_auto(struct list_objects_filter_options *filter_options,
+	char *new_filter, struct strbuf *errbuf)
+{
+	if (filter_options->choice != LOFC_AUTO)
+		return;
+
+	list_objects_filter_release(filter_options);
+
+	if (new_filter)
+		gently_parse_list_objects_filter(filter_options, new_filter, errbuf);
+}
+
 /*
  * Changes filter_options into an equivalent LOFC_COMBINE filter options
  * instance. Does not do anything if filter_options is already LOFC_COMBINE.
