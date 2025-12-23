@@ -2439,6 +2439,8 @@ int cmd_fetch(int argc,
 		OPT_END()
 	};
 
+	filter_options.allow_auto_filter = 1;
+
 	packet_trace_identity("fetch");
 
 	/* Record the command line for the reflog */
