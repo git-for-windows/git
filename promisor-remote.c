@@ -193,6 +193,7 @@ void promisor_remote_clear(struct promisor_remote_config *config)
 	while (config->promisors) {
 		struct promisor_remote *r = config->promisors;
 		free(r->partial_clone_filter);
+		free(r->advertised_filter);
 		config->promisors = config->promisors->next;
 		free(r);
 	}
@@ -837,6 +838,7 @@ static void filter_promisor_remote(struct repository *repo,
 	struct store_info *store_info = NULL;
 	struct string_list_item *item;
 	bool reload_config = false;
+	struct string_list captured_filters = STRING_LIST_INIT_DUP;
 
 	if (!repo_config_get_string_tmp(the_repository, "promisor.acceptfromserver", &accept_str)) {
 		if (!*accept_str || !strcasecmp("None", accept_str))
@@ -879,6 +881,13 @@ static void filter_promisor_remote(struct repository *repo,
 				reload_config = true;
 
 			strvec_push(accepted, advertised->name);
+
+			/* Capture advertised filters for accepted remotes */
+			if (advertised->filter) {
+				struct string_list_item *i;
+				i = string_list_append(&captured_filters, advertised->name);
+				i->util = xstrdup(advertised->filter);
+			}
 		}
 
 		promisor_info_free(advertised);
@@ -890,6 +899,25 @@ static void filter_promisor_remote(struct repository *repo,
 
 	if (reload_config)
 		repo_promisor_remote_reinit(repo);
+
+	/* Apply captured filters to the stable repo state */
+	for_each_string_list_item(item, &captured_filters) {
+		struct promisor_remote *r = repo_promisor_remote_find(repo, item->string);
+		if (r) {
+			free(r->advertised_filter);
+			r->advertised_filter = item->util;
+			item->util = NULL;
+		}
+	}
+
+	string_list_clear(&captured_filters, 1);
+
+	/* Mark the remotes as accepted in the repository state */
+	for (size_t i = 0; i < accepted->nr; i++) {
+		struct promisor_remote *r = repo_promisor_remote_find(repo, accepted->v[i]);
+		if (r)
+			r->accepted = 1;
+	}
 }
 
 char *promisor_remote_reply(const char *info)
@@ -934,4 +962,24 @@ void mark_promisor_remotes_as_accepted(struct repository *r, const char *remotes
 	}
 
 	string_list_clear(&accepted_remotes, 0);
+}
+
+char *promisor_remote_construct_filter(struct repository *repo)
+{
+	struct string_list advertised_filters = STRING_LIST_INIT_NODUP;
+	struct promisor_remote *r;
+	char *result;
+
+	promisor_remote_init(repo);
+
+	for (r = repo->promisor_remote_config->promisors; r; r = r->next) {
+		if (r->accepted && r->advertised_filter)
+			string_list_append(&advertised_filters, r->advertised_filter);
+	}
+
+	result = list_objects_filter_combine(&advertised_filters);
+
+	string_list_clear(&advertised_filters, 0);
+
+	return result;
 }
