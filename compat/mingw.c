@@ -1522,8 +1522,15 @@ char *mingw_strbuf_realpath(struct strbuf *resolved, const char *path)
 	 */
 	if (h == INVALID_HANDLE_VALUE &&
 	    GetLastError() == ERROR_FILE_NOT_FOUND) {
+		WIN32_FILE_ATTRIBUTE_DATA fdata;
+		wchar_t *p;
+
+		if (GetFileAttributesExW(wpath, GetFileExInfoStandard, &fdata) &&
+		    fdata.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+			return NULL; /* must follow symlink */
+
 		/* cut last component off of `wpath` */
-		wchar_t *p = wpath + wcslen(wpath);
+		p = wpath + wcslen(wpath);
 
 		while (p != wpath)
 			if (*(--p) == L'/' || *p == L'\\')
