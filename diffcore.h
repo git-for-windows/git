@@ -43,7 +43,7 @@ struct diff_filespec {
 	char *path;
 	void *data;
 	void *cnt_data;
-	unsigned long size;
+	size_t size;
 	int count;               /* Reference count */
 	int rename_used;         /* Count of rename users */
 	unsigned short mode;	 /* file mode */

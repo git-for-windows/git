@@ -374,7 +374,7 @@ const void *repo_get_commit_buffer(struct repository *r,
 	const void *ret = get_cached_commit_buffer(r, commit, sizep);
 	if (!ret) {
 		enum object_type type;
-		unsigned long size;
+		size_t size;
 		ret = odb_read_object(r->objects, &commit->object.oid, &type, &size);
 		if (!ret)
 			die("cannot read commit object %s",
@@ -552,7 +552,7 @@ int repo_parse_commit_internal(struct repository *r,
 {
 	enum object_type type;
 	void *buffer;
-	unsigned long size;
+	size_t size;
 	struct object_info oi = {
 		.typep = &type,
 		.sizep = &size,
@@ -1276,7 +1276,7 @@ static void handle_signed_tag(const struct commit *parent, struct commit_extra_h
 	struct merge_remote_desc *desc;
 	struct commit_extra_header *mergetag;
 	char *buf;
-	unsigned long size;
+	size_t size;
 	enum object_type type;
 	struct strbuf payload = STRBUF_INIT;
 	struct strbuf signature = STRBUF_INIT;

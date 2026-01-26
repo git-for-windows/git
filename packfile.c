@@ -695,7 +695,7 @@ static int in_window(struct repository *r, struct pack_window *win,
 unsigned char *use_pack(struct packed_git *p,
 		struct pack_window **w_cursor,
 		off_t offset,
-		unsigned long *left)
+		size_t *left)
 {
 	struct pack_window *win = *w_cursor;
 
@@ -1136,12 +1136,12 @@ unsigned long repo_approximate_object_count(struct repository *r)
 	return r->objects->approximate_object_count;
 }
 
-unsigned long unpack_object_header_buffer(const unsigned char *buf,
-		unsigned long len, enum object_type *type, unsigned long *sizep)
+size_t unpack_object_header_buffer(const unsigned char *buf,
+		size_t len, enum object_type *type, size_t *sizep)
 {
 	unsigned shift;
 	size_t size, c;
-	unsigned long used = 0;
+	size_t used = 0;
 
 	c = buf[used++];
 	*type = (c >> 4) & 7;
@@ -1157,11 +1157,11 @@ unsigned long unpack_object_header_buffer(const unsigned char *buf,
 		size = st_add(size, st_left_shift(c & 0x7f, shift));
 		shift += 7;
 	}
-	*sizep = cast_size_t_to_ulong(size);
+	*sizep = size;
 	return used;
 }
 
-unsigned long get_size_from_delta(struct packed_git *p,
+size_t get_size_from_delta(struct packed_git *p,
 				  struct pack_window **w_curs,
 				  off_t curpos)
 {
@@ -1219,11 +1219,11 @@ unsigned long get_size_from_delta(struct packed_git *p,
 int unpack_object_header(struct packed_git *p,
 			 struct pack_window **w_curs,
 			 off_t *curpos,
-			 unsigned long *sizep)
+			 size_t *sizep)
 {
 	unsigned char *base;
-	unsigned long left;
-	unsigned long used;
+	size_t left;
+	size_t used;
 	enum object_type type;
 
 	/* use_pack() assures us we have [base, base + 20) available
@@ -1365,7 +1365,7 @@ static enum object_type packed_to_object_type(struct repository *r,
 
 	while (type == OBJ_OFS_DELTA || type == OBJ_REF_DELTA) {
 		off_t base_offset;
-		unsigned long size;
+		size_t size;
 		/* Push the object we're going to leave behind */
 		if (poi_stack_nr >= poi_stack_alloc && poi_stack == small_poi_stack) {
 			poi_stack_alloc = alloc_nr(poi_stack_nr);
@@ -1506,7 +1506,7 @@ static void detach_delta_base_cache_entry(struct delta_base_cache_entry *ent)
 }
 
 static void *cache_or_unpack_entry(struct repository *r, struct packed_git *p,
-				   off_t base_offset, unsigned long *base_size,
+				   off_t base_offset, size_t *base_size,
 				   enum object_type *type)
 {
 	struct delta_base_cache_entry *ent;
@@ -1584,7 +1584,7 @@ int packed_object_info(struct repository *r, struct packed_git *p,
 		       off_t obj_offset, struct object_info *oi)
 {
 	struct pack_window *w_curs = NULL;
-	unsigned long size;
+	size_t size;
 	off_t curpos = obj_offset;
 	enum object_type type;
 
@@ -1722,16 +1722,16 @@ int do_check_packed_object_crc;
 struct unpack_entry_stack_ent {
 	off_t obj_offset;
 	off_t curpos;
-	unsigned long size;
+	size_t size;
 };
 
 void *unpack_entry(struct repository *r, struct packed_git *p, off_t obj_offset,
-		   enum object_type *final_type, unsigned long *final_size)
+		   enum object_type *final_type, size_t *final_size)
 {
 	struct pack_window *w_curs = NULL;
 	off_t curpos = obj_offset;
 	void *data = NULL;
-	unsigned long size;
+	size_t size;
 	enum object_type type;
 	struct unpack_entry_stack_ent small_delta_stack[UNPACK_ENTRY_STACK_PREALLOC];
 	struct unpack_entry_stack_ent *delta_stack = small_delta_stack;
@@ -1843,7 +1843,7 @@ void *unpack_entry(struct repository *r, struct packed_git *p, off_t obj_offset,
 		void *delta_data;
 		void *base = data;
 		void *external_base = NULL;
-		unsigned long delta_size, base_size = size;
+		size_t delta_size,base_size = size;
 		int i;
 		off_t base_obj_offset = obj_offset;
 
@@ -2528,7 +2528,7 @@ int packfile_store_read_object_stream(struct odb_read_stream **out,
 	struct pack_window *window = NULL;
 	struct object_info oi = OBJECT_INFO_INIT;
 	enum object_type in_pack_type;
-	unsigned long size;
+	size_t size;
 
 	oi.sizep = &size;
 

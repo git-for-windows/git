@@ -51,7 +51,7 @@ static void send_info(struct repository *r, struct packet_writer *writer,
 	for_each_string_list_item (item, oid_str_list) {
 		const char *oid_str = item->string;
 		struct object_id oid;
-		unsigned long object_size;
+		size_t object_size;
 
 		if (get_oid_hex_algop(oid_str, &oid, r->hash_algo) < 0) {
 			packet_writer_error(

@@ -179,7 +179,7 @@ int read_mmfile(mmfile_t *ptr, const char *filename)
 
 void read_mmblob(mmfile_t *ptr, const struct object_id *oid)
 {
-	unsigned long size;
+	size_t size;
 	enum object_type type;
 
 	if (oideq(oid, null_oid(the_hash_algo))) {

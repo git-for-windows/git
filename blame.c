@@ -238,7 +238,7 @@ static struct commit *fake_working_tree_commit(struct repository *r,
 		struct stat st;
 		const char *read_from;
 		char *buf_ptr;
-		unsigned long buf_len;
+		size_t buf_len;
 
 		if (contents_from) {
 			if (stat(contents_from, &st) < 0)
@@ -1034,7 +1034,7 @@ static void fill_origin_blob(struct diff_options *opt,
 {
 	if (!o->file.ptr) {
 		enum object_type type;
-		unsigned long file_size;
+		size_t file_size;
 
 		(*num_read_blob)++;
 		if (opt->flags.allow_textconv &&

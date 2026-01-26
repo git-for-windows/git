@@ -230,7 +230,7 @@ static int check_object(struct object *obj, enum object_type type,
 		die("object type mismatch");
 
 	if (!(obj->flags & FLAG_OPEN)) {
-		unsigned long size;
+		size_t size;
 		int type = odb_read_object_info(the_repository->objects, &obj->oid, &size);
 		if (type != obj->type || type <= 0)
 			die("object of unexpected type");
@@ -313,7 +313,7 @@ static void resolve_delta(unsigned nr, enum object_type type,
 			  void *delta, unsigned long delta_size)
 {
 	void *result;
-	unsigned long result_size;
+	size_t result_size;
 
 	result = patch_delta(base, base_size,
 			     delta, delta_size,
@@ -364,7 +364,7 @@ struct input_zstream_data {
 };
 
 static const void *feed_input_zstream(struct odb_write_stream *in_stream,
-				      unsigned long *readlen)
+				      size_t *readlen)
 {
 	struct input_zstream_data *data = in_stream->data;
 	git_zstream *zstream = data->zstream;
@@ -389,7 +389,7 @@ static const void *feed_input_zstream(struct odb_write_stream *in_stream,
 	return data->buf;
 }
 
-static void stream_blob(unsigned long size, unsigned nr)
+static void stream_blob(size_t size, unsigned nr)
 {
 	git_zstream zstream = { 0 };
 	struct input_zstream_data data = { 0 };
@@ -439,7 +439,7 @@ static void unpack_delta_entry(enum object_type type, unsigned long delta_size,
 			       unsigned nr)
 {
 	void *delta_data, *base;
-	unsigned long base_size;
+	size_t base_size;
 	struct object_id base_oid;
 
 	if (type == OBJ_REF_DELTA) {
@@ -533,7 +533,7 @@ static void unpack_one(unsigned nr)
 {
 	unsigned shift;
 	unsigned char *pack;
-	unsigned long size, c;
+	size_t size, c;
 	enum object_type type;
 
 	obj_list[nr].offset = consumed_bytes;
@@ -548,7 +548,7 @@ static void unpack_one(unsigned nr)
 		pack = fill(1);
 		c = *pack;
 		use(1);
-		size += (c & 0x7f) << shift;
+		size += (size_t)(c & 0x7f) << shift;
 		shift += 7;
 	}
 

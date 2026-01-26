@@ -1335,7 +1335,7 @@ static int fsck_blobs(struct oidset *blobs_found, struct oidset *blobs_done,
 	oidset_iter_init(blobs_found, &iter);
 	while ((oid = oidset_iter_next(&iter))) {
 		enum object_type type;
-		unsigned long size;
+		size_t size;
 		char *buf;
 
 		if (oidset_contains(blobs_done, oid))

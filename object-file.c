@@ -423,7 +423,7 @@ int odb_source_loose_read_object_info(struct odb_source *source,
 	void *map;
 	git_zstream stream;
 	char hdr[MAX_HEADER_LEN];
-	unsigned long size_scratch;
+	size_t size_scratch;
 	enum object_type type_scratch;
 
 	if (oi && oi->delta_base_oid)
@@ -1152,7 +1152,7 @@ int force_object_loose(struct odb_source *source,
 {
 	const struct git_hash_algo *compat = source->odb->repo->compat_hash_algo;
 	void *buf;
-	unsigned long len;
+	size_t len;
 	struct object_info oi = OBJECT_INFO_INIT;
 	struct object_id compat_oid;
 	enum object_type type;
@@ -1904,7 +1904,7 @@ int read_loose_object(struct repository *repo,
 	unsigned long mapsize;
 	git_zstream stream;
 	char hdr[MAX_HEADER_LEN];
-	unsigned long *size = oi->sizep;
+	size_t *size = oi->sizep;
 
 	fd = git_open(path);
 	if (fd >= 0)

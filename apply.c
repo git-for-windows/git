@@ -3157,7 +3157,7 @@ static int apply_binary_fragment(struct apply_state *state,
 				 struct patch *patch)
 {
 	struct fragment *fragment = patch->fragments;
-	unsigned long len;
+	size_t len;
 	void *dst;
 
 	if (!fragment)
@@ -3246,7 +3246,7 @@ static int apply_binary(struct apply_state *state,
 	if (odb_has_object(the_repository->objects, &oid, 0)) {
 		/* We already have the postimage */
 		enum object_type type;
-		unsigned long size;
+		size_t size;
 		char *result;
 
 		result = odb_read_object(the_repository->objects, &oid,
@@ -3309,7 +3309,7 @@ static int read_blob_object(struct strbuf *buf, const struct object_id *oid, uns
 		strbuf_addf(buf, "Subproject commit %s\n", oid_to_hex(oid));
 	} else {
 		enum object_type type;
-		unsigned long sz;
+		size_t sz;
 		char *result;
 
 		result = odb_read_object(the_repository->objects, oid,
@@ -3536,7 +3536,7 @@ static int load_preimage(struct apply_state *state,
 
 static int resolve_to(struct image *image, const struct object_id *result_id)
 {
-	unsigned long size;
+	size_t size;
 	enum object_type type;
 	char *data;
 

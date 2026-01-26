@@ -636,7 +636,7 @@ static void survey_phase_refs(struct survey_context *ctx)
 
 	ctx->report.refs.refs_nr = ctx->ref_array.nr;
 	for (int i = 0; i < ctx->ref_array.nr; i++) {
-		unsigned long size;
+		size_t size;
 		struct ref_array_item *item = ctx->ref_array.items[i];
 
 		switch (item->kind) {
@@ -703,7 +703,7 @@ static void increment_totals(struct survey_context *ctx,
 	for (size_t i = 0; i < oids->nr; i++) {
 		struct object_info oi = OBJECT_INFO_INIT;
 		unsigned oi_flags = OBJECT_INFO_FOR_PREFETCH;
-		unsigned long object_length = 0;
+		size_t object_length = 0;
 		off_t disk_sizep = 0;
 		enum object_type type;
 

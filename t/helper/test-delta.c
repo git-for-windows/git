@@ -21,7 +21,7 @@ int cmd__delta(int argc, const char **argv)
 	int fd;
 	struct strbuf from = STRBUF_INIT, data = STRBUF_INIT;
 	char *out_buf;
-	unsigned long out_size;
+	size_t out_size;
 
 	if (argc != 5 || (strcmp(argv[1], "-d") && strcmp(argv[1], "-p")))
 		usage(usage_str);
