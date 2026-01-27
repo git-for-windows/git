@@ -70,12 +70,12 @@ extern "C" {
 
 typedef struct s_mmfile {
 	char *ptr;
-	long size;
+	size_t size;
 } mmfile_t;
 
 typedef struct s_mmbuffer {
 	char *ptr;
-	long size;
+	size_t size;
 } mmbuffer_t;
 
 typedef struct s_xpparam {

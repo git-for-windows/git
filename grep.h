@@ -235,7 +235,7 @@ struct grep_source {
 	struct repository *repo; /* if GREP_SOURCE_OID */
 
 	const char *buf;
-	unsigned long size;
+	size_t size;
 
 	char *path; /* for attribute lookups */
 	struct userdiff_driver *driver;

@@ -527,7 +527,7 @@ static void fmt_merge_msg_sigs(struct strbuf *out)
 	for (i = 0; i < origins.nr; i++) {
 		struct object_id *oid = origins.items[i].util;
 		enum object_type type;
-		unsigned long size;
+		size_t size;
 		char *buf = odb_read_object(the_repository->objects, oid,
 					    &type, &size);
 		char *origbuf = buf;

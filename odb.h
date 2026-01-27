@@ -297,12 +297,12 @@ struct odb_source *odb_add_to_alternates_memory(struct object_database *odb,
 void *odb_read_object(struct object_database *odb,
 		      const struct object_id *oid,
 		      enum object_type *type,
-		      unsigned long *size);
+		      size_t *size);
 
 void *odb_read_object_peeled(struct object_database *odb,
 			     const struct object_id *oid,
 			     enum object_type required_type,
-			     unsigned long *size,
+			     size_t *size,
 			     struct object_id *oid_ret);
 
 /*
@@ -320,7 +320,7 @@ int odb_pretend_object(struct object_database *odb,
 struct object_info {
 	/* Request */
 	enum object_type *typep;
-	unsigned long *sizep;
+	size_t *sizep;
 	off_t *disk_sizep;
 	struct object_id *delta_base_oid;
 	void **contentp;
@@ -390,7 +390,7 @@ int odb_read_object_info_extended(struct object_database *odb,
  */
 int odb_read_object_info(struct object_database *odb,
 			 const struct object_id *oid,
-			 unsigned long *sizep);
+			 size_t *sizep);
 
 enum {
 	/* Retry packed storage after checking packed and loose storage */
@@ -489,14 +489,14 @@ enum {
  * Returns 0 on success, a negative error code otherwise.
  */
 int odb_write_object_ext(struct object_database *odb,
-			 const void *buf, unsigned long len,
+			 const void *buf, size_t len,
 			 enum object_type type,
 			 struct object_id *oid,
 			 struct object_id *compat_oid,
 			 unsigned flags);
 
 static inline int odb_write_object(struct object_database *odb,
-				   const void *buf, unsigned long len,
+				   const void *buf, size_t len,
 				   enum object_type type,
 				   struct object_id *oid)
 {
@@ -504,7 +504,7 @@ static inline int odb_write_object(struct object_database *odb,
 }
 
 struct odb_write_stream {
-	const void *(*read)(struct odb_write_stream *, unsigned long *len);
+	const void *(*read)(struct odb_write_stream *, size_t *len);
 	void *data;
 	int is_finished;
 };

@@ -27,7 +27,7 @@ static void expand_objectsize(struct strbuf *line, const struct object_id *oid,
 			      const enum object_type type, unsigned int padded)
 {
 	if (type == OBJ_BLOB) {
-		unsigned long size;
+		size_t size;
 		if (odb_read_object_info(the_repository->objects, oid, &size) < 0)
 			die(_("could not get object info about '%s'"),
 			    oid_to_hex(oid));
@@ -217,7 +217,7 @@ static int show_tree_long(const struct object_id *oid, struct strbuf *base,
 		return early;
 
 	if (type == OBJ_BLOB) {
-		unsigned long size;
+		size_t size;
 		if (odb_read_object_info(the_repository->objects, oid, &size) == OBJ_BAD)
 			xsnprintf(size_text, sizeof(size_text), "BAD");
 		else

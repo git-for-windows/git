@@ -174,7 +174,7 @@ struct tree *lookup_tree(struct repository *r, const struct object_id *oid)
 	return object_as_type(obj, OBJ_TREE, 0);
 }
 
-int parse_tree_buffer(struct tree *item, void *buffer, unsigned long size)
+int parse_tree_buffer(struct tree *item, void *buffer, size_t size)
 {
 	if (item->object.parsed)
 		return 0;
@@ -189,7 +189,7 @@ int parse_tree_gently(struct tree *item, int quiet_on_missing)
 {
 	 enum object_type type;
 	 void *buffer;
-	 unsigned long size;
+	 size_t size;
 
 	if (item->object.parsed)
 		return 0;
