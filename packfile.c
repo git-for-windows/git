@@ -1130,8 +1130,8 @@ unsigned long repo_approximate_object_count(struct repository *r)
 	return r->objects->approximate_object_count;
 }
 
-unsigned long unpack_object_header_buffer(const unsigned char *buf,
-		unsigned long len, enum object_type *type, unsigned long *sizep)
+static unsigned long unpack_object_header_buffer_internal(const unsigned char *buf,
+		unsigned long len, enum object_type *type, size_t *sizep)
 {
 	unsigned shift;
 	size_t size, c;
@@ -1142,7 +1142,11 @@ unsigned long unpack_object_header_buffer(const unsigned char *buf,
 	size = c & 15;
 	shift = 4;
 	while (c & 0x80) {
-		if (len <= used || (bitsizeof(long) - 7) < shift) {
+		/*
+		 * Each continuation byte adds 7 bits. Ensure shift won't
+		 * overflow size_t (use size_t not long for 64-bit on Windows).
+		 */
+		if (len <= used || (bitsizeof(size_t) - 7) < shift) {
 			error("bad object header");
 			size = used = 0;
 			break;
@@ -1151,6 +1155,15 @@ unsigned long unpack_object_header_buffer(const unsigned char *buf,
 		size = st_add(size, st_left_shift(c & 0x7f, shift));
 		shift += 7;
 	}
+	*sizep = size;
+	return used;
+}
+
+unsigned long unpack_object_header_buffer(const unsigned char *buf,
+		unsigned long len, enum object_type *type, unsigned long *sizep)
+{
+	size_t size;
+	unsigned long used = unpack_object_header_buffer_internal(buf, len, type, &size);
 	*sizep = cast_size_t_to_ulong(size);
 	return used;
 }
@@ -1208,6 +1221,32 @@ unsigned long get_size_from_delta(struct packed_git *p,
 
 	/* Read the result size */
 	return get_delta_hdr_size(&data, delta_head+sizeof(delta_head));
+}
+
+/*
+ * Like unpack_object_header(), but returns size via size_t* instead of
+ * unsigned long*. This is needed for >4GB objects on Windows where
+ * unsigned long is 32-bit but size_t is 64-bit. Used by streaming code
+ * to get the correct untruncated object size.
+ */
+static int unpack_object_header_sz(struct packed_git *p,
+				   struct pack_window **w_curs,
+				   off_t *curpos,
+				   size_t *sizep)
+{
+	unsigned char *base;
+	unsigned long left;
+	unsigned long used;
+	enum object_type type;
+
+	base = use_pack(p, w_curs, *curpos, &left);
+	used = unpack_object_header_buffer_internal(base, left, &type, sizep);
+	if (!used) {
+		type = OBJ_BAD;
+	} else
+		*curpos += used;
+
+	return type;
 }
 
 int unpack_object_header(struct packed_git *p,
@@ -2561,21 +2600,29 @@ int packfile_store_read_object_stream(struct odb_read_stream **out,
 	struct pack_window *window = NULL;
 	struct object_info oi = OBJECT_INFO_INIT;
 	enum object_type in_pack_type;
-	unsigned long size;
+	size_t size;
 
-	oi.sizep = &size;
-
+	/*
+	 * We need to check if this is a delta or if the object is smaller
+	 * than the big file threshold. For the initial check, we don't need
+	 * the exact size, just whether it qualifies for streaming.
+	 */
 	if (packfile_store_read_object_info(store, oid, &oi, 0) ||
 	    oi.u.packed.type == PACKED_OBJECT_TYPE_REF_DELTA ||
-	    oi.u.packed.type == PACKED_OBJECT_TYPE_OFS_DELTA ||
-	    repo_settings_get_big_file_threshold(store->source->odb->repo) >= size)
+	    oi.u.packed.type == PACKED_OBJECT_TYPE_OFS_DELTA)
 		return -1;
 
-	in_pack_type = unpack_object_header(oi.u.packed.pack,
-					    &window,
-					    &oi.u.packed.offset,
-					    &size);
+	/* Read the actual size using size_t to handle >4GB objects on Windows */
+	in_pack_type = unpack_object_header_sz(oi.u.packed.pack,
+					       &window,
+					       &oi.u.packed.offset,
+					       &size);
 	unuse_pack(&window);
+
+	/* Now check the big file threshold with the correct size */
+	if (repo_settings_get_big_file_threshold(store->source->odb->repo) >= size)
+		return -1;
+
 	switch (in_pack_type) {
 	default:
 		return -1; /* we do not do deltas for now */
