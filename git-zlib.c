@@ -39,31 +39,38 @@ static void zlib_pre_call(git_zstream *s)
 {
 	s->z.next_in = s->next_in;
 	s->z.next_out = s->next_out;
-	s->z.total_in = s->total_in;
-	s->z.total_out = s->total_out;
+	/* Truncate to 32-bit for zlib which uses uLong (32-bit on Windows) */
+	s->z.total_in = (uLong)(s->total_in & 0xFFFFFFFFUL);
+	s->z.total_out = (uLong)(s->total_out & 0xFFFFFFFFUL);
 	s->z.avail_in = zlib_buf_cap(s->avail_in);
 	s->z.avail_out = zlib_buf_cap(s->avail_out);
 }
 
 static void zlib_post_call(git_zstream *s, int status)
 {
-	unsigned long bytes_consumed;
-	unsigned long bytes_produced;
+	size_t bytes_consumed;
+	size_t bytes_produced;
 
 	bytes_consumed = s->z.next_in - s->next_in;
 	bytes_produced = s->z.next_out - s->next_out;
-	if (s->z.total_out != s->total_out + bytes_produced)
+	/*
+	 * zlib's total_out/total_in are uLong (32-bit on Windows),
+	 * so they wrap for >4GB. We track our own 64-bit totals and
+	 * verify only the low 32 bits match to detect corruption,
+	 * while allowing wrap-around for large transfers.
+	 */
+	if ((s->z.total_out & 0xFFFFFFFFUL) != ((s->total_out + bytes_produced) & 0xFFFFFFFFUL))
 		BUG("total_out mismatch");
 	/*
 	 * zlib does not update total_in when it returns Z_NEED_DICT,
 	 * causing a mismatch here. Skip the sanity check in that case.
 	 */
 	if (status != Z_NEED_DICT &&
-	    s->z.total_in != s->total_in + bytes_consumed)
+	    (s->z.total_in & 0xFFFFFFFFUL) != ((s->total_in + bytes_consumed) & 0xFFFFFFFFUL))
 		BUG("total_in mismatch");
 
-	s->total_out = s->z.total_out;
-	s->total_in = s->z.total_in;
+	s->total_out += bytes_produced;
+	s->total_in += bytes_consumed;
 	/* zlib-ng marks `next_in` as `const`, so we have to cast it away. */
 	s->next_in = (unsigned char *) s->z.next_in;
 	s->next_out = s->z.next_out;
