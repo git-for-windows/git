@@ -533,7 +533,8 @@ static void unpack_one(unsigned nr)
 {
 	unsigned shift;
 	unsigned char *pack;
-	unsigned long size, c;
+	size_t size;
+	unsigned long c;
 	enum object_type type;
 
 	obj_list[nr].offset = consumed_bytes;
@@ -548,7 +549,8 @@ static void unpack_one(unsigned nr)
 		pack = fill(1);
 		c = *pack;
 		use(1);
-		size += (c & 0x7f) << shift;
+		// need shift in 64 bit space , as if shift > 32 is valid case in 4GB+ size objects
+		size += (size_t)(c & 0x7f) << shift;
 		shift += 7;
 	}
 
