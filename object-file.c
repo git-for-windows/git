@@ -1086,8 +1086,8 @@ int odb_source_loose_write_stream(struct odb_source *source,
 	} while (ret == Z_OK || ret == Z_BUF_ERROR);
 
 	if (stream.total_in != len + hdrlen)
-		die(_("write stream object %ld != %"PRIuMAX), stream.total_in,
-		    (uintmax_t)len + hdrlen);
+		die(_("write stream object %"PRIuMAX" != %"PRIuMAX),
+		    (uintmax_t)stream.total_in, (uintmax_t)len + hdrlen);
 
 	/*
 	 * Common steps for write_loose_object and stream_loose_object to
