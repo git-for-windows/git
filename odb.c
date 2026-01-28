@@ -1158,5 +1158,8 @@ struct odb_transaction *odb_transaction_begin(struct object_database *odb)
 
 void odb_transaction_commit(struct odb_transaction *transaction)
 {
-	odb_transaction_loose_commit(transaction);
+	if (!transaction)
+		return;
+
+	transaction->commit(transaction);
 }

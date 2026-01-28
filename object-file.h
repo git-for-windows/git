@@ -208,10 +208,4 @@ struct odb_transaction;
  */
 struct odb_transaction *odb_transaction_loose_begin(struct odb_source *source);
 
-/*
- * Tell the object database to make any objects from the
- * current transaction visible.
- */
-void odb_transaction_loose_commit(struct odb_transaction *transaction);
-
 #endif /* OBJECT_FILE_H */
