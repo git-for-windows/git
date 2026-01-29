@@ -1086,8 +1086,8 @@ int odb_source_loose_write_stream(struct odb_source *source,
 	} while (ret == Z_OK || ret == Z_BUF_ERROR);
 
 	if (stream.total_in != len + hdrlen)
-		die(_("write stream object %ld != %"PRIuMAX), stream.total_in,
-		    (uintmax_t)len + hdrlen);
+		die(_("write stream object %"PRIuMAX" != %"PRIuMAX),
+		    (uintmax_t)stream.total_in, (uintmax_t)len + hdrlen);
 
 	/*
 	 * Common steps for write_loose_object and stream_loose_object to
@@ -2108,6 +2108,7 @@ int odb_source_loose_read_object_stream(struct odb_read_stream **out,
 	struct object_info oi = OBJECT_INFO_INIT;
 	struct odb_loose_read_stream *st;
 	unsigned long mapsize;
+	unsigned long size_ul;
 	void *mapped;
 
 	mapped = odb_source_loose_map_object(source, oid, &mapsize);
@@ -2131,11 +2132,18 @@ int odb_source_loose_read_object_stream(struct odb_read_stream **out,
 		goto error;
 	}
 
-	oi.sizep = &st->base.size;
+	/*
+	 * object_info.sizep is unsigned long* (32-bit on Windows), but
+	 * st->base.size is size_t (64-bit). Use temporary variable.
+	 * Note: loose objects >4GB would still truncate here, but such
+	 * large loose objects are uncommon (they'd normally be packed).
+	 */
+	oi.sizep = &size_ul;
 	oi.typep = &st->base.type;
 
 	if (parse_loose_header(st->hdr, &oi) < 0 || st->base.type < 0)
 		goto error;
+	st->base.size = size_ul;
 
 	st->mapped = mapped;
 	st->mapsize = mapsize;
