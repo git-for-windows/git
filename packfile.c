@@ -1168,9 +1168,12 @@ unsigned long unpack_object_header_buffer(const unsigned char *buf,
 	return used;
 }
 
-unsigned long get_size_from_delta(struct packed_git *p,
-				  struct pack_window **w_curs,
-				  off_t curpos)
+/*
+ * Size_t variant for >4GB delta results on Windows.
+ */
+static size_t get_size_from_delta_sz(struct packed_git *p,
+				     struct pack_window **w_curs,
+				     off_t curpos)
 {
 	const unsigned char *data;
 	unsigned char delta_head[20], *in;
@@ -1217,10 +1220,18 @@ unsigned long get_size_from_delta(struct packed_git *p,
 	data = delta_head;
 
 	/* ignore base size */
-	get_delta_hdr_size(&data, delta_head+sizeof(delta_head));
+	get_delta_hdr_size_sz(&data, delta_head+sizeof(delta_head));
 
 	/* Read the result size */
-	return get_delta_hdr_size(&data, delta_head+sizeof(delta_head));
+	return get_delta_hdr_size_sz(&data, delta_head+sizeof(delta_head));
+}
+
+unsigned long get_size_from_delta(struct packed_git *p,
+				  struct pack_window **w_curs,
+				  off_t curpos)
+{
+	size_t size = get_size_from_delta_sz(p, w_curs, curpos);
+	return cast_size_t_to_ulong(size);
 }
 
 /*
@@ -1621,7 +1632,7 @@ int packed_object_info(struct packed_git *p,
 		       off_t obj_offset, struct object_info *oi)
 {
 	struct pack_window *w_curs = NULL;
-	unsigned long size;
+	size_t size;
 	off_t curpos = obj_offset;
 	enum object_type type = OBJ_NONE;
 	int ret;
@@ -1636,7 +1647,8 @@ int packed_object_info(struct packed_git *p,
 		if (!*oi->contentp)
 			type = OBJ_BAD;
 	} else if (oi->sizep || oi->typep || oi->delta_base_oid) {
-		type = unpack_object_header(p, &w_curs, &curpos, &size);
+		/* Use size_t variant to handle >4GB objects on Windows */
+		type = unpack_object_header_sz(p, &w_curs, &curpos, &size);
 	}
 
 	if (!oi->contentp && oi->sizep) {
@@ -1648,14 +1660,18 @@ int packed_object_info(struct packed_git *p,
 				ret = -1;
 				goto out;
 			}
-			*oi->sizep = get_size_from_delta(p, &w_curs, tmp_pos);
-			if (*oi->sizep == 0) {
+			/*
+			 * Use size_t variant to avoid die() on >4GB deltas.
+			 * oi->sizep is unsigned long, so truncation may occur,
+			 * but streaming code uses its own size_t tracking.
+			 */
+			size = get_size_from_delta_sz(p, &w_curs, tmp_pos);
+			if (size == 0) {
 				ret = -1;
 				goto out;
 			}
-		} else {
-			*oi->sizep = size;
 		}
+		*oi->sizep = (unsigned long)size;
 	}
 
 	if (oi->disk_sizep) {
