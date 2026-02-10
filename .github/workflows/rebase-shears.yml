@@ -43,7 +43,7 @@ jobs:
             --allow-tool 'web_fetch'
           echo "Copilot CLI is working!"
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -85,7 +85,7 @@ jobs:
           
           ./ci/rebase-branch.sh "origin/shears/$BRANCH" "$UPSTREAM" ./ci
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
 
       - name: Run rebase (all branches)
         if: env.BRANCH == 'all'
@@ -118,7 +118,7 @@ jobs:
           echo ""
           echo "All branches processed successfully!"
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
 
       - name: Upload recovery archive on failure
         if: failure()
