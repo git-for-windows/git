@@ -1,0 +1,140 @@
+name: Merging-Rebase Automation
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Shears branch to update (seen, next, main, maint, or all)'
+        required: true
+        type: choice
+        options:
+          - all
+          - seen
+          - next
+          - main
+          - maint
+      push:
+        description: 'Push the result after successful rebase'
+        required: false
+        type: boolean
+        default: false
+  schedule:
+    - cron: '0 6 * * *'  # Daily at 6:00 UTC
+
+permissions:
+  contents: write
+
+env:
+  BRANCH: ${{ inputs.branch || 'all' }}
+  PUSH: ${{ github.event_type == 'schedule' && 'true' || inputs.push || 'false' }}
+
+jobs:
+  rebase:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Git for Windows SDK
+        uses: git-for-windows/setup-git-for-windows-sdk@v1
+        with:
+          flavor: minimal
+
+      - name: Configure git
+        shell: bash
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+
+      - name: Add upstream remote
+        shell: bash
+        run: |
+          git remote add upstream https://github.com/git/git.git || true
+          git fetch upstream --no-tags
+
+      - name: Install Copilot CLI
+        shell: bash
+        run: |
+          curl -fsSL https://gh.io/copilot-install | bash
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+        env:
+          GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+
+      - name: Run rebase (single branch)
+        if: env.BRANCH != 'all'
+        shell: bash
+        run: |
+          case "$BRANCH" in
+            main) UPSTREAM="upstream/master" ;;
+            *)    UPSTREAM="upstream/$BRANCH" ;;
+          esac
+          
+          git fetch origin "shears/$BRANCH"
+          
+          if test 0 = "$(git rev-list --count "origin/shears/$BRANCH..$UPSTREAM")"; then
+            echo "Nothing to do: $UPSTREAM has no new commits"
+            exit 0
+          fi
+          
+          ./ci/rebase-branch.sh "origin/shears/$BRANCH" "$UPSTREAM" ./ci
+        env:
+          GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+
+      - name: Run rebase (all branches)
+        if: env.BRANCH == 'all'
+        shell: bash
+        run: |
+          for BRANCH in seen next main maint; do
+            echo ""
+            echo "========================================"
+            echo "Processing shears/$BRANCH"
+            echo "========================================"
+            
+            case "$BRANCH" in
+              main) UPSTREAM="upstream/master" ;;
+              *)    UPSTREAM="upstream/$BRANCH" ;;
+            esac
+            
+            git fetch origin "shears/$BRANCH"
+            
+            if test 0 = "$(git rev-list --count "origin/shears/$BRANCH..$UPSTREAM")"; then
+              echo "Nothing to do: $UPSTREAM has no new commits"
+              continue
+            fi
+            
+            ./ci/rebase-branch.sh "origin/shears/$BRANCH" "$UPSTREAM" ./ci || {
+              echo "Rebase failed for shears/$BRANCH"
+              exit 1
+            }
+          done
+          
+          echo ""
+          echo "All branches processed successfully!"
+        env:
+          GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+
+      - name: Upload recovery archive on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recovery-archive
+          path: "**/recovery-archive.tar.gz"
+          if-no-files-found: ignore
+
+      - name: Push results
+        if: env.PUSH == 'true'
+        shell: bash
+        run: |
+          # Find all worktrees created by the script and push them
+          for worktree in /tmp/tmp.*; do
+            if test -d "$worktree/.git" || test -f "$worktree/.git"; then
+              cd "$worktree"
+              BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+              if test -n "$BRANCH" && test "$BRANCH" != "HEAD"; then
+                echo "Pushing $BRANCH..."
+                git push --force origin "HEAD:$BRANCH"
+              fi
+            fi
+          done
