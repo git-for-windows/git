@@ -32,6 +32,9 @@ jobs:
   rebase:
     runs-on: windows-latest
     steps:
+      - name: Install Copilot CLI
+        run: npm install -g @github/copilot
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -54,8 +57,6 @@ jobs:
           git remote add upstream https://github.com/git/git.git || true
           git fetch upstream --no-tags
 
-      - name: Install Copilot CLI
-        run: npm install -g @github/copilot
 
       - name: Verify Copilot CLI works
         shell: bash
