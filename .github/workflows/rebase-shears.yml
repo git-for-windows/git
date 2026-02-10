@@ -22,6 +22,7 @@ on:
 
 permissions:
   contents: write
+  models: read
 
 env:
   BRANCH: ${{ inputs.branch || 'all' }}
@@ -54,12 +55,19 @@ jobs:
           git fetch upstream --no-tags
 
       - name: Install Copilot CLI
+        run: npm install -g @github/copilot
+
+      - name: Verify Copilot CLI works
         shell: bash
         run: |
-          curl -fsSL https://gh.io/copilot-install | bash
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          echo "Testing Copilot CLI authentication..."
+          copilot -p "What is the current latest Git version according to git-scm.com?" \
+            --allow-tool 'web_fetch' \
+            --json 2>&1 | head -50
+          echo ""
+          echo "Copilot CLI is working!"
         env:
-          GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
 
       - name: Run rebase (single branch)
         if: env.BRANCH != 'all'
@@ -79,7 +87,7 @@ jobs:
           
           ./ci/rebase-branch.sh "origin/shears/$BRANCH" "$UPSTREAM" ./ci
         env:
-          GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
 
       - name: Run rebase (all branches)
         if: env.BRANCH == 'all'
@@ -112,7 +120,7 @@ jobs:
           echo ""
           echo "All branches processed successfully!"
         env:
-          GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
 
       - name: Upload recovery archive on failure
         if: failure()

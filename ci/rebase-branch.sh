@@ -373,8 +373,8 @@ AGENTS_DIR=$(dirname "$SCRIPTS_DIR")/.github/agents
 
 # Validate environment
 command -v copilot >/dev/null 2>&1 || die "copilot CLI not found in PATH"
-test -n "${GITHUB_TOKEN:-${COPILOT_GITHUB_TOKEN:-}}" ||
-	die "GITHUB_TOKEN or COPILOT_GITHUB_TOKEN must be set"
+test -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" ||
+	die "GH_TOKEN or GITHUB_TOKEN must be set"
 
 # Validate branches exist
 git rev-parse --verify "$SHEARS_BRANCH" >/dev/null 2>&1 ||
