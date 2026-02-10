@@ -24,26 +24,7 @@
 
 name: "Merging-Rebase Automation for Git for Windows"
 "on":
-  schedule:
-  - cron: "17 5 * * *"
-    # Friendly format: daily around 6:00 (scattered)
-  workflow_dispatch:
-    inputs:
-      branch:
-        description: Shears branch to update (seen, next, main, maint, or all)
-        options:
-        - all
-        - seen
-        - next
-        - main
-        - maint
-        required: true
-        type: choice
-      push:
-        default: false
-        description: Push the result after successful rebase
-        required: false
-        type: boolean
+  push:
 
 permissions: {}
 
@@ -678,8 +659,8 @@ jobs:
           GH_AW_GITHUB_ACTOR: ${{ github.actor }}
           GH_AW_GITHUB_EVENT_COMMENT_ID: ${{ github.event.comment.id }}
           GH_AW_GITHUB_EVENT_DISCUSSION_NUMBER: ${{ github.event.discussion.number }}
-          GH_AW_GITHUB_EVENT_INPUTS_BRANCH: ${{ github.event.inputs.branch }}
-          GH_AW_GITHUB_EVENT_INPUTS_PUSH: ${{ github.event.inputs.push }}
+          GH_AW_GITHUB_EVENT_INPUTS_BRANCH: ${{ github.event.inputs.branch || 'next' }}
+          GH_AW_GITHUB_EVENT_INPUTS_PUSH: ${{ github.event.inputs.push || 'false' }}
           GH_AW_GITHUB_EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
           GH_AW_GITHUB_EVENT_PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
           GH_AW_GITHUB_REPOSITORY: ${{ github.repository }}
