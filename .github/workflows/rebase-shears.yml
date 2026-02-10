@@ -18,8 +18,7 @@ on:
         required: false
         type: boolean
         default: false
-  schedule:
-    - cron: '0 6 * * *'  # Daily at 6:00 UTC
+  push:
 
 permissions:
   contents: write
