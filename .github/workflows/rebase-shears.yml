@@ -31,13 +31,12 @@ env:
 
 jobs:
   rebase:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
       - name: Install Copilot CLI
         run: npm install -g @github/copilot
 
       - name: Verify Copilot CLI works
-        shell: bash
         run: |
           echo "Testing Copilot CLI authentication..."
           copilot -p "What is the current latest Git version according to git-scm.com?" \
@@ -51,19 +50,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Git for Windows SDK
-        uses: git-for-windows/setup-git-for-windows-sdk@v1
-        with:
-          flavor: minimal
-
       - name: Configure git
-        shell: bash
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
 
       - name: Add upstream remote
-        shell: bash
         run: |
           git remote add upstream https://github.com/git/git.git || true
           git fetch upstream --no-tags
@@ -71,7 +63,6 @@ jobs:
       - name: Run rebase (single branch)
         id: rebase-single
         if: env.BRANCH != 'all'
-        shell: bash
         run: |
           case "$BRANCH" in
             main) UPSTREAM="upstream/master" ;;
@@ -99,7 +90,6 @@ jobs:
       - name: Run rebase (all branches)
         id: rebase-all
         if: env.BRANCH == 'all'
-        shell: bash
         run: |
           to_push=""
           failed_worktrees=""
@@ -139,7 +129,6 @@ jobs:
 
       - name: Create worktree bundles and archives
         if: always()
-        shell: bash
         run: |
           set -x
           mkdir -p upload
@@ -173,6 +162,5 @@ jobs:
 
       - name: Push results
         if: env.PUSH == 'true' && (steps.rebase-single.outputs.to_push || steps.rebase-all.outputs.to_push)
-        shell: bash
         run: |
           git push --force origin ${{ steps.rebase-single.outputs.to_push }} ${{ steps.rebase-all.outputs.to_push }}
