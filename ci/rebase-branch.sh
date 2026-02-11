@@ -167,9 +167,33 @@ Your FINAL line must be exactly: skip <oid>, continue, or fail"
 	fi
 	echo "::endgroup::"
 
-	# Extract the decision from the last non-empty line
+	# Extract the decision - look for continue/skip/fail before the stats trailer
 	local last_line decision upstream_oid
-	last_line=$(echo "$ai_output" | grep -v '^$' | tail -1)
+	last_line=$(echo "$ai_output" | sed -n '
+		/^continue$/b found
+		/^skip [0-9a-f][0-9a-f]*$/b found
+		/^fail$/b found
+		b
+		:found
+		h
+		# If this is the last line, output it
+		${ p; q }
+		# Read next line
+		n
+		# If not empty, this was not the decision line before stats
+		/^$/!b
+		# Empty lines before stats
+		:emptyloop
+		n
+		/^$/b emptyloop
+		# Stats loop - no empty lines allowed after first stats line
+		:stats
+		/[A-Za-z][^:]\{0,30\}:$/{ n; /^ /!b; :ind; ${ g; p; q }; n; /^ /b ind; b stats }
+		/^[^:]\{1,30\}: /!b
+		${ g; p; q }
+		n
+		b stats
+	')
 	decision=$(echo "$last_line" | awk '{print tolower($1)}')
 
 	case "$decision" in
@@ -508,9 +532,8 @@ test "$PARENT_COUNT" -eq 3 || # commit itself + 2 parents
 	die "Marker should have 2 parents, found $((PARENT_COUNT - 1))"
 
 # Generate range-diff (always use markers as base, never upstream branches)
-# MARKER_IN_RESULT^2 is the old tip (saved as second parent of new marker)
-# Use ORIG_OLD_MARKER to compare against the original state before any sync/adoption
-RANGE_DIFF=$(git range-diff "$ORIG_OLD_MARKER..$MARKER_IN_RESULT^2" "$MARKER_IN_RESULT..HEAD" || echo "Unable to generate range-diff")
+# Compare original patches (before rebase) with rebased patches
+RANGE_DIFF=$(git range-diff "$ORIG_OLD_MARKER..$ORIG_TIP_OID" "$MARKER_IN_RESULT..HEAD" || echo "Unable to generate range-diff")
 
 # Annotate range-diff with upstream OIDs for skipped commits
 if test -s "$SKIPPED_MAP_FILE"; then
