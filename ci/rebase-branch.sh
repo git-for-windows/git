@@ -81,7 +81,6 @@ generate_log_l_commands () {
 	echo "$commands"
 }
 
-# Function to create recovery bundle on failure
 # Function to resolve a single conflict with AI
 resolve_conflict_with_ai () {
 	# Get REBASE_HEAD info once
@@ -411,7 +410,7 @@ REBASE_TODO_COUNT=$(git rev-list --count "$OLD_MARKER..$TIP_OID")
 echo "Rebasing $REBASE_TODO_COUNT commits onto $MARKER_OID"
 echo "::endgroup::"
 
-run_rebase_with_ai -r --onto "$MARKER_OID" "$OLD_MARKER" HEAD
+run_rebase_with_ai -r --onto "$MARKER_OID" "$OLD_MARKER"
 
 # Clean up graft and verify
 git replace -d "$MARKER_OID"

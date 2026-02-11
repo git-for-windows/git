@@ -87,12 +87,9 @@ jobs:
             exit 0
           fi
           
-          echo "::group::Rebasing shears/$BRANCH"
           if ./ci/rebase-branch.sh "shears/$BRANCH" "$UPSTREAM" ./ci; then
-            echo "::endgroup::"
             echo "to_push=shears/$BRANCH" >>"$GITHUB_OUTPUT"
           else
-            echo "::endgroup::"
             echo "failed_worktrees=$PWD/rebase-worktree-$BRANCH" >>"$GITHUB_OUTPUT"
             exit 1
           fi
@@ -124,12 +121,9 @@ jobs:
             fi
             
             worktree="$PWD/rebase-worktree-$BRANCH"
-            echo "::group::Rebasing shears/$BRANCH"
             if ./ci/rebase-branch.sh "shears/$BRANCH" "$UPSTREAM" ./ci; then
-              echo "::endgroup::"
               to_push="${to_push:+$to_push }shears/$BRANCH"
             else
-              echo "::endgroup::"
               echo "::error::Rebase failed for shears/$BRANCH"
               failed_worktrees="${failed_worktrees:+$failed_worktrees }$worktree"
             fi
@@ -160,13 +154,13 @@ jobs:
           for worktree in ${{ steps.rebase-single.outputs.failed_worktrees }} ${{ steps.rebase-all.outputs.failed_worktrees }}; do
             test -d "$worktree" || continue
             name=${worktree##*rebase-worktree-}
-            cd "$worktree"
-            git for-each-ref --format='%(refname)' |
+            # Include REBASE_HEAD if it exists
+            git -C "$worktree" rev-parse --verify REBASE_HEAD && rebase_head_arg=REBASE_HEAD || rebase_head_arg=
+            git -C "$worktree" for-each-ref --format='%(refname)' |
               grep -v '^refs/tags/' |
               sed 's,^refs/remotes/origin/,^refs/remotes/origin/,' |
-              git bundle create "$GITHUB_WORKSPACE/upload/$name.bundle" --stdin HEAD
-            tar -czf "$GITHUB_WORKSPACE/upload/$name.tar.gz" .
-            cd "$GITHUB_WORKSPACE"
+              git -C "$worktree" bundle create "../upload/$name.bundle" --stdin HEAD $rebase_head_arg
+            tar -czf "upload/$name.tar.gz" -C "$worktree" .
           done
 
       - name: Upload bundles and worktrees
