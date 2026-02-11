@@ -27,7 +27,7 @@ permissions:
 env:
   BRANCH: ${{ inputs.branch || 'all' }}
   PUSH: ${{ github.event_name == 'schedule' && 'true' || inputs.push || 'false' }}
-  COPILOT_MODEL: claude-opus-4
+  COPILOT_MODEL: claude-opus-4.5
 
 jobs:
   rebase:
