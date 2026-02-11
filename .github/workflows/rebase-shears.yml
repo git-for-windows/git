@@ -27,6 +27,7 @@ permissions:
 env:
   BRANCH: ${{ inputs.branch || 'all' }}
   PUSH: ${{ github.event_type == 'schedule' && 'true' || inputs.push || 'false' }}
+  COPILOT_MODEL: claude-opus-4
 
 jobs:
   rebase:
@@ -40,7 +41,7 @@ jobs:
         run: |
           echo "Testing Copilot CLI authentication..."
           copilot -p "What is the current latest Git version according to git-scm.com?" \
-            --allow-tool 'web_fetch'
+            --allow-tool 'web_fetch' --allow-url git-scm.com
           echo "Copilot CLI is working!"
         env:
           GH_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
