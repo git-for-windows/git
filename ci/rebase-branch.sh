@@ -25,7 +25,7 @@
 #   2 - Conflict resolution failed (AI could not resolve)
 #   3 - Rebase failed for other reasons
 
-set -e
+set -ex
 
 die () {
 	echo "error: $*" >&2
@@ -149,7 +149,13 @@ Your FINAL line must be exactly: skip <oid>, continue, or fail"
 		--allow-tool 'shell(git add)' \
 		--allow-tool 'shell(git grep)' \
 		--allow-tool 'shell(git rev-list)' \
+		--allow-tool 'shell(git checkout)' \
 		--allow-tool 'shell(grep)' \
+		--allow-tool 'shell(head)' \
+		--allow-tool 'shell(tail)' \
+		--allow-tool 'shell(sed)' \
+		--allow-tool 'shell(cat)' \
+		--allow-tool 'shell(awk)' \
 		2>&1 | tee /dev/stderr)
 	local ai_exit_code=$?
 
@@ -404,6 +410,10 @@ OLD_UPSTREAM=$(git rev-parse "$OLD_MARKER^1")
 NEW_UPSTREAM=$(git rev-parse "$UPSTREAM_BRANCH")
 TIP_OID=$(git rev-parse HEAD)
 
+# Save original values for the final range-diff (before any sync/adoption)
+ORIG_OLD_MARKER=$OLD_MARKER
+ORIG_TIP_OID=$TIP_OID
+
 echo "::notice::Old marker: $OLD_MARKER"
 echo "::notice::Old upstream: $OLD_UPSTREAM"
 echo "::notice::New upstream: $NEW_UPSTREAM"
@@ -499,7 +509,8 @@ test "$PARENT_COUNT" -eq 3 || # commit itself + 2 parents
 
 # Generate range-diff (always use markers as base, never upstream branches)
 # MARKER_IN_RESULT^2 is the old tip (saved as second parent of new marker)
-RANGE_DIFF=$(git range-diff "$OLD_MARKER..$MARKER_IN_RESULT^2" "$MARKER_IN_RESULT..HEAD" || echo "Unable to generate range-diff")
+# Use ORIG_OLD_MARKER to compare against the original state before any sync/adoption
+RANGE_DIFF=$(git range-diff "$ORIG_OLD_MARKER..$MARKER_IN_RESULT^2" "$MARKER_IN_RESULT..HEAD" || echo "Unable to generate range-diff")
 
 # Annotate range-diff with upstream OIDs for skipped commits
 if test -s "$SKIPPED_MAP_FILE"; then
