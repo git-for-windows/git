@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/bash
 #
 # Rebase a branch using the merging-rebase strategy with AI-powered conflict resolution.
 #
