@@ -86,6 +86,45 @@ generate_log_l_commands () {
 	echo "$commands"
 }
 
+# Run copilot with standard tool permissions
+# Usage: run_copilot <prompt> [extra-tools...]
+# Outputs to stdout, also tees to stderr for logging
+# Returns copilot's exit code
+run_copilot () {
+	local prompt=$1
+	shift
+
+	local tools=(
+		--allow-tool 'view'
+		--allow-tool 'write'
+		--allow-tool 'shell(git show)'
+		--allow-tool 'shell(git diff)'
+		--allow-tool 'shell(git log)'
+		--allow-tool 'shell(git range-diff)'
+		--allow-tool 'shell(git add)'
+		--allow-tool 'shell(git grep)'
+		--allow-tool 'shell(git rev-list)'
+		--allow-tool 'shell(git checkout)'
+		--allow-tool 'shell(grep)'
+		--allow-tool 'shell(head)'
+		--allow-tool 'shell(tail)'
+		--allow-tool 'shell(sed)'
+		--allow-tool 'shell(cat)'
+		--allow-tool 'shell(awk)'
+	)
+
+	# Add any extra tools passed as arguments
+	local extra
+	for extra in "$@"; do
+		tools+=(--allow-tool "$extra")
+	done
+
+	copilot -p "$prompt" \
+		${COPILOT_MODEL:+--model "$COPILOT_MODEL"} \
+		"${tools[@]}" \
+		2>&1 | tee /dev/stderr
+}
+
 # Function to resolve a single conflict with AI
 # Usage: resolve_conflict_with_ai [<tried-correspondences>]
 resolve_conflict_with_ai () {
@@ -138,25 +177,7 @@ Decision rules:
 Your FINAL line must be exactly: skip <oid>, continue, or fail"
 
 	echo "Invoking AI for conflict resolution..."
-	local ai_output=$(copilot -p "$prompt" \
-		${COPILOT_MODEL:+--model "$COPILOT_MODEL"} \
-		--allow-tool 'view' \
-		--allow-tool 'edit' \
-		--allow-tool 'shell(git show)' \
-		--allow-tool 'shell(git diff)' \
-		--allow-tool 'shell(git log)' \
-		--allow-tool 'shell(git range-diff)' \
-		--allow-tool 'shell(git add)' \
-		--allow-tool 'shell(git grep)' \
-		--allow-tool 'shell(git rev-list)' \
-		--allow-tool 'shell(git checkout)' \
-		--allow-tool 'shell(grep)' \
-		--allow-tool 'shell(head)' \
-		--allow-tool 'shell(tail)' \
-		--allow-tool 'shell(sed)' \
-		--allow-tool 'shell(cat)' \
-		--allow-tool 'shell(awk)' \
-		2>&1 | tee /dev/stderr)
+	local ai_output=$(run_copilot "$prompt")
 	local ai_exit_code=$?
 
 	# Log the AI output in a collapsible group
@@ -227,7 +248,7 @@ SKIP_EOF
 	continue)
 		echo "::notice::Resolved conflict surgically: $rebase_head_oneline"
 		CONFLICTS_RESOLVED=$((CONFLICTS_RESOLVED + 1))
-		git rebase --continue
+		GIT_EDITOR=: git rebase --continue
 		
 		# Verify build after surgical resolution
 		echo "::group::Verifying build"
@@ -250,15 +271,7 @@ $(tail -15 make.log)
 Output 'continue' when fixed, or 'fail' if you cannot fix it.
 Your FINAL line must be exactly: continue or fail"
 
-			local retry_output=$(copilot -p "$retry_prompt" \
-				${COPILOT_MODEL:+--model "$COPILOT_MODEL"} \
-				--allow-tool 'view' \
-				--allow-tool 'edit' \
-				--allow-tool 'shell(git show)' \
-				--allow-tool 'shell(git diff)' \
-				--allow-tool 'shell(git add)' \
-				--allow-tool 'shell(git commit --amend)' \
-				2>&1 | tee /dev/stderr)
+			local retry_output=$(run_copilot "$retry_prompt" 'shell(git commit --amend)')
 			local retry_exit_code=$?
 			
 			echo "::group::AI Retry Output"
@@ -384,7 +397,7 @@ Used resolution from: $(git show --no-patch --format=reference "$corresponding_o
 
 RESOLVED_EOF
 				CONFLICTS_RESOLVED=$((CONFLICTS_RESOLVED + 1))
-				git rebase --continue
+				GIT_EDITOR=: git rebase --continue
 				continue 2
 			fi
 		done
@@ -564,7 +577,10 @@ echo "Rebase completed: $(git rev-parse --short HEAD)"
 cat "$REPORT_FILE"
 echo "To push: git push --force origin $(git rev-parse HEAD):$SHEARS_BRANCH"
 
-# For GitHub Actions: output report path
+# For GitHub Actions: output report path and write to job summary
 if test -n "$GITHUB_OUTPUT"; then
 	echo "report=$REPORT_FILE" >>"$GITHUB_OUTPUT"
+fi
+if test -n "$GITHUB_STEP_SUMMARY"; then
+	cat "$REPORT_FILE" >>"$GITHUB_STEP_SUMMARY"
 fi
