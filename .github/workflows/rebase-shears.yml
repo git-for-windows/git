@@ -26,7 +26,7 @@ permissions:
 
 env:
   BRANCH: ${{ inputs.branch || 'all' }}
-  PUSH: ${{ github.event_type == 'schedule' && 'true' || inputs.push || 'false' }}
+  PUSH: ${{ github.event_name == 'schedule' && 'true' || inputs.push || 'false' }}
   COPILOT_MODEL: claude-opus-4
 
 jobs:
@@ -78,14 +78,24 @@ jobs:
             *)    UPSTREAM="upstream/$BRANCH" ;;
           esac
           
+          echo "::group::Fetching shears/$BRANCH"
           git fetch origin "shears/$BRANCH"
+          echo "::endgroup::"
           
           if test 0 = "$(git rev-list --count "origin/shears/$BRANCH..$UPSTREAM")"; then
-            echo "Nothing to do: $UPSTREAM has no new commits"
+            echo "::notice::Nothing to do for shears/$BRANCH: $UPSTREAM has no new commits"
             exit 0
           fi
           
-          ./ci/rebase-branch.sh "origin/shears/$BRANCH" "$UPSTREAM" ./ci
+          echo "::group::Rebasing shears/$BRANCH"
+          if ./ci/rebase-branch.sh "shears/$BRANCH" "$UPSTREAM" ./ci; then
+            echo "::endgroup::"
+            echo "to_push=shears/$BRANCH" >>"$GITHUB_OUTPUT"
+          else
+            echo "::endgroup::"
+            echo "failed_worktrees=$PWD/rebase-worktree-$BRANCH" >>"$GITHUB_OUTPUT"
+            exit 1
+          fi
         env:
           GH_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
 
@@ -94,8 +104,11 @@ jobs:
         if: env.BRANCH == 'all'
         shell: bash
         run: |
+          to_push=""
+          failed_worktrees=""
+          
           for BRANCH in seen next main maint; do
-            echo "::group::Processing shears/$BRANCH"
+            echo "::group::Fetching shears/$BRANCH"
             
             case "$BRANCH" in
               main) UPSTREAM="upstream/master" ;;
@@ -103,51 +116,69 @@ jobs:
             esac
             
             git fetch origin "shears/$BRANCH"
+            echo "::endgroup::"
             
             if test 0 = "$(git rev-list --count "origin/shears/$BRANCH..$UPSTREAM")"; then
-              echo "Nothing to do: $UPSTREAM has no new commits"
-              echo "::endgroup::"
+              echo "::notice::Nothing to do for shears/$BRANCH: $UPSTREAM has no new commits"
               continue
             fi
             
-            ./ci/rebase-branch.sh "origin/shears/$BRANCH" "$UPSTREAM" ./ci || {
+            worktree="$PWD/rebase-worktree-$BRANCH"
+            echo "::group::Rebasing shears/$BRANCH"
+            if ./ci/rebase-branch.sh "shears/$BRANCH" "$UPSTREAM" ./ci; then
               echo "::endgroup::"
-              echo "Rebase failed for shears/$BRANCH"
-              exit 1
-            }
-            echo "::endgroup::"
+              to_push="${to_push:+$to_push }shears/$BRANCH"
+            else
+              echo "::endgroup::"
+              echo "::error::Rebase failed for shears/$BRANCH"
+              failed_worktrees="${failed_worktrees:+$failed_worktrees }$worktree"
+            fi
           done
+          
+          echo "to_push=$to_push" >>"$GITHUB_OUTPUT"
+          echo "failed_worktrees=$failed_worktrees" >>"$GITHUB_OUTPUT"
+          
+          # Fail the step if any rebase failed
+          test -z "$failed_worktrees"
         env:
           GH_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
 
-      - name: Create recovery archive on failure
-        if: failure() && (steps.rebase-single.outputs.worktree || steps.rebase-all.outputs.worktree)
+      - name: Create worktree bundles and archives
+        if: always()
         shell: bash
         run: |
-          worktree="${{ steps.rebase-single.outputs.worktree || steps.rebase-all.outputs.worktree }}"
-          cd "$worktree"
-          git bundle create recovery.bundle HEAD REBASE_HEAD refs/rewritten/* 2>/dev/null || true
-          tar -czf recovery-archive.tar.gz .
+          set -x
+          mkdir -p upload
+          
+          # Bundles for successful branches (no worktree needed)
+          for branch in ${{ steps.rebase-single.outputs.to_push }} ${{ steps.rebase-all.outputs.to_push }}; do
+            name=${branch##*/}
+            git bundle create "upload/$name.bundle" "$branch" ^origin/main
+          done
+          
+          # Bundles and archives for failed branches
+          for worktree in ${{ steps.rebase-single.outputs.failed_worktrees }} ${{ steps.rebase-all.outputs.failed_worktrees }}; do
+            test -d "$worktree" || continue
+            name=${worktree##*rebase-worktree-}
+            cd "$worktree"
+            git for-each-ref --format='%(refname)' |
+              grep -v '^refs/tags/' |
+              sed 's,^refs/remotes/origin/,^refs/remotes/origin/,' |
+              git bundle create "$GITHUB_WORKSPACE/upload/$name.bundle" --stdin HEAD
+            tar -czf "$GITHUB_WORKSPACE/upload/$name.tar.gz" .
+            cd "$GITHUB_WORKSPACE"
+          done
 
-      - name: Upload recovery archive on failure
-        if: failure() && (steps.rebase-single.outputs.worktree || steps.rebase-all.outputs.worktree)
+      - name: Upload bundles and worktrees
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: recovery-archive
-          path: "${{ steps.rebase-single.outputs.worktree || steps.rebase-all.outputs.worktree }}/recovery-archive.tar.gz"
+          name: bundles-and-worktrees
+          path: upload/
+          if-no-files-found: warn
 
       - name: Push results
-        if: env.PUSH == 'true'
+        if: env.PUSH == 'true' && (steps.rebase-single.outputs.to_push || steps.rebase-all.outputs.to_push)
         shell: bash
         run: |
-          # Find all worktrees created by the script and push them
-          for worktree in /tmp/tmp.*; do
-            if test -d "$worktree/.git" || test -f "$worktree/.git"; then
-              cd "$worktree"
-              BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)
-              if test -n "$BRANCH" && test "$BRANCH" != "HEAD"; then
-                echo "Pushing $BRANCH..."
-                git push --force origin "HEAD:$BRANCH"
-              fi
-            fi
-          done
+          git push --force origin ${{ steps.rebase-single.outputs.to_push }} ${{ steps.rebase-all.outputs.to_push }}

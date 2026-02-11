@@ -5,14 +5,14 @@
 # Usage: rebase-branch.sh <shears-branch> <upstream-branch> [<scripts-dir>]
 #
 # Parameters:
-#   shears-branch   - The branch to rebase (e.g., origin/shears/seen)
+#   shears-branch   - The branch to rebase (e.g., shears/seen)
 #   upstream-branch - The upstream branch to rebase onto (e.g., upstream/seen)
 #   scripts-dir     - Optional: directory containing this script and agents
 #                     (defaults to the directory containing this script)
 #
 # Preconditions:
 #   - Must be run from a git repository
-#   - shears-branch and upstream-branch must be fetched
+#   - origin/<shears-branch> and <upstream-branch> must be fetched
 #   - GH_TOKEN or GITHUB_TOKEN must be set for AI resolution
 #
 # Outputs:
@@ -82,53 +82,6 @@ generate_log_l_commands () {
 }
 
 # Function to create recovery bundle on failure
-create_recovery_archive () {
-	local ai_output=$1
-	local archive_dir=$(mktemp -d)
-	local bundle_file="$archive_dir/recovery.bundle"
-	local archive_file="${WORKTREE_DIR}/recovery-archive.tar.gz"
-
-	echo "::group::Creating recovery archive"
-
-	# Collect refs: HEAD, REBASE_HEAD, and all refs/rewritten/*
-	{
-		echo HEAD
-		echo REBASE_HEAD
-		git for-each-ref --format='%(refname)' refs/rewritten/
-	} >"$archive_dir/refs-to-bundle.txt"
-
-	# Create bundle with all progress (may fail if refs don't exist yet)
-	if ! git bundle create "$bundle_file" --stdin <"$archive_dir/refs-to-bundle.txt"; then
-		echo "::warning::Could not create recovery bundle"
-	fi
-
-	# Copy the conflict report if it exists
-	if test -f "$REPORT_FILE"; then
-		cp "$REPORT_FILE" "$archive_dir/"
-	fi
-
-	# Save the AI output that caused failure
-	echo "$ai_output" >"$archive_dir/ai-output.txt"
-
-	# Save rebase state if it exists
-	if test -d .git/rebase-merge; then
-		cp -r .git/rebase-merge "$archive_dir/"
-	fi
-
-	# Create archive with working tree and recovery files
-	tar -czf "$archive_file" -C "$WORKTREE_DIR" . -C "$archive_dir" .
-
-	rm -rf "$archive_dir"
-
-	echo "Recovery archive created: $archive_file"
-	echo "::endgroup::"
-
-	# Output for GitHub Actions artifact upload
-	if test -n "$GITHUB_OUTPUT"; then
-		echo "recovery_archive=$archive_file" >>"$GITHUB_OUTPUT"
-	fi
-}
-
 # Function to resolve a single conflict with AI
 resolve_conflict_with_ai () {
 	# Get REBASE_HEAD info once
@@ -285,7 +238,6 @@ $(tail -50 make.log)
 \`\`\`
 
 BUILD_FAIL_EOF
-				create_recovery_archive "$retry_output"
 				exit 2
 			fi
 			echo "::endgroup::"
@@ -307,7 +259,6 @@ $ai_output
 \`\`\`
 
 EOF
-		create_recovery_archive "$ai_output"
 		exit 2
 		;;
 	*)
@@ -323,7 +274,6 @@ $ai_output
 \`\`\`
 
 EOF
-		create_recovery_archive "$ai_output"
 		exit 2
 		;;
 	esac
@@ -383,29 +333,26 @@ command -v copilot >/dev/null 2>&1 || die "copilot CLI not found in PATH"
 test -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" ||
 	die "GH_TOKEN or GITHUB_TOKEN must be set"
 
-# Validate branches exist
-git rev-parse --verify "$SHEARS_BRANCH" >/dev/null 2>&1 ||
-	die "Branch not found: $SHEARS_BRANCH"
+# Validate branches exist (shears branch is fetched as origin/<branch>)
+git rev-parse --verify "origin/$SHEARS_BRANCH" >/dev/null 2>&1 ||
+	die "Branch not found: origin/$SHEARS_BRANCH"
 git rev-parse --verify "$UPSTREAM_BRANCH" >/dev/null 2>&1 ||
 	die "Branch not found: $UPSTREAM_BRANCH"
 
-# Set up worktree
-WORKTREE_DIR=$(mktemp -d)
+# Set up worktree in current directory, named after the branch
+WORKTREE_DIR="$PWD/rebase-worktree-${SHEARS_BRANCH##*/}"
 REPORT_FILE="$WORKTREE_DIR/conflict-report.md"
-trap 'git worktree remove --force "$WORKTREE_DIR"' EXIT
 
 # Output worktree path early so recovery steps can find it on failure
 if test -n "$GITHUB_OUTPUT"; then
 	echo "worktree=$WORKTREE_DIR" >>"$GITHUB_OUTPUT"
 fi
 
-# Extract local branch name from origin/shears/foo -> shears/foo
-LOCAL_BRANCH=${SHEARS_BRANCH#origin/}
-
-echo "::group::Setup"
+echo "::group::Setup worktree"
 echo "Creating worktree at $WORKTREE_DIR..."
-git worktree add -b "$LOCAL_BRANCH" "$WORKTREE_DIR" "$SHEARS_BRANCH"
+git worktree add -B "$SHEARS_BRANCH" "$WORKTREE_DIR" "origin/$SHEARS_BRANCH"
 cd "$WORKTREE_DIR"
+echo "::endgroup::"
 
 # Find the old marker
 OLD_MARKER=$(git rev-parse "HEAD^{/Start.the.merging-rebase}") ||
@@ -414,11 +361,10 @@ OLD_UPSTREAM=$(git rev-parse "$OLD_MARKER^1")
 NEW_UPSTREAM=$(git rev-parse "$UPSTREAM_BRANCH")
 TIP_OID=$(git rev-parse HEAD)
 
-echo "Old marker: $OLD_MARKER"
-echo "Old upstream: $OLD_UPSTREAM"
-echo "New upstream: $NEW_UPSTREAM"
-echo "Current tip: $TIP_OID"
-echo "::endgroup::"
+echo "::notice::Old marker: $OLD_MARKER"
+echo "::notice::Old upstream: $OLD_UPSTREAM"
+echo "::notice::New upstream: $NEW_UPSTREAM"
+echo "::notice::Current tip: $TIP_OID"
 
 # Check if shears branch is behind GfW main (commits in main not in shears)
 # The second parent of the marker points to the GfW branch tip at marker creation time
@@ -426,9 +372,10 @@ GFW_MAIN_BRANCH="origin/main"
 BEHIND_COUNT=$(git rev-list --count "$TIP_OID..$GFW_MAIN_BRANCH" || echo "0")
 
 if test "$BEHIND_COUNT" -gt 0; then
-	echo "::group::Syncing $BEHIND_COUNT commits from $GFW_MAIN_BRANCH"
+	echo "::notice::Syncing $BEHIND_COUNT commits from $GFW_MAIN_BRANCH"
+	echo "::group::Sync rebase from $GFW_MAIN_BRANCH"
 	run_rebase_with_ai -r HEAD "$GFW_MAIN_BRANCH"
-	git checkout -B "$LOCAL_BRANCH"
+	git checkout -B "$SHEARS_BRANCH"
 	TIP_OID=$(git rev-parse HEAD)
 	echo "::endgroup::"
 fi
@@ -504,10 +451,9 @@ EOF
 
 echo "Rebase completed: $(git rev-parse --short HEAD)"
 cat "$REPORT_FILE"
-echo "To push: cd $WORKTREE_DIR && git push --force origin HEAD:${SHEARS_BRANCH##*/}"
+echo "To push: git push --force origin $(git rev-parse HEAD):$SHEARS_BRANCH"
 
-# For GitHub Actions: output variables (worktree already output early)
+# For GitHub Actions: output report path
 if test -n "$GITHUB_OUTPUT"; then
 	echo "report=$REPORT_FILE" >>"$GITHUB_OUTPUT"
-	echo "head=$(git rev-parse HEAD)" >>"$GITHUB_OUTPUT"
 fi
