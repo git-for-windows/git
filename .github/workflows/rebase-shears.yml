@@ -69,6 +69,7 @@ jobs:
           git fetch upstream --no-tags
 
       - name: Run rebase (single branch)
+        id: rebase-single
         if: env.BRANCH != 'all'
         shell: bash
         run: |
@@ -89,14 +90,12 @@ jobs:
           GH_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
 
       - name: Run rebase (all branches)
+        id: rebase-all
         if: env.BRANCH == 'all'
         shell: bash
         run: |
           for BRANCH in seen next main maint; do
-            echo ""
-            echo "========================================"
-            echo "Processing shears/$BRANCH"
-            echo "========================================"
+            echo "::group::Processing shears/$BRANCH"
             
             case "$BRANCH" in
               main) UPSTREAM="upstream/master" ;;
@@ -107,27 +106,35 @@ jobs:
             
             if test 0 = "$(git rev-list --count "origin/shears/$BRANCH..$UPSTREAM")"; then
               echo "Nothing to do: $UPSTREAM has no new commits"
+              echo "::endgroup::"
               continue
             fi
             
             ./ci/rebase-branch.sh "origin/shears/$BRANCH" "$UPSTREAM" ./ci || {
+              echo "::endgroup::"
               echo "Rebase failed for shears/$BRANCH"
               exit 1
             }
+            echo "::endgroup::"
           done
-          
-          echo ""
-          echo "All branches processed successfully!"
         env:
           GH_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
 
+      - name: Create recovery archive on failure
+        if: failure() && (steps.rebase-single.outputs.worktree || steps.rebase-all.outputs.worktree)
+        shell: bash
+        run: |
+          worktree="${{ steps.rebase-single.outputs.worktree || steps.rebase-all.outputs.worktree }}"
+          cd "$worktree"
+          git bundle create recovery.bundle HEAD REBASE_HEAD refs/rewritten/* 2>/dev/null || true
+          tar -czf recovery-archive.tar.gz .
+
       - name: Upload recovery archive on failure
-        if: failure()
+        if: failure() && (steps.rebase-single.outputs.worktree || steps.rebase-all.outputs.worktree)
         uses: actions/upload-artifact@v4
         with:
           name: recovery-archive
-          path: "**/recovery-archive.tar.gz"
-          if-no-files-found: ignore
+          path: "${{ steps.rebase-single.outputs.worktree || steps.rebase-all.outputs.worktree }}/recovery-archive.tar.gz"
 
       - name: Push results
         if: env.PUSH == 'true'

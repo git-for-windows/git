@@ -394,6 +394,11 @@ WORKTREE_DIR=$(mktemp -d)
 REPORT_FILE="$WORKTREE_DIR/conflict-report.md"
 trap 'git worktree remove --force "$WORKTREE_DIR"' EXIT
 
+# Output worktree path early so recovery steps can find it on failure
+if test -n "$GITHUB_OUTPUT"; then
+	echo "worktree=$WORKTREE_DIR" >>"$GITHUB_OUTPUT"
+fi
+
 # Extract local branch name from origin/shears/foo -> shears/foo
 LOCAL_BRANCH=${SHEARS_BRANCH#origin/}
 
@@ -468,8 +473,9 @@ PARENT_COUNT=$(git rev-list --parents -1 "$MARKER_IN_RESULT" | wc -w)
 test "$PARENT_COUNT" -eq 3 || # commit itself + 2 parents
 	die "Marker should have 2 parents, found $((PARENT_COUNT - 1))"
 
-# Generate range-diff
-RANGE_DIFF=$(git range-diff "$OLD_UPSTREAM..$OLD_MARKER^2" "$NEW_UPSTREAM..$MARKER_IN_RESULT^2" || echo "Unable to generate range-diff")
+# Generate range-diff (always use markers as base, never upstream branches)
+# MARKER_IN_RESULT^2 is the old tip (saved as second parent of new marker)
+RANGE_DIFF=$(git range-diff "$OLD_MARKER..$MARKER_IN_RESULT^2" "$MARKER_IN_RESULT..HEAD" || echo "Unable to generate range-diff")
 
 # Annotate range-diff with upstream OIDs for skipped commits
 if test -s "$SKIPPED_MAP_FILE"; then
@@ -500,9 +506,8 @@ echo "Rebase completed: $(git rev-parse --short HEAD)"
 cat "$REPORT_FILE"
 echo "To push: cd $WORKTREE_DIR && git push --force origin HEAD:${SHEARS_BRANCH##*/}"
 
-# For GitHub Actions: output variables
+# For GitHub Actions: output variables (worktree already output early)
 if test -n "$GITHUB_OUTPUT"; then
-	echo "worktree=$WORKTREE_DIR" >>"$GITHUB_OUTPUT"
 	echo "report=$REPORT_FILE" >>"$GITHUB_OUTPUT"
 	echo "head=$(git rev-parse HEAD)" >>"$GITHUB_OUTPUT"
 fi
