@@ -87,7 +87,7 @@ jobs:
             exit 0
           fi
           
-          if ./ci/rebase-branch.sh "shears/$BRANCH" "$UPSTREAM" ./ci; then
+          if ./ci/rebase-branch.sh "shears/$BRANCH" "$UPSTREAM" "$PWD/ci"; then
             echo "to_push=shears/$BRANCH" >>"$GITHUB_OUTPUT"
           else
             echo "failed_worktrees=$PWD/rebase-worktree-$BRANCH" >>"$GITHUB_OUTPUT"
@@ -121,7 +121,7 @@ jobs:
             fi
             
             worktree="$PWD/rebase-worktree-$BRANCH"
-            if ./ci/rebase-branch.sh "shears/$BRANCH" "$UPSTREAM" ./ci; then
+            if ./ci/rebase-branch.sh "shears/$BRANCH" "$UPSTREAM" "$PWD/ci"; then
               to_push="${to_push:+$to_push }shears/$BRANCH"
             else
               echo "::error::Rebase failed for shears/$BRANCH"
