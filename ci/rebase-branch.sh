@@ -243,14 +243,13 @@ SKIP_EOF
 			echo "::notice::Skipping commit (already upstream): $rebase_head_oneline"
 		fi
 		CONFLICTS_SKIPPED=$((CONFLICTS_SKIPPED + 1))
-		git rebase --skip
+		git rebase --skip ||:
 		;;
 	continue)
 		echo "::notice::Resolved conflict surgically: $rebase_head_oneline"
 		CONFLICTS_RESOLVED=$((CONFLICTS_RESOLVED + 1))
-		GIT_EDITOR=: git rebase --continue
-		
-		# Verify build after surgical resolution
+
+		# Verify build before committing the resolution
 		echo "::group::Verifying build"
 		if ! make -j$(nproc) 2>&1 | tee make.log; then
 			echo "::endgroup::"
@@ -258,12 +257,12 @@ SKIP_EOF
 			
 			local retry_prompt="Build failed after your conflict resolution. Fix the compilation error.
 
-Files you modified: $(git diff --name-only HEAD^)
+Files with conflicts: $(git diff --name-only --diff-filter=U)
 
 Investigation:
 - See full build log: view make.log
-- See your changes: git diff HEAD^
-- Edit files to fix, then: git add <file> && git commit --amend --no-edit
+- See your changes: git diff
+- Edit files to fix, then: git add <file>
 
 Build errors (last 15 lines):
 $(tail -15 make.log)
@@ -271,7 +270,7 @@ $(tail -15 make.log)
 Output 'continue' when fixed, or 'fail' if you cannot fix it.
 Your FINAL line must be exactly: continue or fail"
 
-			local retry_output=$(run_copilot "$retry_prompt" 'shell(git commit --amend)')
+			local retry_output=$(run_copilot "$retry_prompt")
 			local retry_exit_code=$?
 			
 			echo "::group::AI Retry Output"
@@ -288,7 +287,7 @@ Your FINAL line must be exactly: continue or fail"
 				echo "::error::Build still fails after retry"
 				cat >>"$REPORT_FILE" <<BUILD_FAIL_EOF
 
-### BUILD FAILED: $(git show --no-patch --format=reference HEAD)
+### BUILD FAILED: $rebase_head_ref
 
 Build failed after conflict resolution. Last 50 lines:
 
@@ -304,6 +303,7 @@ BUILD_FAIL_EOF
 			echo "::endgroup::"
 		fi
 		rm -f make.log
+		GIT_EDITOR=: git rebase --continue ||:
 		;;
 	fail)
 		echo "::error::AI could not resolve conflict: $rebase_head_oneline"
@@ -341,10 +341,11 @@ EOF
 # Function to run a rebase with AI-powered conflict resolution
 # Usage: run_rebase_with_ai <rebase-args...>
 run_rebase_with_ai () {
-	while true; do
-		if git rebase "$@" 2>&1; then
-			break
-		fi
+	if git rebase "$@" 2>&1; then
+		return
+	fi
+
+	while git rev-parse --verify REBASE_HEAD >/dev/null 2>&1; do
 
 		# Check if we have a conflict
 		if ! git diff --name-only --diff-filter=U | grep -q .; then
@@ -372,7 +373,7 @@ Detected via exact range-diff match (no AI needed).
 
 TRIVIAL_SKIP_EOF
 			CONFLICTS_SKIPPED=$((CONFLICTS_SKIPPED + 1))
-			git rebase --skip
+			git rebase --skip ||:
 			continue
 		fi
 
@@ -397,7 +398,7 @@ Used resolution from: $(git show --no-patch --format=reference "$corresponding_o
 
 RESOLVED_EOF
 				CONFLICTS_RESOLVED=$((CONFLICTS_RESOLVED + 1))
-				GIT_EDITOR=: git rebase --continue
+				GIT_EDITOR=: git rebase --continue ||:
 				continue 2
 			fi
 		done
@@ -482,6 +483,14 @@ if test "$BEHIND_COUNT" -gt 0; then
 		TIP_OID=$(git rev-parse HEAD)
 		echo "::endgroup::"
 	fi
+fi
+
+# Check if there's anything to rebase after syncing
+UPSTREAM_AHEAD=$(git rev-list --count "$OLD_UPSTREAM..$NEW_UPSTREAM")
+if test "$UPSTREAM_AHEAD" -eq 0; then
+	echo "::notice::Nothing to rebase: upstream has no new commits since $OLD_UPSTREAM"
+	echo "Current HEAD is at $(git rev-parse --short HEAD)"
+	exit 0
 fi
 
 # Initialize report
