@@ -1,0 +1,399 @@
+# Translation of git-gui glossary to Japanese
+# Copyright (C) 2026
+# This file is distributed under the same license as the git-gui package.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: git-gui glossary\n"
+"POT-Creation-Date: 2020-01-26 22:26+0100\n"
+"PO-Revision-Date: 2026-03-25 04:23+0900\n"
+"Last-Translator: coolvitto\n"
+"Language-Team: Japanese\n"
+"Language: ja_JP\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-Generator: Poedit 3.8\n"
+
+#. "English Definition (Dear translator: This file will never be visible to the user! It should only serve as a tool for you, the translator. Nothing more.)"
+msgid "English Term (Dear translator: This file will never be visible to the user!)"
+msgstr "日本語訳 (翻訳者へ: このファイルはユーザーに表示されることはありません。翻訳者であるあなた自身のためのツールとしてのみご使用ください。)"
+
+#. "prematurely stop and abandon an operation"
+msgid "abort"
+msgstr "中止"
+
+#. ""
+msgid "amend"
+msgstr "修正"
+
+#. "a commit that succeeds the current one in git's graph of commits (not necessarily directly)"
+msgid "ancestor"
+msgstr "祖先コミット"
+
+#. ""
+msgid "annotate"
+msgstr "注釈"
+
+#. "The person who initially created (authored) a commit"
+msgid "author"
+msgstr "作者"
+
+#. "a repository with only .git directory, without working directory"
+msgid "bare repository"
+msgstr "ベアリポジトリ"
+
+#. "a parent version of the current file"
+msgid "base"
+msgstr "ベース"
+
+#. ""
+msgid "bisect"
+msgstr "二分探索"
+
+#. "get the authors responsible for each line in a file"
+msgid "blame"
+msgstr "blame"
+
+#.      ""
+msgid "blob"
+msgstr "blob"
+
+#. "A 'branch' is an active line of development."
+msgid "branch [noun]"
+msgstr "ブランチ"
+
+#. ""
+msgid "branch [verb]"
+msgstr "ブランチを作成する"
+
+#. ""
+msgid "checkout [noun]"
+msgstr "チェックアウト"
+
+#. "The action of updating the working tree to a revision which was stored in the object database."
+msgid "checkout [verb]"
+msgstr "チェックアウトする"
+
+#. "to select and apply a single commit to the current HEAD without merging"
+msgid "cherry-pick"
+msgstr "チェリーピック"
+
+#. "a commit that directly succeeds the current one in git's graph of commits"
+msgid "child commit"
+msgstr "子コミット"
+
+#. "clean the state of the git repository, often after manually stopped operation"
+msgid "cleanup"
+msgstr "クリーンアップ"
+
+#. ""
+msgid "clone [verb]"
+msgstr "クローンする"
+
+#. "A single point in the git history."
+msgid "commit [noun]"
+msgstr "コミット"
+
+#. "The action of storing a new snapshot of the project's state in the git history."
+msgid "commit [verb]"
+msgstr "コミットする"
+
+#. "a message that gets attached with any commit"
+msgid "commit message"
+msgstr "コミットメッセージ"
+
+#.   "The person who committed a commit (to the current branch), which might be different than the author."
+msgid "committer"
+msgstr "コミッター"
+
+#. "a commit that precedes the current one in git's graph of commits (not necessarily directly)"
+msgid "descendant"
+msgstr "子孫コミット"
+
+#.       "checkout of a revision rather than some head"
+msgid "detached HEAD"
+msgstr "切り離された HEAD"
+
+#. "checkout of a revision rather than some head"
+msgid "detached checkout"
+msgstr "切り離されたチェックアウト"
+
+#. ""
+msgid "diff [noun]"
+msgstr "差分"
+
+#. ""
+msgid "diff [verb]"
+msgstr "差分を表示する"
+
+#.   ""
+msgid "directory"
+msgstr "ディレクトリ"
+
+#. "A fast-forward merge is a special type of merge where you have a revision and you are merging another branch's changes that happen to be a descendant of what you have."
+msgid "fast-forward"
+msgstr "早送りマージ"
+
+#. "Fetching a branch means to get the branch's head from a remote repository, to find out which objects are missing from the local object database, and to get them, too."
+msgid "fetch"
+msgstr "フェッチ"
+
+#. "any merge strategy that works on a file by file basis"
+msgid "file level merging"
+msgstr "ファイル単位のマージ"
+
+#.      ""
+msgid "file"
+msgstr "ファイル"
+
+#. "the last revision in a branch"
+msgid "head"
+msgstr "ヘッド"
+
+#. "script that gets executed automatically on some event"
+msgid "hook"
+msgstr "フック"
+
+#. "One context of consecutive lines in a whole patch, which consists of many such hunks"
+msgid "hunk"
+msgstr "ハンク"
+
+#. "A collection of files. The index is a stored version of your working tree."
+msgid "index (in git-gui: staging area)"
+msgstr "インデックス (git-gui ではステージングエリア)"
+
+#. "the first checkout during a clone operation"
+msgid "initial checkout"
+msgstr "初回チェックアウト"
+
+#. "The very first commit in a repository"
+msgid "initial commit"
+msgstr "初回コミット"
+
+#. "a branch that resides in the local git repository"
+msgid "local branch"
+msgstr "ローカルブランチ"
+
+#. "a Git object that is not part of any pack"
+msgid "loose object"
+msgstr "緩いオブジェクト"
+
+#. "a branch called by convention 'master' that exists in a newly created git repository"
+msgid "master branch"
+msgstr "masterブランチ"
+
+#. "A successful merge results in the creation of a new commit representing the result of the merge."
+msgid "merge [noun]"
+msgstr "マージ"
+
+#. "To bring the contents of another branch into the current branch."
+msgid "merge [verb]"
+msgstr "マージする"
+
+#. ""
+msgid "message"
+msgstr "メッセージ"
+
+#. "a remote called by convention 'origin' that the current git repository has been cloned from"
+msgid "origin"
+msgstr "origin"
+
+#.       ""
+msgid "orphan commit"
+msgstr "孤立コミット"
+
+#.  ""
+msgid "orphan reference"
+msgstr "孤立参照"
+
+#. "a file containing many git objects packed together"
+msgid "pack [noun]"
+msgstr "パック"
+
+#.     "the process of creating a pack file"
+msgid "pack [verb]"
+msgstr "パックする"
+
+#. "a Git object part of some pack"
+msgid "packed object"
+msgstr "パック済みオブジェクト"
+
+#. "a commit that directly precedes the current one in git's graph of commits"
+msgid "parent commit"
+msgstr "親コミット"
+
+msgid "patch\" \""
+msgstr "パッチ"
+
+#. "The path to a file"
+msgid "path"
+msgstr "パス"
+
+#. "Delete all stale tracking branches under <name>. These stale branches have already been removed from the remote repository referenced by <name>, but are still locally available in 'remotes/<name>'."
+msgid "prune"
+msgstr "刈り込み"
+
+#. "Pulling a branch means to fetch it and merge it."
+msgid "pull"
+msgstr "プル"
+
+#. "Pushing a branch means to get the branch's head ref from a remote repository, and ... (well, can someone please explain it for mere mortals?)"
+msgid "push"
+msgstr "プッシュ"
+
+#. "The process of rebasing one set of commits on top of another branch's head"
+msgid "rebase [noun]"
+msgstr "リベース"
+
+#. "Re-apply one set of commits on top of another branch's head. Contrary to merge."
+msgid "rebase [verb]"
+msgstr "リベースする"
+
+#. ""
+msgid "redo"
+msgstr "やり直し"
+
+#.   ""
+msgid "reference"
+msgstr "参照"
+
+#. "the log file containing all states of the HEAD reference (in other words past pristine states of the working copy)"
+msgid "reflog"
+msgstr "reflog"
+
+msgid "refmap\"       \""
+msgstr "refmap"
+
+#. ""
+msgid "refspec"
+msgstr "refspec"
+
+#. "The adjective for anything which is outside of the current (local) repository"
+msgid "remote [adj]"
+msgstr "リモート"
+
+#.       "A branch in any other ('remote') repository"
+msgid "remote branch"
+msgstr "リモートブランチ"
+
+#.   "An other repository ('remote'). One might have a set of remotes whose branches one tracks."
+msgid "remote repository"
+msgstr "リモートリポジトリ"
+
+#. "A collection of refs (?) together with an object database containing all objects which are reachable from the refs... (oops, you've lost me here. Again, please an explanation for mere mortals?)"
+msgid "repository"
+msgstr "リポジトリ"
+
+#. ""
+msgid "reset"
+msgstr "リセット"
+
+#. "decide which changes from alternative versions of a file should persist in Git"
+msgid "resolve (a conflict)"
+msgstr "解決する (競合)"
+
+#. "abandon changes and go to pristine version"
+msgid "revert changes"
+msgstr "変更を元に戻す"
+
+#. ""
+msgid "revert"
+msgstr "リバート"
+
+#. "expression that signifies a revision in git"
+msgid "revision expression"
+msgstr "リビジョン式"
+
+#. "A particular state of files and directories which was stored in the object database."
+msgid "revision"
+msgstr "リビジョン"
+
+#. ""
+msgid "sign off"
+msgstr "サインオフ"
+
+#.     "see: staging area. In some areas of git this is called 'index'."
+msgid "stage [noun], index"
+msgstr "ステージ, インデックス"
+
+#. "add some content of files and directories to the staging area in preparation for a commit"
+msgid "stage [verb]"
+msgstr "ステージする"
+
+#. "The place where changes from files are marked to be included for the next commit. In some areas of git this is called 'index'."
+msgid "staging area"
+msgstr "ステージングエリア"
+
+#. "The place (stack) where changes can be temporarily saved without committing"
+msgid "stash [noun]"
+msgstr "スタッシュ"
+
+#. "temporarily save changes in a stack without committing"
+msgid "stash [verb]"
+msgstr "スタッシュする"
+
+#. ""
+msgid "status"
+msgstr "ステータス"
+
+#. ""
+msgid "submodule"
+msgstr "サブモジュール"
+
+#. "A ref pointing to some commit object. In other words: A label on a specific commit."
+msgid "tag [noun]"
+msgstr "タグ"
+
+#. "The process of creating a tag at a specific commit object"
+msgid "tag [verb]"
+msgstr "タグを付ける"
+
+#. "The person who created a tag"
+msgid "tagger"
+msgstr "タグ作成者"
+
+#. "file whose content is tracked/not tracked by git"
+msgid "tracked/untracked"
+msgstr "追跡済み/未追跡"
+
+#. "A regular git branch that is used to follow changes from another repository."
+msgid "tracking branch"
+msgstr "追跡ブランチ"
+
+#. ""
+msgid "trailer"
+msgstr "トレーラー"
+
+#. "1. tree object, 2. directory tree"
+msgid "tree"
+msgstr "ツリー"
+
+#. ""
+msgid "undo"
+msgstr "元に戻す"
+
+#. "Remove content of files from the staging area again so that it will not be part of the next commit"
+msgid "unstage"
+msgstr "ステージから除外する"
+
+#. "Retrieving the temporarily saved changes back again from the stash"
+msgid "unstash [verb]"
+msgstr "スタッシュから復元する"
+
+#. ""
+msgid "update"
+msgstr "更新"
+
+#. ""
+msgid "upstream branch"
+msgstr "上流ブランチ"
+
+#. ""
+msgid "verify"
+msgstr "検証"
+
+#. "The tree of actual checked out files."
+msgid "working directory, working copy, working tree"
+msgstr "作業ディレクトリ, 作業コピー, 作業ツリー"
