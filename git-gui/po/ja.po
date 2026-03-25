@@ -1,28 +1,30 @@
 # Translation of git-gui to Japanese
-# Copyright (C) 2007 Shawn Pearce
+# Copyright (C) 2026
 # This file is distributed under the same license as the git-gui package.
 #
 # しらいし ななこ <nanako3@bluebottle.com>, 2007.
 # Satoshi Yasushima <s.yasushima@gmail.com>, 2016.
 # KIDANI Akito <a.kid.1985@gmail.com>, 2019.
+# coolvitto, 2026.
 #
 msgid ""
 msgstr ""
 "Project-Id-Version: git-gui\n"
-"Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2016-05-27 17:52+0900\n"
-"PO-Revision-Date: 2019-10-13 23:20+0900\n"
-"Last-Translator: KIDANI Akito <a.kid.1985@gmail.com>\n"
+"PO-Revision-Date: 2026-03-25 05:31+0900\n"
+"Last-Translator: coolvitto\n"
 "Language-Team: Japanese\n"
-"Language: ja\n"
+"Language: ja_JP\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+"X-Generator: Poedit 3.8\n"
 
 #: git-gui.sh:861
 #, tcl-format
 msgid "Invalid font specified in %s:"
-msgstr "%s に無効なフォントが指定されています:"
+msgstr "%s に無効なフォントが指定されています :"
 
 #: git-gui.sh:915
 msgid "Main Font"
@@ -35,15 +37,15 @@ msgstr "diff/コンソール・フォント"
 #: git-gui.sh:931 git-gui.sh:945 git-gui.sh:958 git-gui.sh:1048 git-gui.sh:1067
 #: git-gui.sh:3125
 msgid "git-gui: fatal error"
-msgstr "git-gui: 致命的なエラー"
+msgstr "git-gui : 致命的なエラー"
 
 #: git-gui.sh:932
 msgid "Cannot find git in PATH."
-msgstr "PATH 中に git が見つかりません"
+msgstr "PATH 中に git が見つかりません。"
 
 #: git-gui.sh:959
 msgid "Cannot parse Git version string:"
-msgstr "Git バージョン名が理解できません:"
+msgstr "Git バージョン名が理解できません :"
 
 #: git-gui.sh:984
 #, tcl-format
@@ -66,15 +68,15 @@ msgstr ""
 
 #: git-gui.sh:1281
 msgid "Git directory not found:"
-msgstr "Git ディレクトリが見つかりません:"
+msgstr "Git ディレクトリが見つかりません :"
 
 #: git-gui.sh:1315
 msgid "Cannot move to top of working directory:"
-msgstr "作業ディレクトリの最上位に移動できません"
+msgstr "作業ディレクトリの最上位に移動できません :"
 
 #: git-gui.sh:1323
 msgid "Cannot use bare repository:"
-msgstr "裸のリポジトリは使えません:"
+msgstr "裸のリポジトリは使えません :"
 
 #: git-gui.sh:1331
 msgid "No working directory"
@@ -90,15 +92,15 @@ msgstr "変更されたファイルをスキャンしています…"
 
 #: git-gui.sh:1639
 msgid "Calling prepare-commit-msg hook..."
-msgstr "prepare-commit-msg フックを実行中・・・"
+msgstr "prepare-commit-msg フックを実行中..."
 
 #: git-gui.sh:1656
 msgid "Commit declined by prepare-commit-msg hook."
-msgstr "prepare-commit-msg フックがコミットを拒否しました"
+msgstr "prepare-commit-msg フックがコミットを拒否しました。"
 
 #: git-gui.sh:1814 lib/browser.tcl:252
 msgid "Ready."
-msgstr "準備完了"
+msgstr "準備完了。"
 
 #: git-gui.sh:1978
 #, tcl-format
@@ -106,7 +108,7 @@ msgid ""
 "Display limit (gui.maxfilesdisplayed = %s) reached, not showing all %s files."
 msgstr ""
 "表示可能な限界 (gui.maxfilesdisplayed = %s) に達しため、全体で%s個のファイル"
-"を表示できません"
+"を表示できません。"
 
 #: git-gui.sh:2101
 msgid "Unmodified"
@@ -215,7 +217,7 @@ msgstr "ワーキングコピーをブラウズ"
 
 #: git-gui.sh:2682
 msgid "Git Bash"
-msgstr ""
+msgstr "Git Bash"
 
 #: git-gui.sh:2692
 msgid "Browse Current Branch's Files"
@@ -300,7 +302,7 @@ msgstr "作成…"
 
 #: git-gui.sh:2791
 msgid "Checkout..."
-msgstr "チェックアウト"
+msgstr "チェックアウト..."
 
 #: git-gui.sh:2797
 msgid "Rename..."
@@ -352,11 +354,11 @@ msgstr "変更を元に戻す"
 
 #: git-gui.sh:2878 git-gui.sh:3581 git-gui.sh:3612
 msgid "Show Less Context"
-msgstr "文脈を少なく"
+msgstr "表示するコンテキストを減らす"
 
 #: git-gui.sh:2882 git-gui.sh:3585 git-gui.sh:3616
 msgid "Show More Context"
-msgstr "文脈を多く"
+msgstr "表示するコンテキストを増やす"
 
 #: git-gui.sh:2889 git-gui.sh:3283 git-gui.sh:3392
 msgid "Sign Off"
@@ -372,7 +374,7 @@ msgstr "マージ中止…"
 
 #: git-gui.sh:2922 git-gui.sh:2950
 msgid "Add..."
-msgstr "追加"
+msgstr "追加..."
 
 #: git-gui.sh:2926
 msgid "Push..."
@@ -420,12 +422,12 @@ msgstr "エラー"
 #, tcl-format
 msgid "fatal: cannot stat path %s: No such file or directory"
 msgstr ""
-"致命的: パス %s が stat できません。そのようなファイルやディレクトリはありま"
+"致命的 : パス %s が stat できません。そのようなファイルやディレクトリはありま"
 "せん"
 
 #: git-gui.sh:3159
 msgid "Current Branch:"
-msgstr "現在のブランチ"
+msgstr "現在のブランチ :"
 
 #: git-gui.sh:3185
 msgid "Staged Changes (Will Commit)"
@@ -445,27 +447,27 @@ msgstr "プッシュ"
 
 #: git-gui.sh:3330
 msgid "Initial Commit Message:"
-msgstr "最初のコミットメッセージ:"
+msgstr "最初のコミットメッセージ :"
 
 #: git-gui.sh:3331
 msgid "Amended Commit Message:"
-msgstr "訂正したコミットメッセージ:"
+msgstr "訂正したコミットメッセージ :"
 
 #: git-gui.sh:3332
 msgid "Amended Initial Commit Message:"
-msgstr "訂正した最初のコミットメッセージ:"
+msgstr "訂正した最初のコミットメッセージ :"
 
 #: git-gui.sh:3333
 msgid "Amended Merge Commit Message:"
-msgstr "訂正したマージコミットメッセージ:"
+msgstr "訂正したマージコミットメッセージ :"
 
 #: git-gui.sh:3334
 msgid "Merge Commit Message:"
-msgstr "マージコミットメッセージ:"
+msgstr "マージコミットメッセージ :"
 
 #: git-gui.sh:3335
 msgid "Commit Message:"
-msgstr "コミットメッセージ:"
+msgstr "コミットメッセージ :"
 
 #: git-gui.sh:3384 git-gui.sh:3538 lib/console.tcl:73
 msgid "Copy All"
@@ -473,7 +475,7 @@ msgstr "全てコピー"
 
 #: git-gui.sh:3408 lib/blame.tcl:105
 msgid "File:"
-msgstr "ファイル:"
+msgstr "ファイル :"
 
 #: git-gui.sh:3526
 msgid "Refresh"
@@ -582,7 +584,7 @@ msgid ""
 msgstr ""
 "\n"
 "これは Cygwin で配布されている Tcl バイナリに\n"
-"関しての既知の問題によります"
+"関しての既知の問題によります。"
 
 #: git-gui.sh:3886
 #, tcl-format
@@ -597,7 +599,7 @@ msgstr ""
 "\n"
 "\n"
 "個人的な ~/.gitconfig ファイル内で user.name と user.email の値を設定\n"
-"するのが、%s の良い代用となります\n"
+"するのが、%s の良い代用となります。\n"
 
 #: lib/merge.tcl:13
 msgid ""
@@ -662,20 +664,20 @@ msgstr ""
 #: lib/merge.tcl:108
 #, tcl-format
 msgid "%s of %s"
-msgstr "%2$s の %1$s ブランチ"
+msgstr "%s / %s"
 
 #: lib/merge.tcl:122
 #, tcl-format
 msgid "Merging %s and %s..."
-msgstr "%s と %s をマージ中・・・"
+msgstr "%s と %s をマージ中..."
 
 #: lib/merge.tcl:133
 msgid "Merge completed successfully."
-msgstr "マージが完了しました"
+msgstr "マージが完了しました。"
 
 #: lib/merge.tcl:135
 msgid "Merge failed.  Conflict resolution is required."
-msgstr "マージが失敗しました。衝突の解決が必要です。"
+msgstr "マージが失敗しました。競合の解決が必要です。"
 
 #: lib/merge.tcl:160
 #, tcl-format
@@ -762,16 +764,16 @@ msgstr "警告"
 
 #: lib/error.tcl:96
 msgid "You must correct the above errors before committing."
-msgstr "コミットする前に、以上のエラーを修正して下さい"
+msgstr "コミットする前に、以上のエラーを修正して下さい。"
 
 #: lib/date.tcl:25
 #, tcl-format
 msgid "Invalid date from Git: %s"
-msgstr "Git から出た無効な日付: %s"
+msgstr "Git から出た無効な日付 : %s"
 
 #: lib/encoding.tcl:443
 msgid "Default"
-msgstr "デフォールト"
+msgstr "デフォルト"
 
 #: lib/encoding.tcl:448
 #, tcl-format
@@ -792,11 +794,11 @@ msgstr "元のリポジトリ"
 
 #: lib/remote_branch_delete.tcl:51 lib/transport.tcl:165
 msgid "Remote:"
-msgstr "リモート:"
+msgstr "リモート :"
 
 #: lib/remote_branch_delete.tcl:72 lib/transport.tcl:187
 msgid "Arbitrary Location:"
-msgstr "任意の位置:"
+msgstr "任意のf場所 :"
 
 #: lib/remote_branch_delete.tcl:88
 msgid "Branches"
@@ -808,11 +810,11 @@ msgstr "条件付で削除"
 
 #: lib/remote_branch_delete.tcl:112
 msgid "Merged Into:"
-msgstr "マージ先:"
+msgstr "マージ先 :"
 
 #: lib/remote_branch_delete.tcl:120 lib/branch_delete.tcl:53
 msgid "Always (Do not perform merge checks)"
-msgstr "無条件（マージ検査をしない）"
+msgstr "無条件 (マージ検査をしない)"
 
 #: lib/remote_branch_delete.tcl:153
 msgid "A branch is required for 'Merged Into'."
@@ -825,7 +827,7 @@ msgid ""
 "\n"
 " - %s"
 msgstr ""
-"以下のブランチは %s に完全にマージされていません:\n"
+"以下のブランチは %s に完全にマージされていません :\n"
 "\n"
 " - %s"
 
@@ -835,8 +837,8 @@ msgid ""
 "One or more of the merge tests failed because you have not fetched the "
 "necessary commits.  Try fetching from %s first."
 msgstr ""
-"必要なコミットが不足しているために、マージ検査が失敗しました。まず %s から"
-"フェッチして下さい。"
+"必要なコミットが不足しているために、マージ検査が失敗しました。まず %s から取"
+"得して下さい。"
 
 #: lib/remote_branch_delete.tcl:208
 msgid "Please select one or more branches to delete."
@@ -855,7 +857,7 @@ msgstr ""
 #: lib/remote_branch_delete.tcl:227
 #, tcl-format
 msgid "Deleting branches from %s"
-msgstr "%s からブランチを削除しています。"
+msgstr "%s からブランチを削除しています"
 
 #: lib/remote_branch_delete.tcl:300
 msgid "No repository selected."
@@ -885,7 +887,7 @@ msgstr "マージ済みの時のみ削除"
 #: lib/branch_delete.tcl:103
 #, tcl-format
 msgid "The following branches are not completely merged into %s:"
-msgstr "以下のブランチは %s に完全にマージされていません:"
+msgstr "以下のブランチは %s に完全にマージされていません :"
 
 #: lib/branch_delete.tcl:141
 #, tcl-format
@@ -893,7 +895,7 @@ msgid ""
 "Failed to delete branches:\n"
 "%s"
 msgstr ""
-"以下のブランチを削除できません:\n"
+"以下のブランチを削除できません :\n"
 "%s"
 
 #: lib/choose_rev.tcl:52
@@ -902,7 +904,7 @@ msgstr "分離されたチェックアウト"
 
 #: lib/choose_rev.tcl:60
 msgid "Revision Expression:"
-msgstr "リビジョン式:"
+msgstr "リビジョン式 :"
 
 #: lib/choose_rev.tcl:72
 msgid "Local Branch"
@@ -919,7 +921,7 @@ msgstr "タグ"
 #: lib/choose_rev.tcl:321
 #, tcl-format
 msgid "Invalid revision: %s"
-msgstr "無効なリビジョン: %s"
+msgstr "無効なリビジョン : %s"
 
 #: lib/choose_rev.tcl:342
 msgid "No revision selected."
@@ -952,32 +954,32 @@ msgstr "成功"
 
 #: lib/console.tcl:200
 msgid "Error: Command Failed"
-msgstr "エラー: コマンドが失敗しました"
+msgstr "エラー : コマンドが失敗しました"
 
 #: lib/checkout_op.tcl:85
 #, tcl-format
 msgid "Fetching %s from %s"
-msgstr "%2$s から %1$s をフェッチしています"
+msgstr "%s を %s から取得しています"
 
 #: lib/checkout_op.tcl:133
 #, tcl-format
 msgid "fatal: Cannot resolve %s"
-msgstr "致命的エラー: %s を解決できません"
+msgstr "致命的エラー : %s を解決できません"
 
 #: lib/checkout_op.tcl:175
 #, tcl-format
 msgid "Branch '%s' does not exist."
-msgstr "ブランチ'%s'は存在しません。"
+msgstr "ブランチ '%s' は存在しません。"
 
 #: lib/checkout_op.tcl:194
 #, tcl-format
 msgid "Failed to configure simplified git-pull for '%s'."
-msgstr "'%s' に簡易 git-pull を設定できませんでした"
+msgstr "'%s' に簡易 git-pull を設定できませんでした。"
 
 #: lib/checkout_op.tcl:202 lib/branch_rename.tcl:102
 #, tcl-format
 msgid "Branch '%s' already exists."
-msgstr "'%s'というブランチは既に存在します。"
+msgstr "'%s' というブランチは既に存在します。"
 
 #: lib/checkout_op.tcl:229
 #, tcl-format
@@ -1060,12 +1062,12 @@ msgstr ""
 #: lib/checkout_op.tcl:503 lib/checkout_op.tcl:507
 #, tcl-format
 msgid "Checked out '%s'."
-msgstr "'%s' をチェックアウトしました"
+msgstr "'%s' をチェックアウトしました。"
 
 #: lib/checkout_op.tcl:535
 #, tcl-format
 msgid "Resetting '%s' to '%s' will lose the following commits:"
-msgstr "'%s' を '%s' にリセットすると、以下のコミットが失なわれます:"
+msgstr "'%s' を '%s' にリセットすると、以下のコミットが失なわれます :"
 
 #: lib/checkout_op.tcl:557
 msgid "Recovering lost commits may not be easy."
@@ -1102,7 +1104,7 @@ msgstr "ファイルピューワ"
 
 #: lib/blame.tcl:79
 msgid "Commit:"
-msgstr "コミット:"
+msgstr "コミット :"
 
 #: lib/blame.tcl:280
 msgid "Copy Commit"
@@ -1110,7 +1112,7 @@ msgstr "コミットをコピー"
 
 #: lib/blame.tcl:284
 msgid "Find Text..."
-msgstr "テキストを検索"
+msgstr "テキストの検索..."
 
 #: lib/blame.tcl:288
 msgid "Goto Line..."
@@ -1122,7 +1124,7 @@ msgstr "コピー検知"
 
 #: lib/blame.tcl:301
 msgid "Show History Context"
-msgstr "文脈を見せる"
+msgstr "履歴コンテキストを表示"
 
 #: lib/blame.tcl:304
 msgid "Blame Parent Commit"
@@ -1131,11 +1133,11 @@ msgstr "親コミットを注釈"
 #: lib/blame.tcl:466
 #, tcl-format
 msgid "Reading %s..."
-msgstr "%s を読んでいます…"
+msgstr "%s を読み込み中…"
 
 #: lib/blame.tcl:594
 msgid "Loading copy/move tracking annotations..."
-msgstr "コピー・移動追跡データを読んでいます…"
+msgstr "コピー・移動追跡データを読み込み中…"
 
 #: lib/blame.tcl:614
 msgid "lines annotated"
@@ -1143,11 +1145,11 @@ msgstr "行を注釈しました"
 
 #: lib/blame.tcl:806
 msgid "Loading original location annotations..."
-msgstr "元位置行の注釈データを読んでいます…"
+msgstr "元位置行の注釈データを読み込み中…"
 
 #: lib/blame.tcl:809
 msgid "Annotation complete."
-msgstr "注釈完了しました"
+msgstr "注釈が完了しました。"
 
 #: lib/blame.tcl:839
 msgid "Busy"
@@ -1167,23 +1169,23 @@ msgstr "注釈を読み込んでいます…"
 
 #: lib/blame.tcl:1000
 msgid "Author:"
-msgstr "作者:"
+msgstr "作者 :"
 
 #: lib/blame.tcl:1004
 msgid "Committer:"
-msgstr "コミット者:"
+msgstr "コミット者 :"
 
 #: lib/blame.tcl:1009
 msgid "Original File:"
-msgstr "元ファイル"
+msgstr "元ファイル :"
 
 #: lib/blame.tcl:1057
 msgid "Cannot find HEAD commit:"
-msgstr "HEAD コミットが見つかりません"
+msgstr "HEAD コミットが見つかりません :"
 
 #: lib/blame.tcl:1112
 msgid "Cannot find parent commit:"
-msgstr "親コミットが見つかりません:"
+msgstr "親コミットが見つかりません :"
 
 #: lib/blame.tcl:1127
 msgid "Unable to display parent"
@@ -1191,23 +1193,23 @@ msgstr "親を表示できません"
 
 #: lib/blame.tcl:1128 lib/diff.tcl:356
 msgid "Error loading diff:"
-msgstr "diff を読む際のエラーです:"
+msgstr "diff を読む際のエラーです :"
 
 #: lib/blame.tcl:1269
 msgid "Originally By:"
-msgstr "原作者:"
+msgstr "原作者 :"
 
 #: lib/blame.tcl:1275
 msgid "In File:"
-msgstr "ファイル:"
+msgstr "ファイル :"
 
 #: lib/blame.tcl:1280
 msgid "Copied Or Moved Here By:"
-msgstr "複写・移動者:"
+msgstr "複写・移動者 :"
 
 #: lib/about.tcl:26
 msgid "git-gui - a graphical user interface for Git."
-msgstr "Git のグラフィカルUI git-gui"
+msgstr "git-gui - Git用のグラフィカルユーザーインターフェース。"
 
 #: lib/choose_repository.tcl:33
 msgid "Git Gui"
@@ -1243,13 +1245,13 @@ msgstr "最近使ったリポジトリ"
 
 #: lib/choose_repository.tcl:148
 msgid "Open Recent Repository:"
-msgstr "最近使ったリポジトリを開く"
+msgstr "最近使ったリポジトリを開く :"
 
 #: lib/choose_repository.tcl:316 lib/choose_repository.tcl:323
 #: lib/choose_repository.tcl:330
 #, tcl-format
 msgid "Failed to create repository %s:"
-msgstr "リポジトリ %s を作製できません:"
+msgstr "リポジトリ %s を作製できません :"
 
 #: lib/choose_repository.tcl:407 lib/branch_create.tcl:33
 msgid "Create"
@@ -1257,13 +1259,13 @@ msgstr "作成"
 
 #: lib/choose_repository.tcl:417
 msgid "Directory:"
-msgstr "ディレクトリ:"
+msgstr "ディレクトリ :"
 
 #: lib/choose_repository.tcl:422 lib/choose_repository.tcl:509
 #: lib/choose_repository.tcl:518 lib/choose_repository.tcl:1074
 #: lib/browser.tcl:288
 msgid "Browse"
-msgstr "ブラウズ"
+msgstr "参照"
 
 #: lib/choose_repository.tcl:447 lib/choose_repository.tcl:573
 #: lib/choose_repository.tcl:1098
@@ -1286,15 +1288,15 @@ msgstr "複製"
 
 #: lib/choose_repository.tcl:504
 msgid "Source Location:"
-msgstr "ソースの位置"
+msgstr "ソースの場所 :"
 
 #: lib/choose_repository.tcl:513
 msgid "Target Directory:"
-msgstr "先ディレクトリ:"
+msgstr "対象ディレクトリ :"
 
 #: lib/choose_repository.tcl:523
 msgid "Clone Type:"
-msgstr "複製方式:"
+msgstr "複製方式 :"
 
 #: lib/choose_repository.tcl:528
 msgid "Standard (Fast, Semi-Redundant, Hardlinks)"
@@ -1317,7 +1319,7 @@ msgstr "サブモジュールも再帰的に複製する"
 #: lib/choose_repository.tcl:1104 lib/choose_repository.tcl:1112
 #, tcl-format
 msgid "Not a Git repository: %s"
-msgstr "Git リポジトリではありません: %s"
+msgstr "Git リポジトリではありません : %s"
 
 #: lib/choose_repository.tcl:615
 msgid "Standard only available for local repository."
@@ -1342,26 +1344,26 @@ msgstr "オブジェクトを数えています"
 
 #: lib/choose_repository.tcl:664
 msgid "buckets"
-msgstr "バケツ"
+msgstr "バケット"
 
 #: lib/choose_repository.tcl:688
 #, tcl-format
 msgid "Unable to copy objects/info/alternates: %s"
-msgstr "objects/info/alternates を複写できません: %s"
+msgstr "objects/info/alternates を複写できません : %s"
 
 #: lib/choose_repository.tcl:724
 #, tcl-format
 msgid "Nothing to clone from %s."
-msgstr "%s から複製する内容はありません"
+msgstr "%s から複製する内容はありません。"
 
 #: lib/choose_repository.tcl:726 lib/choose_repository.tcl:940
 #: lib/choose_repository.tcl:952
 msgid "The 'master' branch has not been initialized."
-msgstr "'master' ブランチが初期化されていません"
+msgstr "'master' ブランチが初期化されていません。"
 
 #: lib/choose_repository.tcl:739
 msgid "Hardlinks are unavailable.  Falling back to copying."
-msgstr "ハードリンクが作れないので、コピーします"
+msgstr "ハードリンクは使用できません。コピー処理に切り替えます。"
 
 #: lib/choose_repository.tcl:751
 #, tcl-format
@@ -1379,7 +1381,7 @@ msgstr "KiB"
 #: lib/choose_repository.tcl:807
 #, tcl-format
 msgid "Unable to copy object: %s"
-msgstr "オブジェクトを複写できません: %s"
+msgstr "オブジェクトを複写できません : %s"
 
 #: lib/choose_repository.tcl:817
 msgid "Linking objects"
@@ -1392,19 +1394,19 @@ msgstr "オブジェクト"
 #: lib/choose_repository.tcl:826
 #, tcl-format
 msgid "Unable to hardlink object: %s"
-msgstr "オブジェクトをハードリンクできません: %s"
+msgstr "オブジェクトをハードリンクできません : %s"
 
 #: lib/choose_repository.tcl:881
 msgid "Cannot fetch branches and objects.  See console output for details."
-msgstr "ブランチやオブジェクトを取得できません。コンソール出力を見て下さい"
+msgstr "ブランチやオブジェクトを取得できません。コンソール出力を見て下さい。"
 
 #: lib/choose_repository.tcl:892
 msgid "Cannot fetch tags.  See console output for details."
-msgstr "タグを取得できません。コンソール出力を見て下さい"
+msgstr "タグを取得できません。コンソール出力を見て下さい。"
 
 #: lib/choose_repository.tcl:916
 msgid "Cannot determine HEAD.  See console output for details."
-msgstr "HEAD を確定できません。コンソール出力を見て下さい"
+msgstr "HEAD を確定できません。コンソール出力を見て下さい。"
 
 #: lib/choose_repository.tcl:925
 #, tcl-format
@@ -1413,16 +1415,16 @@ msgstr "%s を掃除できません"
 
 #: lib/choose_repository.tcl:931
 msgid "Clone failed."
-msgstr "複写に失敗しました。"
+msgstr "複製に失敗しました。"
 
 #: lib/choose_repository.tcl:938
 msgid "No default branch obtained."
-msgstr "デフォールト・ブランチが取得されませんでした"
+msgstr "デフォルト ブランチが取得されませんでした。"
 
 #: lib/choose_repository.tcl:949
 #, tcl-format
 msgid "Cannot resolve %s as a commit."
-msgstr "%s をコミットとして解釈できません"
+msgstr "%s をコミットとして解決できません。"
 
 #: lib/choose_repository.tcl:961
 msgid "Creating working directory"
@@ -1443,7 +1445,7 @@ msgstr "サブモジュールを複製しています"
 
 #: lib/choose_repository.tcl:1015
 msgid "Initial file checkout failed."
-msgstr "初期チェックアウトに失敗しました"
+msgstr "初期チェックアウトに失敗しました。"
 
 #: lib/choose_repository.tcl:1059
 msgid "Open"
@@ -1451,12 +1453,12 @@ msgstr "開く"
 
 #: lib/choose_repository.tcl:1069
 msgid "Repository:"
-msgstr "リポジトリ:"
+msgstr "リポジトリ :"
 
 #: lib/choose_repository.tcl:1118
 #, tcl-format
 msgid "Failed to open repository %s:"
-msgstr "リポジトリ %s を開けません:"
+msgstr "リポジトリ %s を開けません :"
 
 #: lib/branch_rename.tcl:15 lib/branch_rename.tcl:23
 msgid "Rename Branch"
@@ -1468,11 +1470,11 @@ msgstr "名前変更"
 
 #: lib/branch_rename.tcl:38
 msgid "Branch:"
-msgstr "ブランチ:"
+msgstr "ブランチ :"
 
 #: lib/branch_rename.tcl:46
 msgid "New Name:"
-msgstr "新しい名前:"
+msgstr "新しい名前 :"
 
 #: lib/branch_rename.tcl:81
 msgid "Please select a branch to rename."
@@ -1490,19 +1492,19 @@ msgstr "'%s' はブランチ名に使えません。"
 #: lib/branch_rename.tcl:123
 #, tcl-format
 msgid "Failed to rename '%s'."
-msgstr "'%s'の名前変更に失敗しました。"
+msgstr "'%s' の名前変更に失敗しました。"
 
 #: lib/shortcut.tcl:21 lib/shortcut.tcl:62
 msgid "Cannot write shortcut:"
-msgstr "ショートカットが書けません:"
+msgstr "ショートカットを書き込めません :"
 
 #: lib/shortcut.tcl:137
 msgid "Cannot write icon:"
-msgstr "アイコンが書けません:"
+msgstr "アイコンを書き込めません :"
 
 #: lib/search.tcl:48
 msgid "Find:"
-msgstr "検索:"
+msgstr "検索 :"
 
 #: lib/search.tcl:50
 msgid "Next"
@@ -1523,7 +1525,7 @@ msgstr "大文字小文字を区別"
 #: lib/status_bar.tcl:87
 #, tcl-format
 msgid "%s ... %*i of %*i %s (%3i%%)"
-msgstr "%1$s ... %4$*i %6$s 中の %2$*i (%7$3i%%)"
+msgstr "%s ... %*i / %*i %s (%3i%%)"
 
 #: lib/tools_dlg.tcl:22
 msgid "Add Tool"
@@ -1547,15 +1549,15 @@ msgstr "ツールの詳細"
 
 #: lib/tools_dlg.tcl:49
 msgid "Use '/' separators to create a submenu tree:"
-msgstr "'/' でサブメニューを区切ります:"
+msgstr "'/' でサブメニューを区切ります :"
 
 #: lib/tools_dlg.tcl:51 lib/remote_add.tcl:41 lib/branch_create.tcl:44
 msgid "Name:"
-msgstr "名前:"
+msgstr "名前 :"
 
 #: lib/tools_dlg.tcl:60
 msgid "Command:"
-msgstr "コマンド:"
+msgstr "コマンド :"
 
 #: lib/tools_dlg.tcl:71
 msgid "Show a dialog before running"
@@ -1614,7 +1616,7 @@ msgstr "(青色はローカルレポジトリのツールです)"
 #: lib/tools_dlg.tcl:292
 #, tcl-format
 msgid "Run Command: %s"
-msgstr "コマンドを起動: %s"
+msgstr "コマンドを起動 : %s"
 
 #: lib/tools_dlg.tcl:306
 msgid "Arguments"
@@ -1646,22 +1648,22 @@ msgstr "本当に %s を起動しますか?"
 #: lib/tools.tcl:116
 #, tcl-format
 msgid "Tool: %s"
-msgstr "ツール: %s"
+msgstr "ツール : %s"
 
 #: lib/tools.tcl:117
 #, tcl-format
 msgid "Running: %s"
-msgstr "実行中: %s"
+msgstr "実行中 : %s"
 
 #: lib/tools.tcl:155
 #, tcl-format
 msgid "Tool completed successfully: %s"
-msgstr "ツールが完了しました: %s"
+msgstr "ツールが完了しました : %s"
 
 #: lib/tools.tcl:157
 #, tcl-format
 msgid "Tool failed: %s"
-msgstr "ツールが失敗しました: %s"
+msgstr "ツールが失敗しました : %s"
 
 #: lib/mergetool.tcl:8
 msgid "Force resolution to the base version?"
@@ -1707,12 +1709,12 @@ msgstr "ツールでは削除やリンク競合は扱えません"
 
 #: lib/mergetool.tcl:146
 msgid "Conflict file does not exist"
-msgstr "競合ファイルは存在しません。"
+msgstr "競合ファイルは存在しません"
 
 #: lib/mergetool.tcl:246
 #, tcl-format
 msgid "Not a GUI merge tool: '%s'"
-msgstr "GUI マージツールではありません: %s"
+msgstr "GUI マージツールではありません : %s"
 
 #: lib/mergetool.tcl:275
 #, tcl-format
@@ -1729,7 +1731,7 @@ msgid ""
 "Error retrieving versions:\n"
 "%s"
 msgstr ""
-"版の取り出し時にエラーが出ました:\n"
+"版の取り出し時にエラーが出ました :\n"
 "%s"
 
 #: lib/mergetool.tcl:350
@@ -1739,7 +1741,7 @@ msgid ""
 "\n"
 "%s"
 msgstr ""
-"マージツールが起動できません:\n"
+"マージツールが起動できません :\n"
 "\n"
 "%s"
 
@@ -1776,7 +1778,7 @@ msgstr "%s リポジトリ"
 
 #: lib/option.tcl:134
 msgid "Global (All Repositories)"
-msgstr "大域（全てのリポジトリ）"
+msgstr "グローバル (全てのリポジトリ)"
 
 #: lib/option.tcl:140
 msgid "User Name"
@@ -1832,7 +1834,7 @@ msgstr "コピーを検知する最少文字数"
 
 #: lib/option.tcl:155
 msgid "Blame History Context Radius (days)"
-msgstr "注釈する履歴半径（日数）"
+msgstr "Blame 履歴コンテキスト範囲 (日)"
 
 #: lib/option.tcl:156
 msgid "Number of Diff Context Lines"
@@ -1876,7 +1878,7 @@ msgstr "変更"
 
 #: lib/option.tcl:254
 msgid "Spelling Dictionary:"
-msgstr "スペルチェック辞書"
+msgstr "スペルチェック辞書 :"
 
 #: lib/option.tcl:284
 msgid "Change Font"
@@ -1889,7 +1891,7 @@ msgstr "%s を選択"
 
 #: lib/option.tcl:294
 msgid "pt."
-msgstr "ポイント"
+msgstr "ポイント."
 
 #: lib/option.tcl:308
 msgid "Preferences"
@@ -1901,7 +1903,7 @@ msgstr "オプション"
 
 #: lib/option.tcl:345
 msgid "Failed to completely save options:"
-msgstr "完全にオプションを保存できません:"
+msgstr "完全にオプションを保存できません :"
 
 #: lib/database.tcl:42
 msgid "Number of loose objects"
@@ -1963,7 +1965,7 @@ msgstr "%s を取得"
 #: lib/transport.tcl:7
 #, tcl-format
 msgid "Fetching new changes from %s"
-msgstr "%s から新しい変更をフェッチしています"
+msgstr "%s から新しい変更を取得しています"
 
 #: lib/transport.tcl:18
 #, tcl-format
@@ -1981,7 +1983,7 @@ msgstr "すべてのリモートを取得"
 
 #: lib/transport.tcl:26
 msgid "Fetching new changes from all remotes"
-msgstr "すべてのリモートから新しい変更をフェッチしています"
+msgstr "すべてのリモートから新しい変更を取得しています"
 
 #: lib/transport.tcl:40
 msgid "remote prune all remotes"
@@ -2010,7 +2012,7 @@ msgstr "%s へミラーしています"
 #: lib/transport.tcl:111
 #, tcl-format
 msgid "Pushing %s %s to %s"
-msgstr "%3$s へ %1$s %2$s をプッシュしています"
+msgstr "%s %s を %s にプッシュしています"
 
 #: lib/transport.tcl:132
 msgid "Push Branches"
@@ -2030,11 +2032,11 @@ msgstr "通信オプション"
 
 #: lib/transport.tcl:207
 msgid "Force overwrite existing branch (may discard changes)"
-msgstr "既存ブランチを上書き(変更を破棄する可能性があります)"
+msgstr "既存ブランチを上書き (変更を破棄する可能性があります)"
 
 #: lib/transport.tcl:211
 msgid "Use thin pack (for slow network connections)"
-msgstr "Thin Pack を使う（遅いネットワーク接続）"
+msgstr "Thin Pack を使う (遅いネットワーク接続)"
 
 #: lib/transport.tcl:215
 msgid "Include tags"
@@ -2074,7 +2076,7 @@ msgstr "リモートを削除"
 
 #: lib/remote.tcl:223
 msgid "Prune from"
-msgstr "から刈込む…"
+msgstr "刈込み先"
 
 #: lib/remote.tcl:228
 msgid "Fetch from"
@@ -2112,24 +2114,24 @@ msgid ""
 "LOCAL: deleted\n"
 "REMOTE:\n"
 msgstr ""
-"LOCAL: 削除\n"
-"Remote:\n"
+"LOCAL : 削除\n"
+"Remote :\n"
 
 #: lib/diff.tcl:145
 msgid ""
 "REMOTE: deleted\n"
 "LOCAL:\n"
 msgstr ""
-"REMOTE: 削除\n"
-"LOCAL:\n"
+"REMOTE : 削除\n"
+"LOCAL :\n"
 
 #: lib/diff.tcl:152
 msgid "LOCAL:\n"
-msgstr "LOCAL:\n"
+msgstr "LOCAL :\n"
 
 #: lib/diff.tcl:155
 msgid "REMOTE:\n"
-msgstr "REMOTE\n"
+msgstr "REMOTE :\n"
 
 #: lib/diff.tcl:217 lib/diff.tcl:355
 #, tcl-format
@@ -2138,15 +2140,15 @@ msgstr "%s を表示できません"
 
 #: lib/diff.tcl:218
 msgid "Error loading file:"
-msgstr "ファイルを読む際のエラーです:"
+msgstr "ファイルを読む際のエラーです :"
 
 #: lib/diff.tcl:225
 msgid "Git Repository (subproject)"
-msgstr "Git リポジトリ(サブプロジェクト)"
+msgstr "Git リポジトリ (サブプロジェクト)"
 
 #: lib/diff.tcl:237
 msgid "* Binary file (not showing content)."
-msgstr "* バイナリファイル(内容は表示しません)"
+msgstr "* バイナリファイル (内容は表示しません)。"
 
 #: lib/diff.tcl:242
 #, tcl-format
@@ -2164,7 +2166,6 @@ msgid ""
 "* Untracked file clipped here by %s.\n"
 "* To see the entire file, use an external editor.\n"
 msgstr ""
-"\n"
 "\n"
 "* %s は管理外のファイルをここで切りおとしました。\n"
 "* 全体を見るには外部エディタを使ってください。\n"
@@ -2195,7 +2196,7 @@ msgstr "チェックアウト"
 
 #: lib/branch_checkout.tcl:42 lib/branch_create.tcl:92
 msgid "Fetch Tracking Branch"
-msgstr "トラッキング・ブランチをフェッチ"
+msgstr "トラッキング・ブランチを取得"
 
 #: lib/branch_checkout.tcl:47
 msgid "Detach From Local Branch"
@@ -2203,7 +2204,7 @@ msgstr "ローカル・ブランチから削除"
 
 #: lib/index.tcl:6
 msgid "Unable to unlock the index."
-msgstr "インデックスをロックできません"
+msgstr "インデックスをロックできません。"
 
 #: lib/index.tcl:17
 msgid "Index Error"
@@ -2232,7 +2233,7 @@ msgstr "コミットから '%s' を降ろす"
 
 #: lib/index.tcl:337
 msgid "Ready to commit."
-msgstr "コミット準備完了"
+msgstr "コミット準備完了。"
 
 #: lib/index.tcl:350
 #, tcl-format
@@ -2278,7 +2279,7 @@ msgstr "キーがありません。"
 #: lib/sshkey.tcl:34
 #, tcl-format
 msgid "Found a public key in: %s"
-msgstr "公開鍵がありました: %s"
+msgstr "公開鍵がありました : %s"
 
 #: lib/sshkey.tcl:40
 msgid "Generate Key"
@@ -2303,7 +2304,7 @@ msgid ""
 "\n"
 "%s"
 msgstr ""
-"ssh-keygen を起動できません:\n"
+"ssh-keygen を起動できません :\n"
 "\n"
 "%s"
 
@@ -2343,24 +2344,24 @@ msgstr ""
 "マージ中にコミットの訂正はできません。\n"
 "\n"
 "現在はまだマージの途中です。先にこのマージを中止しないと、前のコミットの訂正"
-"はできません\n"
+"はできません。\n"
 
 #: lib/commit.tcl:48
 msgid "Error loading commit data for amend:"
-msgstr "訂正するコミットのデータを読めません:"
+msgstr "訂正するコミットのデータを読めません :"
 
 #: lib/commit.tcl:75
 msgid "Unable to obtain your identity:"
-msgstr "ユーザの正体を確認できません:"
+msgstr "本人確認ができませんでした :"
 
 #: lib/commit.tcl:80
 msgid "Invalid GIT_COMMITTER_IDENT:"
-msgstr "GIT_COMMITTER_IDENT が無効です:"
+msgstr "GIT_COMMITTER_IDENT が無効です :"
 
 #: lib/commit.tcl:129
 #, tcl-format
 msgid "warning: Tcl does not support encoding '%s'."
-msgstr "警告: Tcl はエンコーディング '%s' をサポートしていません"
+msgstr "警告: Tcl はエンコーディング '%s' をサポートしていません。"
 
 #: lib/commit.tcl:149
 msgid ""
@@ -2432,11 +2433,11 @@ msgstr ""
 
 #: lib/commit.tcl:235
 msgid "Calling pre-commit hook..."
-msgstr "コミット前フックを実行中・・・"
+msgstr "コミット前フックを実行中..."
 
 #: lib/commit.tcl:250
 msgid "Commit declined by pre-commit hook."
-msgstr "コミット前フックがコミットを拒否しました"
+msgstr "コミット前フックがコミットを拒否しました。"
 
 #: lib/commit.tcl:269
 msgid ""
@@ -2447,29 +2448,28 @@ msgid ""
 " \n"
 " Do you really want to proceed with your Commit?"
 msgstr ""
-"分離 HEAD での変更をコミットしようとしています。"
-"これは潜在的に危険な行為で、理由は別のブランチへの切り替えで"
-"変更が消失し、reflog からの事後復旧も困難となるためです。"
-"おそらくこのコミットはキャンセルし新しく作成したブランチで"
-"行うべきです。\n"
+"分離 HEAD での変更をコミットしようとしています。これは潜在的に危険な行為で、"
+"理由は別のブランチへの切り替えで変更が消失し、reflog からの事後復旧も困難とな"
+"るためです。おそらくこのコミットはキャンセルし新しく作成したブランチで行うべ"
+"きです。\n"
 "\n"
 " 本当にコミットを続行しますか？"
 
 #: lib/commit.tcl:290
 msgid "Calling commit-msg hook..."
-msgstr "コミット・メッセージ・フックを実行中・・・"
+msgstr "コミット・メッセージ・フックを実行中..."
 
 #: lib/commit.tcl:305
 msgid "Commit declined by commit-msg hook."
-msgstr "コミット・メッセージ・フックがコミットを拒否しました"
+msgstr "コミット・メッセージ・フックがコミットを拒否しました。"
 
 #: lib/commit.tcl:318
 msgid "Committing changes..."
-msgstr "変更点をコミット中・・・"
+msgstr "変更点をコミット中..."
 
 #: lib/commit.tcl:334
 msgid "write-tree failed:"
-msgstr "write-tree が失敗しました:"
+msgstr "write-tree が失敗しました :"
 
 #: lib/commit.tcl:335 lib/commit.tcl:379 lib/commit.tcl:400
 msgid "Commit failed."
@@ -2500,16 +2500,16 @@ msgstr "コミットする変更がありません。"
 
 #: lib/commit.tcl:378
 msgid "commit-tree failed:"
-msgstr "commit-tree が失敗しました:"
+msgstr "commit-tree が失敗しました :"
 
 #: lib/commit.tcl:399
 msgid "update-ref failed:"
-msgstr "update-ref が失敗しました:"
+msgstr "update-ref が失敗しました :"
 
 #: lib/commit.tcl:492
 #, tcl-format
 msgid "Created commit %s: %s"
-msgstr "コミット %s を作成しました: %s"
+msgstr "コミット %s を作成しました : %s"
 
 #: lib/browser.tcl:17
 msgid "Starting..."
@@ -2546,7 +2546,7 @@ msgstr "リモートの詳細"
 
 #: lib/remote_add.tcl:50
 msgid "Location:"
-msgstr "場所:"
+msgstr "場所 :"
 
 #: lib/remote_add.tcl:60
 msgid "Further Action"
@@ -2576,12 +2576,12 @@ msgstr "'%s' はリモート名に使えません。"
 #: lib/remote_add.tcl:124
 #, tcl-format
 msgid "Failed to add remote '%s' of location '%s'."
-msgstr "場所 '%2$s' のリモート '%1$s'の名前変更に失敗しました。"
+msgstr "リモート '%s' を追加できませんでした : 場所 '%s'。"
 
 #: lib/remote_add.tcl:133
 #, tcl-format
 msgid "Fetching the %s"
-msgstr "%s からフェッチしています"
+msgstr "%s から取得しています"
 
 #: lib/remote_add.tcl:156
 #, tcl-format
@@ -2591,11 +2591,11 @@ msgstr "リポジトリ '%s' を初期化できません。"
 #: lib/remote_add.tcl:163
 #, tcl-format
 msgid "Setting up the %s (at %s)"
-msgstr "%2$s にある %1$s をセットアップします"
+msgstr "%s の設定中 (%s で)"
 
 #: lib/line.tcl:17
 msgid "Goto Line:"
-msgstr "行番号"
+msgstr "行番号 :"
 
 #: lib/line.tcl:23
 msgid "Go"
@@ -2623,7 +2623,7 @@ msgstr "初期リビジョン"
 
 #: lib/branch_create.tcl:72
 msgid "Update Existing Branch:"
-msgstr "既存のブランチを更新:"
+msgstr "既存のブランチを更新 :"
 
 #: lib/branch_create.tcl:75
 msgid "No"
@@ -2662,7 +2662,7 @@ msgstr "スペルチェックの設定が不正です"
 #: lib/spellcheck.tcl:70
 #, tcl-format
 msgid "Reverting dictionary to %s."
-msgstr "辞書を %s に巻き戻します"
+msgstr "辞書を %s に巻き戻します。"
 
 #: lib/spellcheck.tcl:73
 msgid "Spell checker silently failed on startup"
