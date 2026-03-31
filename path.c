@@ -1327,6 +1327,32 @@ char *strip_path_suffix(const char *path, const char *suffix)
 	return offset == -1 ? NULL : xstrndup(path, offset);
 }
 
+int is_mount_point_via_stat(struct strbuf *path)
+{
+	size_t len = path->len;
+	dev_t current_dev;
+	struct stat st;
+
+	if (!strcmp("/", path->buf))
+		return 1;
+
+	strbuf_addstr(path, "/.");
+	if (lstat(path->buf, &st)) {
+		strbuf_setlen(path, len);
+		return 0;
+	}
+	current_dev = st.st_dev;
+
+	strbuf_addch(path, '.');
+	if (lstat(path->buf, &st)) {
+		strbuf_setlen(path, len);
+		return 0;
+	}
+	strbuf_setlen(path, len);
+
+	return current_dev != st.st_dev;
+}
+
 int daemon_avoid_alias(const char *p)
 {
 	int sl, ndot;
