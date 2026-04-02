@@ -819,7 +819,162 @@ On Windows, `unsigned long` is 32 bits even on 64-bit systems. Use `size_t`
 for sizes that may exceed 4GB. Be careful with format strings: use `PRIuMAX`
 with a cast for `size_t` values.
 
+## Contributing to Upstream Git via GitGitGadget
+
+### Overview
+
+The upstream Git project accepts contributions via the mailing list
+(`git@vger.kernel.org`). [GitGitGadget](https://gitgitgadget.github.io/)
+bridges GitHub PRs to the mailing list: you push a branch to your GitHub
+fork, open a PR against https://github.com/gitgitgadget/git, and
+GitGitGadget formats and sends the patches.
+
+### Workflow
+
+1. Push the topic branch to your personal fork on GitHub (the remote
+   that points at `https://github.com/<you>/git`).
+2. Open a PR from `<you>:<branch>` against `gitgitgadget/git`'s `master`.
+3. The PR title becomes the patch series subject; the PR body becomes the
+   cover letter. Use
+   `gh pr create --repo gitgitgadget/git --head <you>:<branch>`.
+4. Use `/submit` as a PR comment to send patches to the mailing list.
+5. After review feedback, update the branch, force-push, and `/submit` again.
+
+### Branch Naming
+
+Do **not** use an initials prefix (like `ds/` or `js/`). That convention is
+used by the Git maintainer when picking up topics, not by contributors. Use
+descriptive names like `tests-explicit-bare-repo`.
+
+### Cover Letter Style
+
+The PR body is the cover letter. It should be plain text (not Markdown with
+headers or bullet formatting), since it will be sent as email. Structure:
+
+- A brief subject line (the PR title, e.g. "tests: access bare repositories
+  explicitly")
+- Motivation: why is this change needed?
+- Summary: what does the series do? What patterns/techniques does it use?
+- Scope: is this part of a larger effort? If so, link to the tracking PR.
+
+Keep it factual and measured. Avoid framing changes in terms of security
+when contributing to upstream Git; frame them as robustness, correctness,
+or preparation for future defaults.
+
+### Commit Message Conventions (Upstream Git)
+
+Upstream Git commit messages follow stricter conventions than the Microsoft
+Git fork:
+
+- **Subject line**: `<area>: <description>` (lowercase after the colon).
+  The `<area>` is typically a file name without extension (e.g. `t0001`,
+  `setup`, `scalar`) or a subsystem name (e.g. `tests`, `refs`).
+- **Body**: Flowing English prose, no bullet points. Wrap at 76 columns.
+- **ASCII only**: No Unicode characters anywhere in the message.
+- **Trailers**: `Signed-off-by` is mandatory. `Assisted-by` for AI.
+- The subject line must accurately describe the diff content. If a commit
+  adds `--git-dir=.` to one invocation, do not title it "wrap bare repo
+  commands in subshell with `GIT_DIR`".
+
+### Patch Series with Dependencies
+
+When contributing a branch thicket (multiple related patch series with
+dependencies), submit the foundation series first and note the overall
+effort in the cover letter with a link to the tracking PR or `compare`
+URL. Submit dependent series after earlier ones land in `seen`.
+
+Use `git replay --onto <target> <base>..<branch>` to test whether a
+sub-branch applies cleanly to a given base (e.g., `upstream/master` or
+`upstream/seen`) without touching the working tree. By default (since
+the `--ref-action` default changed to `update`), `git replay` updates
+named refs in the range directly, producing no stdout output. Use
+`--ref-action=print` to get the old behavior of printing `update-ref`
+commands to stdout instead. Always verify that `git replay` actually
+did something by checking the reflog of the affected branches.
+
+## Working with Worktrees
+
+### General Principles
+
+Use worktrees to work on multiple topics simultaneously without stashing
+or switching branches. Keep worktrees as subdirectories of the main
+repository and add them to `.git/info/exclude` so they do not show up
+as untracked files.
+
+```bash
+git worktree add <name> <branch>
+echo "<name>" >> .git/info/exclude
+```
+
+### Rewriting Commits with `--update-refs`
+
+When rewriting history in a worktree (e.g., fixing a commit message via
+`amend!` + autosquash), use `--update-refs` so that other local branches
+pointing into the rewritten range are updated automatically:
+
+```bash
+# Create a local branch at the commit to be pushed
+git branch <push-name> <tip>
+
+# Create the amend! commit and autosquash
+git commit --allow-empty -F <message-file>
+GIT_SEQUENCE_EDITOR=true GIT_EDITOR=true \
+  git rebase -i --autosquash --update-refs <base>
+
+# Verify: tree should be identical
+git diff <push-name>@{1}..<push-name>
+
+# Force-push the updated branch
+git push <remote> <push-name> --force-with-lease
+```
+
+The `--update-refs` flag is essential: without it, only the checked-out
+branch is rewritten and other branches become stale, pointing at
+pre-rewrite commits.
+
+### Verifying Rebase Results
+
+After any rebase, verify that the tree content is unchanged (unless you
+intentionally modified it):
+
+```bash
+git diff @{1}              # Should be empty for pure rewording
+git range-diff @{1}...     # Shows per-commit changes
+```
+
+## Analyzing Branch Thickets
+
+When a branch is structured as a sequence of merged sub-branches (a
+"branch thicket"), use the merge structure to extract sub-branches:
+
+```bash
+# List the merge commits (sub-branches)
+git log --oneline --first-parent <branch>...upstream/master | grep 'Merge branch'
+
+# Extract commits for a specific sub-branch (second parent of its merge)
+git log --oneline <merge>^1..<merge>^2
+
+# Find what each sub-branch forks from
+git log -1 --format='%H %s' <first-commit-in-sub-branch>^
+```
+
+Use `git replay` to test whether sub-branches can be rebased onto a new
+base without conflicts. This replaces speculation about "overlapping files"
+with actual evidence:
+
+```bash
+git replay --onto upstream/master <old-base>..<branch>
+```
+
+If the range contains merge commits, `git replay` will fail with "replaying
+merge commits is not supported yet!" In that case, identify the linear
+commit range and replay just those commits.
+
 ## Resources
 
 - [Git for Windows](https://gitforwindows.org/)
 - [Git Internals](https://git-scm.com/book/en/v2/Git-Internals-Plumbing-and-Porcelain)
+- [GitGitGadget](https://gitgitgadget.github.io/) - Bridge GitHub PRs to
+  the Git mailing list
+- [Git Mailing List Archive](https://lore.kernel.org/git/) - Searchable
+  archive of all upstream discussion
