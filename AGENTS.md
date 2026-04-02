@@ -719,6 +719,52 @@ GIT_PAGER=cat git range-diff ...
 git --no-pager log ...
 ```
 
+### Non-interactive "Interactive" Rebases
+
+AI agents cannot drive interactive editors reliably. Instead, insert a
+`break` as the first todo command so the rebase stops immediately, then
+edit the todo file directly:
+
+```bash
+# Start the rebase, stopping before any picks execute
+GIT_SEQUENCE_EDITOR='sed -i 1ib' git rebase -ir <base>
+
+# Find and edit the todo file with the view/edit tools
+git rev-parse --git-path rebase-merge/git-rebase-todo
+
+# After editing the todo, continue (GIT_EDITOR=true suppresses the
+# editor that fixup -C and amend! commands would otherwise open)
+GIT_EDITOR=true git rebase --continue
+```
+
+### Scripted Hunk Staging
+
+`git add -p` is interactive by default, but its prompts follow a
+predictable protocol. To stage the first hunk of a file without
+human interaction:
+
+```bash
+printf '%s\n' s y q | git add -p <file>
+```
+
+The `s` splits a large hunk, `y` stages the first sub-hunk, and `q`
+quits. Adjust the sequence for different hunk selections (e.g.,
+`y y n q` to stage the first two hunks but skip the third).
+
+### Finding Which Commit to Amend
+
+When a working-tree change belongs in an earlier commit (an `hg absorb`
+workflow), use `git log -L` to find which commit last touched the
+relevant lines:
+
+```bash
+git log -L <start>,+<count>:<file>
+```
+
+This shows the full history of a line range, making it easy to identify
+the commit whose title you need for a `fixup!` commit. This is far more
+surgical than grepping through full diffs.
+
 ### Fixup Commits
 
 Downstream patches sometimes require adjustment due to changes in the
