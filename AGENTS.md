@@ -831,6 +831,22 @@ terminal sessions of yore:
 - **Tabs for indentation**: The codebase uses tabs, not spaces.
 - **No trailing whitespace**: Clean up your lines.
 
+**Pre-commit checklist.** Run all three checks before every commit:
+
+```bash
+git diff --check &&
+git diff --no-color | LC_ALL=C grep '[^ -~]' &&
+  echo "ERROR: non-ASCII characters found" &&
+git diff --no-color | grep '^+' | sed 's/\t/        /g' |
+  grep '.\{82\}' &&
+  echo "ERROR: lines exceed 80 columns"
+```
+
+The first command catches whitespace errors. If either of the latter
+two produces output, fix the offending lines before committing. Note
+that these checks apply to commit messages as well (wrap at 76 columns
+for messages, 80 for code).
+
 See `Documentation/CodingGuidelines` for the full set of conventions.
 
 ### strbuf patterns
