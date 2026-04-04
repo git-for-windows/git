@@ -230,6 +230,30 @@ Enable tracing to see command execution patterns:
 GIT_TRACE2_EVENT=/path/to/trace.txt git <command>
 ```
 
+### Instrumenting Git Internals During Tests
+
+When adding debug output to Git's C code during test investigation,
+`fprintf(stderr, ...)` from git subprocesses spawned by the test framework
+is typically swallowed (redirected or discarded by the test harness). Use
+Trace2 instead:
+
+```c
+trace2_data_intmax("index", NULL, "my_debug/cache_nr", istate->cache_nr);
+trace2_data_string("index", NULL, "my_debug/state", some_string);
+```
+
+Then run the test with `GIT_TRACE2_EVENT` or `GIT_TRACE2_PERF` pointing to
+a file, and grep the output. This integrates with Git's existing tracing
+infrastructure and survives the test framework's output management.
+
+As a last resort (e.g. when Trace2 is not initialized yet at the point you
+need to instrument), write to a fixed file path:
+
+```c
+FILE *f = fopen("/tmp/debug.log", "a");
+if (f) { fprintf(f, "state: %u\n", value); fclose(f); }
+```
+
 ### Comparing Branches After Rebase
 
 ```bash
@@ -264,6 +288,32 @@ away from the original branch point the commit is cherry-picked to, so it
 often makes sense to squash both old and new downstream changes, and then
 to "interpolate" between them when encountering merge conflicts).
 
+### Bisecting Failures in `seen`
+
+When a topic passes on its own but fails after being merged to `seen`, the
+failure is caused by interaction with another in-flight topic. To identify
+the culprit:
+
+1. Fetch the exact `seen` commit from the failing CI run (get the SHA from
+   the workflow run metadata via the GitHub API).
+2. Use a worktree checked out at that `seen` commit.
+3. Bisect the first-parent history between `upstream/master` and `seen~1`
+   (excluding the topic's own merge). At each bisection step, merge the
+   topic in temporarily, build, run the test, then undo the merge.
+4. Write a `git bisect run` script that automates this. Key pitfalls:
+   - The script must `unset` test environment variables (especially
+     `GIT_TEST_SPLIT_INDEX`) before cleanup operations like
+     `git checkout -f`, otherwise the worktree's own index can get
+     corrupted.
+   - Use `git checkout -f "$ORIG"` (not `git reset --hard`) to undo the
+     temporary merge, since `reset --hard` under split-index can corrupt.
+   - Save the current commit OID at the start (`ORIG=$(git rev-parse HEAD)`)
+     because `ORIG_HEAD` is unreliable during bisect.
+   - On merge conflict, return 125 (skip) and `git merge --abort`.
+5. Store the alias for running with the full set of CI test variables as a
+   repository-local alias (to avoid repeating the long export list and to
+   allow the user to approve the tool call once).
+
 ### CI/Workflow Failure Investigation
 
 When a CI workflow fails, the debugging process has a high cost per iteration.
@@ -295,6 +345,23 @@ locally with faster turnaround:
 - For build failures: replicate the build environment and commands.
 - For macOS issues: if you lack a Mac, at least trace the Makefile logic
   to understand what flags should be set and why.
+- For test failures that only appear in specific CI jobs (like
+  `linux-TEST-vars`): reproduce with the _exact_ set of environment
+  variables that job sets. Check `ci/run-build-and-tests.sh` for the
+  job's variable block. Do not assume a single variable (e.g.
+  `GIT_TEST_SPLIT_INDEX`) is sufficient; other variables may contribute
+  to the failure path.
+- When a test fails in `seen` but not on the topic branch alone, check
+  out the exact `seen` commit from the failing CI run (get the SHA from
+  the workflow run metadata) and reproduce against that. The interaction
+  with other in-flight topics is the likely cause.
+
+**5. Do not assume CI coverage from platform support.** When asking "why
+does platform X not see this bug?", verify whether CI actually tests that
+combination on that platform. For example, `GIT_TEST_SPLIT_INDEX=yes` is
+only set by `linux-TEST-vars`; there is no equivalent `osx-TEST-vars` or
+`windows-TEST-vars` job. A bug that only manifests under split-index
+testing may be present on all platforms but only caught on Linux.
 
 **5. Add comprehensive diagnostics on first attempt.** If you must push to
 CI to test, make that push count:
