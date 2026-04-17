@@ -609,6 +609,6 @@ finish:
 	free(ps_matched);
 	dir_clear(&dir);
 	clear_pathspec(&pathspec);
-	enable_fscache(0);
+	disable_fscache();
 	return exit_status;
 }
