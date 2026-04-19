@@ -509,8 +509,19 @@ void set_die_is_recursing_routine(int (*routine)(void));
  *
  *  See the skip_prefix macro below for an example of use.
  */
+/*
+ * Coverity's EVALUATION_ORDER checker mistakes the dead ternary branch
+ * for a live side effect: in skip_prefix(p, "x", &p) the expansion
+ * contains *(out) = (in) in a 0-conditional, which Coverity reads as a
+ * write to p while p is also read as the first argument.  Simplify the
+ * macro for Coverity to suppress 120+ false positives.
+ */
+#ifdef __COVERITY__
+#define CONST_OUTPARAM(in, out) (out)
+#else
 #define CONST_OUTPARAM(in, out) \
 	((const char **)(0 ? ((*(out) = (in)),(out)) : (out)))
+#endif
 
 /*
  * If the string "str" begins with the string found in "prefix", return true.
