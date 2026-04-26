@@ -1829,7 +1829,7 @@ int cmd_main(int argc, const char **argv)
 
 	/* Remove a remote branch if -d or -D was specified */
 	if (delete_branch) {
-		const char *branch = rs.items[i].src;
+		const char *branch = rs.items[0].src;
 		if (delete_remote_branch(branch, force_delete) == -1) {
 			fprintf(stderr, "Unable to delete remote branch %s\n",
 				branch);
