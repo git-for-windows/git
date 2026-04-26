@@ -2633,6 +2633,8 @@ static int remote_tracking(struct remote *remote, const char *refname,
 {
 	char *dst;
 
+	if (!remote)
+		return -1; /* no remote to look up tracking ref */
 	dst = apply_refspecs(&remote->fetch, refname);
 	if (!dst)
 		return -1; /* no tracking ref for refname at remote */
