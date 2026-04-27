@@ -146,3 +146,11 @@ and the name as (depending on your mood):
 [Documentation/SubmittingPatches]: Documentation/SubmittingPatches
 [Documentation/CodingGuidelines]: Documentation/CodingGuidelines
 [po/README.md]: po/README.md
+
+## 💰 Bounty Contribution
+
+- **Task:** After exiting commit editor whole console get cleared
+- **Reward:** $1
+- **Source:** GitHub-Paid
+- **Date:** 2026-04-28
+
