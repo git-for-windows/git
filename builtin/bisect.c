@@ -660,6 +660,11 @@ static int bisect_successful(struct bisect_terms *terms)
 
 	refs_read_ref(get_main_ref_store(the_repository), bad_ref, &oid);
 	commit = lookup_commit_reference_by_name(bad_ref);
+	if (!commit) {
+		res = error(_("could not find commit for '%s'"), bad_ref);
+		free(bad_ref);
+		return res;
+	}
 	repo_format_commit_message(the_repository, commit, "%s", &commit_name,
 				   &pp);
 
