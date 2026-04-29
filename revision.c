@@ -1903,8 +1903,13 @@ static int add_parents_only(struct rev_info *revs, const char *arg_, int flags,
 		return 0;
 	while (1) {
 		it = get_reference(revs, arg, &oid, 0);
-		if (!it && revs->ignore_missing)
-			return 0;
+		if (!it) {
+			if (revs->ignore_missing)
+				return 0;
+			if (revs->do_not_die_on_missing_objects)
+				return 0;
+			return -1;
+		}
 		if (it->type != OBJ_TAG)
 			break;
 		if (!((struct tag*)it)->tagged)
