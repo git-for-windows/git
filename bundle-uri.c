@@ -378,7 +378,7 @@ cleanup:
 	if (child_in)
 		fclose(child_in);
 	if (finish_command(&cp))
-		return 1;
+		result = 1;
 	if (child_out)
 		fclose(child_out);
 	return result;
