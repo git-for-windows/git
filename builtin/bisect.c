@@ -808,9 +808,11 @@ static enum bisect_error bisect_start(struct bisect_terms *terms, int argc,
 	 */
 	head = refs_resolve_ref_unsafe(get_main_ref_store(the_repository),
 				       "HEAD", 0, &head_oid, &flags);
-	if (!head)
+	if (!head) {
 		if (repo_get_oid(the_repository, "HEAD", &head_oid))
 			return error(_("bad HEAD - I need a HEAD"));
+		head = "HEAD";
+	}
 
 	/*
 	 * Check if we are bisecting
