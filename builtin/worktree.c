@@ -945,14 +945,17 @@ static int add(int ac, const char **av, const char *prefix,
 		strvec_push(&cp.args, branch);
 		if (opt_track)
 			strvec_push(&cp.args, opt_track);
-		if (run_command(&cp))
-			return -1;
+		if (run_command(&cp)) {
+			ret = -1;
+			goto cleanup;
+		}
 		branch = new_branch;
 	} else if (opt_track) {
 		die(_("--[no-]track can only be used if a new branch is created"));
 	}
 
 	ret = add_worktree(path, branch, &opts);
+cleanup:
 	free(path);
 	free(opt_track);
 	free(branch_to_free);

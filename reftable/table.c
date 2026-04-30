@@ -709,6 +709,10 @@ out:
 		if (ti)
 			table_iter_close(ti);
 		reftable_free(ti);
+		if (filter) {
+			reftable_buf_release(&filter->oid);
+			reftable_free(filter);
+		}
 	}
 	return err;
 }
