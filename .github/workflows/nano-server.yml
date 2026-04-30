@@ -14,8 +14,8 @@ jobs:
       IMAGE: mcr.microsoft.com/powershell:nanoserver-ltsc2022
 
     steps:
-      - uses: actions/checkout@v5
-      - uses: git-for-windows/setup-git-for-windows-sdk@v1
+      - uses: actions/checkout@v6
+      - uses: git-for-windows/setup-git-for-windows-sdk@v2
       - name: build Git
         shell: bash
         run: make -j15
