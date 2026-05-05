@@ -758,7 +758,6 @@ ifeq ($(uname_S),MINGW)
 	HAVE_LIBCHARSET_H = YesPlease
 	USE_GETTEXT_SCHEME = fallthrough
 	USE_LIBPCRE = YesPlease
-	USE_MIMALLOC = YesPlease
 	NO_PYTHON =
 endif
 ifeq ($(uname_S),QNX)
