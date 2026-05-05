@@ -203,7 +203,8 @@ static int write_one_object(struct odb_source *source,
 	return 0;
 errout:
 	error_errno(_("failed to write loose object index %s"), path.buf);
-	close(fd);
+	if (fd >= 0)
+		close(fd);
 	rollback_lock_file(&lock);
 	strbuf_release(&buf);
 	strbuf_release(&path);
