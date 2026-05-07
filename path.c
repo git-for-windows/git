@@ -18,6 +18,45 @@
 #include "lockfile.h"
 #include "exec-cmd.h"
 
+void translate_wsl_path(char *path)
+{
+#ifdef GIT_WINDOWS_NATIVE
+	static const struct {
+		const char *prefix;
+		size_t      prefix_len;
+	} posix_prefixes[] = {
+		{ "/mnt/",      5 },
+		{ "/cygdrive/", 10 },
+	};
+	size_t i, len;
+
+	if (!path || !path[0])
+		return;
+	len = strlen(path);
+
+	for (i = 0; i < ARRAY_SIZE(posix_prefixes); i++) {
+		size_t pl = posix_prefixes[i].prefix_len;
+		char drive;
+
+		if (len < pl + 1)
+			continue;
+		if (memcmp(path, posix_prefixes[i].prefix, pl) != 0)
+			continue;
+		drive = path[pl];
+		if (!isalpha((unsigned char)drive))
+			continue;
+		if (len > pl + 1 && path[pl + 1] != '/' && path[pl + 1] != '\\')
+			continue;
+
+		/* In-place rewrite to "<drive>:" + tail. Result is shorter. */
+		path[0] = drive;
+		path[1] = ':';
+		memmove(path + 2, path + pl + 1, len - pl);
+		return;
+	}
+#endif
+}
+
 static int get_st_mode_bits(const char *path, int *mode)
 {
 	struct stat st;
