@@ -859,6 +859,53 @@ gets squashed into.
 
 Run affected tests before finalizing.
 
+### `amend!` Commits
+
+A `fixup!` commit keeps the target's commit message and merely combines
+its diff into the target. An `amend!` commit additionally **replaces**
+the target's commit message with its own body. Use `amend!` when the
+fix changes the meaning of the target sufficiently that the original
+subject or body is no longer accurate, or when the goal is to align a
+downstream commit with a specific upstream replacement.
+
+The format is rigid: the first line of an `amend!` commit must be
+exactly `amend! <subject of target>`, followed by a blank line and then
+the **new** commit message that should replace the target's, starting
+with the new subject line:
+
+```
+amend! mingw: use mimalloc
+
+mingw: stop using nedmalloc
+
+The vendored nedmalloc allocator under compat/nedmalloc/ has been
+unmaintained upstream...
+```
+
+After autosquash, the resulting commit has the new subject (`mingw:
+stop using nedmalloc`), the new body, and a diff that is the
+composition of the target's diff and the `amend!`'s diff. Crafting the
+`amend!` diff so that the composition equals a known upstream commit's
+diff is the canonical way to align a downstream branch-thicket commit
+with an in-flight upstream replacement: when the next merging-rebase
+picks up the upstream commit, the byte-identical downstream commit
+collapses into it cleanly.
+
+### PRs Composed Entirely of `fixup!` and `amend!` Commits
+
+Adjusting or removing a feature that lives in the branch thicket is
+often best expressed as a PR that consists *only* of `fixup!` and
+`amend!` commits targeting the existing thicket commits. Each pair
+autosquashes during the next merging-rebase. Pairs whose diffs cancel
+exactly produce empty commits, which the rebase drops with
+`--empty=drop`. The end state is *as if the original commits had been
+edited or removed in place*, while preserving review-friendly atomic
+patches in the PR.
+
+This is the preferred pattern for reverting a multi-commit downstream
+feature. Order the fixups in **reverse** of the originals so each
+revert applies cleanly to the worktree as you build the series.
+
 ### Common Adaptation Patterns
 
 **Struct field moves**: When upstream moves fields between structs, update
@@ -947,6 +994,54 @@ Choose descriptive variable names (`header` for pack headers, not generic
 On Windows, `unsigned long` is 32 bits even on 64-bit systems. Use `size_t`
 for sizes that may exceed 4GB. Be careful with format strings: use `PRIuMAX`
 with a cast for `size_t` values.
+
+## Contributing to Git for Windows
+
+The primary contribution path for this fork is a PR against
+`git-for-windows/git`'s `main` branch. The repository is laid out as a
+branch thicket on top of an upstream Git base; see
+[Merging-Rebases](#merging-rebases) and
+[Analyzing Branch Thickets](#analyzing-branch-thickets) for the
+mechanics.
+
+### Opening a PR
+
+Push the topic branch to a personal fork on GitHub, then:
+
+```bash
+gh pr create \
+  --repo git-for-windows/git \
+  --base main \
+  --head <you>:<branch> \
+  --title "<subject>" \
+  --body-file <path/to/body.md>
+```
+
+Unlike upstream contributions, the PR body is rendered as Markdown on
+GitHub, not sent as email. Use the formatting that aids review:
+fenced code blocks, tables, links to workflow runs.
+
+### When the PR Adjusts the Thicket Itself
+
+If the PR's purpose is to edit, remove, or replace existing
+branch-thicket commits, the natural form is a series of `fixup!` or
+`amend!` commits targeting the affected originals. See
+[Fixup Commits](#fixup-commits),
+[`amend!` Commits](#amend-commits), and
+[PRs Composed Entirely of `fixup!` and `amend!` Commits](#prs-composed-entirely-of-fixup-and-amend-commits).
+The merging-rebase that produces the next `main` autosquashes these
+into the thicket; the PR exists for review of the individual
+adjustments.
+
+### When an Upstream Patch Will Replace a Thicket Commit
+
+If an upstream patch is in flight (for instance, on `gitgitgadget/git`
+in `seen` or `next`) that replaces a downstream thicket commit, an
+`amend!` commit whose body is a verbatim copy of the upstream commit
+message and whose diff aligns the autosquashed target with the
+upstream commit's diff is the canonical pattern. The next
+merging-rebase that picks up the upstream commit will recognize the
+two as byte-identical and collapse them.
 
 ## Contributing to Upstream Git via GitGitGadget
 
