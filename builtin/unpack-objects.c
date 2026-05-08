@@ -533,7 +533,7 @@ static void unpack_one(unsigned nr)
 {
 	unsigned shift;
 	unsigned char *pack;
-	unsigned long size, c;
+	size_t size, c;
 	enum object_type type;
 
 	obj_list[nr].offset = consumed_bytes;
@@ -545,6 +545,8 @@ static void unpack_one(unsigned nr)
 	size = (c & 15);
 	shift = 4;
 	while (c & 0x80) {
+		if ((bitsizeof(size_t) - 7) < shift)
+			die(_("object size too large for this platform"));
 		pack = fill(1);
 		c = *pack;
 		use(1);

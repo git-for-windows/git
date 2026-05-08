@@ -37,7 +37,7 @@ static const char index_pack_usage[] =
 
 struct object_entry {
 	struct pack_idx_entry idx;
-	unsigned long size;
+	size_t size;
 	unsigned char hdr_size;
 	signed char type;
 	signed char real_type;
@@ -469,7 +469,7 @@ static int is_delta_type(enum object_type type)
 	return (type == OBJ_REF_DELTA || type == OBJ_OFS_DELTA);
 }
 
-static void *unpack_entry_data(off_t offset, unsigned long size,
+static void *unpack_entry_data(off_t offset, size_t size,
 			       enum object_type type, struct object_id *oid)
 {
 	static char fixed_buf[8192];
@@ -524,7 +524,7 @@ static void *unpack_raw_entry(struct object_entry *obj,
 			      struct object_id *oid)
 {
 	unsigned char *p;
-	unsigned long size, c;
+	size_t size, c;
 	off_t base_offset;
 	unsigned shift;
 	void *data;
@@ -539,6 +539,8 @@ static void *unpack_raw_entry(struct object_entry *obj,
 	size = (c & 15);
 	shift = 4;
 	while (c & 0x80) {
+		if ((bitsizeof(size_t) - 7) < shift)
+			die(_("object size too large for this platform"));
 		p = fill(1);
 		c = *p;
 		use(1);
