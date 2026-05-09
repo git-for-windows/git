@@ -290,7 +290,8 @@ static void process_parent(struct last_modified *lm,
 {
 	struct bitmap *active_p;
 
-	repo_parse_commit(lm->rev.repo, parent);
+	if (repo_parse_commit(lm->rev.repo, parent))
+		return;
 	active_p = active_paths_for(lm, parent);
 
 	/*
@@ -414,13 +415,15 @@ static int last_modified_run(struct last_modified *lm)
 		 * Otherwise, make sure that 'c' isn't reachable from anything
 		 * in the '--not' queue.
 		 */
-		repo_parse_commit(lm->rev.repo, c);
+		if (repo_parse_commit(lm->rev.repo, c))
+			continue;
 
 		while (not_queue.nr) {
 			struct commit_list *np;
 			struct commit *n = prio_queue_get(&not_queue);
 
-			repo_parse_commit(lm->rev.repo, n);
+			if (repo_parse_commit(lm->rev.repo, n))
+				continue;
 
 			for (np = n->parents; np; np = np->next) {
 				if (!(np->item->object.flags & PARENT2)) {
