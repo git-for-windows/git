@@ -523,6 +523,10 @@ static int open_midx_bitmap_1(struct bitmap_index *bitmap_git,
 
 	if (midx->base_midx) {
 		bitmap_git->base = prepare_midx_bitmap_git(midx->base_midx);
+		if (!bitmap_git->base) {
+			warning(_("could not open bitmap for base MIDX"));
+			goto cleanup;
+		}
 		bitmap_git->base_nr = bitmap_git->base->base_nr + 1;
 	} else {
 		bitmap_git->base_nr = 0;

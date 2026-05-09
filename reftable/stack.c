@@ -171,7 +171,8 @@ void reftable_stack_destroy(struct reftable_stack *st)
 		st->merged = NULL;
 	}
 
-	err = read_lines(st->list_file, &names);
+	if (st->list_file)
+		err = read_lines(st->list_file, &names);
 	if (err < 0) {
 		REFTABLE_FREE_AND_NULL(names);
 	}
