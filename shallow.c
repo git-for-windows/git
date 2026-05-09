@@ -367,7 +367,7 @@ static int write_one_shallow(const struct commit_graft *graft, void *cb_data)
 		if (!c || !(c->object.flags & SEEN)) {
 			if (data->flags & VERBOSE)
 				printf("Removing %s from .git/shallow\n",
-				       oid_to_hex(&c->object.oid));
+				       oid_to_hex(&graft->oid));
 			return 0;
 		}
 	}
