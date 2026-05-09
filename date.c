@@ -1272,7 +1272,13 @@ static const char *approxidate_alpha(const char *date, struct tm *tm, struct tm 
 	while (tl->type) {
 		size_t len = strlen(tl->type);
 		if (match_string(date, tl->type) >= len-1) {
-			update_tm(tm, now, tl->length * *num);
+			time_t length = tl->length, num_t = *num;
+			time_t max_val = is_unsigned_type(length)
+				? maximum_unsigned_value_of_type(length)
+				: maximum_signed_value_of_type(length);
+			time_t seconds = mult_overflows(length, num_t)
+				? max_val : length * num_t;
+			update_tm(tm, now, seconds);
 			*num = 0;
 			*touched = 1;
 			return end;

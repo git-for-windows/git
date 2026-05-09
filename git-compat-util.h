@@ -85,6 +85,18 @@ struct strbuf;
 
 #define bitsizeof(x)  (CHAR_BIT * sizeof(x))
 
+#if GIT_GNUC_PREREQ(3, 1)
+#define is_unsigned_type(a) ((__typeof__(a))-1 >= 0)
+#else
+/*
+ * Without __typeof__, we cannot portably determine signedness from a
+ * value alone. Fall back to assuming signed, which is correct for all
+ * current callers (time_t, off_t, ssize_t are signed on all platforms
+ * Git targets).
+ */
+#define is_unsigned_type(a) 0
+#endif
+
 #define maximum_signed_value_of_type(a) \
     (INTMAX_MAX >> (bitsizeof(intmax_t) - bitsizeof(a)))
 
@@ -110,6 +122,28 @@ struct strbuf;
  */
 #define unsigned_mult_overflows(a, b) \
     ((a) && (b) > maximum_unsigned_value_of_type(a) / (a))
+
+/*
+ * Returns true if the multiplication of "a" and "b" will
+ * overflow or underflow a signed type. The types of "a" and "b"
+ * must match and must be signed. Note that this macro evaluates
+ * both "a" and "b" twice!
+ */
+#define signed_mult_overflows(a, b) \
+    (((a) > 0 && (b) > 0 && (a) > maximum_signed_value_of_type(a) / (b)) || \
+     ((a) < 0 && (b) < 0 && (a) < maximum_signed_value_of_type(a) / (b)) || \
+     ((a) > 0 && (b) < 0 && (b) < -(maximum_signed_value_of_type(a) / (a))) || \
+     ((a) < 0 && (b) > 0 && (a) < -(maximum_signed_value_of_type(b) / (b))))
+
+/*
+ * Returns true if the multiplication of "a" and "b" will overflow,
+ * regardless of whether the type is signed or unsigned.  Note that
+ * this macro evaluates both "a" and "b" twice!
+ */
+#define mult_overflows(a, b) \
+    (is_unsigned_type(a) \
+     ? unsigned_mult_overflows(a, b) \
+     : signed_mult_overflows(a, b))
 
 /*
  * Returns true if the left shift of "a" by "shift" bits will
@@ -502,8 +536,19 @@ void set_die_is_recursing_routine(int (*routine)(void));
  *
  *  See the skip_prefix macro below for an example of use.
  */
+/*
+ * Coverity's EVALUATION_ORDER checker mistakes the dead ternary branch
+ * for a live side effect: in skip_prefix(p, "x", &p) the expansion
+ * contains *(out) = (in) in a 0-conditional, which Coverity reads as a
+ * write to p while p is also read as the first argument.  Simplify the
+ * macro for Coverity to suppress 120+ false positives.
+ */
+#ifdef __COVERITY__
+#define CONST_OUTPARAM(in, out) (out)
+#else
 #define CONST_OUTPARAM(in, out) \
 	((const char **)(0 ? ((*(out) = (in)),(out)) : (out)))
+#endif
 
 /*
  * If the string "str" begins with the string found in "prefix", return true.
@@ -743,6 +788,10 @@ static inline uint64_t u64_add(uint64_t a, uint64_t b)
 # else
 #  define MAX_IO_SIZE MAX_IO_SIZE_DEFAULT
 # endif
+#endif
+
+#ifndef SSIZE_MAX
+# define SSIZE_MAX ((ssize_t)(((size_t)-1) >> 1))
 #endif
 
 #ifdef HAVE_ALLOCA_H
