@@ -951,6 +951,35 @@ void read_gitfile_error_die(int error_code, const char *path)
 	}
 }
 
+#if (defined _WIN32 || defined __WIN32__)
+static int ensure_valid_ownership(const char *gitfile,
+				  const char *worktree, const char *gitdir,
+				  struct strbuf *report);
+
+static int is_invalid_dotgit_path(const char *gitfile, const char *potential_gitdir)
+{
+	WCHAR wpath[MAX_PATH];
+	struct strbuf dir = STRBUF_INIT;
+	int ret;
+
+	if (xutftowcs_path(wpath, potential_gitdir) < 0)
+		return 1;
+
+	/* Do not leak NTLM hashes, UNC paths etc. are generally problematic */
+	if (wpath[0] != L'\\' || is_valid_windows_path_element(wpath[1]))
+		return 0;
+
+	strbuf_addstr(&dir, gitfile);
+	strbuf_strip_file_from_path(&dir);
+
+	ret = ensure_valid_ownership(gitfile, dir.buf, potential_gitdir, NULL) ? 0 : 1;
+
+	strbuf_release(&dir);
+
+	return ret;
+}
+#endif
+
 /*
  * Try to read the location of the git directory from the .git file,
  * return path to git directory if found. The return value comes from
@@ -1024,11 +1053,20 @@ const char *read_gitfile_gently(const char *path, int *return_error_code)
 		free(buf);
 		buf = dir;
 	}
+#if (defined _WIN32 || defined __WIN32__)
+	if (is_dir_sep(dir[0]) && is_invalid_dotgit_path(path, dir)) {
+		strbuf_reset(&realpath);
+		strbuf_add(&realpath, dir, strlen(dir));
+		path = realpath.buf;
+		goto cleanup_return;
+	}
+#endif
 	if (!is_git_directory(dir)) {
 		error_code = READ_GITFILE_ERR_NOT_A_REPO;
 		goto cleanup_return;
 	}
 
+	strbuf_reset(&realpath);
 	strbuf_realpath(&realpath, dir, 1);
 	path = realpath.buf;
 
