@@ -921,13 +921,12 @@ static int count_objects(const char *path UNUSED, struct oid_array *oids,
 
 	for (size_t i = 0; i < oids->nr; i++) {
 		struct object_info oi = OBJECT_INFO_INIT;
-		unsigned long inflated;
-		size_t inflated_st = 0;
+		size_t inflated;
 		struct commit *commit;
 		void *content = NULL;
 		off_t disk;
 
-		oi.sizep = &inflated_st;
+		oi.sizep = &inflated;
 		oi.disk_sizep = &disk;
 		if (type == OBJ_TREE)
 			oi.contentp = &content;
@@ -936,7 +935,6 @@ static int count_objects(const char *path UNUSED, struct oid_array *oids,
 						  OBJECT_INFO_SKIP_FETCH_OBJECT |
 						  OBJECT_INFO_QUICK) < 0)
 			continue;
-		inflated = cast_size_t_to_ulong(inflated_st);
 
 		switch (type) {
 		case OBJ_TAG:
