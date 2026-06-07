@@ -260,8 +260,8 @@ static int exclude_promisor_objects_best_effort;
 
 static int use_delta_islands;
 
-static unsigned long delta_cache_size = 0;
-static unsigned long max_delta_cache_size = DEFAULT_DELTA_CACHE_SIZE;
+static size_t delta_cache_size = 0;
+static size_t max_delta_cache_size = DEFAULT_DELTA_CACHE_SIZE;
 static unsigned long cache_max_small_delta_size = 1000;
 
 static unsigned long window_memory_limit = 0;
@@ -353,7 +353,8 @@ static void index_commit_for_bitmap(struct commit *commit)
 
 static void *get_delta(struct object_entry *entry)
 {
-	unsigned long size, base_size, delta_size;
+	unsigned long size, base_size;
+	size_t delta_size;
 	void *buf, *base_buf, *delta_buf;
 	enum object_type type;
 	size_t size_st = 0, base_size_st = 0;
@@ -487,7 +488,7 @@ static void copy_pack_data(struct hashfile *f,
 		off_t len)
 {
 	unsigned char *in;
-	unsigned long avail;
+	size_t avail;
 
 	while (len) {
 		in = use_pack(p, w_curs, offset, &avail);
@@ -1916,7 +1917,7 @@ struct pbase_tree_cache {
 	int ref;
 	int temporary;
 	void *tree_data;
-	unsigned long tree_size;
+	size_t tree_size;
 };
 
 static struct pbase_tree_cache *(pbase_tree_cache[256]);
@@ -1943,8 +1944,7 @@ static struct pbase_tree_cache *pbase_tree_get(const struct object_id *oid)
 {
 	struct pbase_tree_cache *ent, *nent;
 	void *data;
-	unsigned long size;
-	size_t size_st = 0;
+	size_t size;
 	enum object_type type;
 	int neigh;
 	int my_ix = pbase_tree_cache_ix(oid);
@@ -1972,8 +1972,7 @@ static struct pbase_tree_cache *pbase_tree_get(const struct object_id *oid)
 	/* Did not find one.  Either we got a bogus request or
 	 * we need to read and perhaps cache.
 	 */
-	data = odb_read_object(the_repository->objects, oid, &type, &size_st);
-	size = cast_size_t_to_ulong(size_st);
+	data = odb_read_object(the_repository->objects, oid, &type, &size);
 	if (!data)
 		return NULL;
 	if (type != OBJ_TREE) {
@@ -2127,16 +2126,14 @@ static void add_preferred_base(struct object_id *oid)
 {
 	struct pbase_tree *it;
 	void *data;
-	unsigned long size;
-	size_t size_st = 0;
+	size_t size;
 	struct object_id tree_oid;
 
 	if (window <= num_preferred_base++)
 		return;
 
 	data = odb_read_object_peeled(the_repository->objects, oid,
-				      OBJ_TREE, &size_st, &tree_oid);
-	size = cast_size_t_to_ulong(size_st);
+				      OBJ_TREE, &size, &tree_oid);
 	if (!data)
 		return;
 
@@ -2259,7 +2256,7 @@ static void check_object(struct object_entry *entry, uint32_t object_index)
 		struct object_id base_ref;
 		struct object_entry *base_entry;
 		unsigned long used, used_0;
-		unsigned long avail;
+		size_t avail;
 		off_t ofs;
 		unsigned char *buf, c;
 		enum object_type type;
@@ -2687,8 +2684,8 @@ struct unpacked {
 	unsigned depth;
 };
 
-static int delta_cacheable(unsigned long src_size, unsigned long trg_size,
-			   unsigned long delta_size)
+static int delta_cacheable(size_t src_size, size_t trg_size,
+			   size_t delta_size)
 {
 	if (max_delta_cache_size && delta_cache_size + delta_size > max_delta_cache_size)
 		return 0;
@@ -2771,8 +2768,8 @@ size_t oe_get_size_slow(struct packing_data *pack,
 	struct pack_window *w_curs;
 	unsigned char *buf;
 	enum object_type type;
-	unsigned long used, avail;
-	size_t size;
+	unsigned long used;
+	size_t avail, size;
 
 	if (e->type_ != OBJ_OFS_DELTA && e->type_ != OBJ_REF_DELTA) {
 		size_t sz;
@@ -2803,11 +2800,12 @@ size_t oe_get_size_slow(struct packing_data *pack,
 }
 
 static int try_delta(struct unpacked *trg, struct unpacked *src,
-		     unsigned max_depth, unsigned long *mem_usage)
+		     unsigned max_depth, size_t *mem_usage)
 {
 	struct object_entry *trg_entry = trg->entry;
 	struct object_entry *src_entry = src->entry;
-	unsigned long trg_size, src_size, delta_size, sizediff, max_size, sz;
+	unsigned long trg_size, src_size, sizediff, max_size, sz;
+	size_t delta_size;
 	unsigned ref_depth;
 	enum object_type type;
 	void *delta_buf;
@@ -2971,9 +2969,9 @@ static unsigned int check_delta_limit(struct object_entry *me, unsigned int n)
 	return m;
 }
 
-static unsigned long free_unpacked(struct unpacked *n)
+static size_t free_unpacked(struct unpacked *n)
 {
-	unsigned long freed_mem = sizeof_delta_index(n->index);
+	size_t freed_mem = sizeof_delta_index(n->index);
 	free_delta_index(n->index);
 	n->index = NULL;
 	if (n->data) {
@@ -2990,7 +2988,7 @@ static void find_deltas(struct object_entry **list, unsigned *list_size,
 {
 	uint32_t i, idx = 0, count = 0;
 	struct unpacked *array;
-	unsigned long mem_usage = 0;
+	size_t mem_usage = 0;
 
 	CALLOC_ARRAY(array, window);
 
