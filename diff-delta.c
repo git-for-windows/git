@@ -302,7 +302,7 @@ void free_delta_index(struct delta_index *index)
 	free(index);
 }
 
-unsigned long sizeof_delta_index(struct delta_index *index)
+size_t sizeof_delta_index(struct delta_index *index)
 {
 	if (index)
 		return index->memsize;
