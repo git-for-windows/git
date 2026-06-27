@@ -199,6 +199,7 @@ static ssize_t get_go_version(const char *path, char *go_version, size_t go_vers
 			if (size < 32 + 1 + 2 + 1 || !pointer)
 				continue;
 
+			free(p);
 			p = malloc(size);
 
 			if (!p || read_at(fd, p, pointer, size) < 0)
