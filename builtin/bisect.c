@@ -1308,6 +1308,11 @@ static int bisect_run(struct bisect_terms *terms, int argc, const char **argv)
 
 		fflush(stdout);
 		saved_stdout = dup(1);
+		if (saved_stdout < 0) {
+			res = error_errno(_("could not duplicate stdout"));
+			close(temporary_stdout_fd);
+			break;
+		}
 		dup2(temporary_stdout_fd, 1);
 
 		res = bisect_state(terms, 1, &new_state);
