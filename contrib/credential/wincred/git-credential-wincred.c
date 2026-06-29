@@ -208,8 +208,8 @@ static void store_credential(void)
 
 	if (oauth_refresh_token) {
 		wlen = _scwprintf(L"%s\r\noauth_refresh_token=%s", password, oauth_refresh_token);
-		secret = xmalloc(sizeof(WCHAR) * wlen);
-		_snwprintf_s(secret, sizeof(WCHAR) * wlen, wlen, L"%s\r\noauth_refresh_token=%s", password, oauth_refresh_token);
+		secret = xmalloc((wlen + 1) * sizeof(WCHAR));
+		_snwprintf_s(secret, wlen + 1, wlen, L"%s\r\noauth_refresh_token=%s", password, oauth_refresh_token);
 	} else {
 		secret = _wcsdup(password);
 	}
