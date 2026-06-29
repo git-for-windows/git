@@ -219,10 +219,13 @@ static void read_rr(struct repository *r, struct string_list *rr)
 			variant = 0;
 			path = buf.buf + hexsz;
 		} else {
+			long parsed;
+
 			errno = 0;
-			variant = strtol(buf.buf + hexsz + 1, &path, 10);
-			if (errno)
+			parsed = strtol(buf.buf + hexsz + 1, &path, 10);
+			if (errno || parsed < 0 || parsed >= INT_MAX)
 				die(_("corrupt MERGE_RR"));
+			variant = parsed;
 		}
 		if (*(path++) != '\t')
 			die(_("corrupt MERGE_RR"));

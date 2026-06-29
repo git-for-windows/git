@@ -1803,10 +1803,12 @@ static enum get_oid_result get_oid_with_context_1(struct repository *repo,
 			    memcmp(ce->name, cp, namelen))
 				break;
 			if (ce_stage(ce) == stage) {
-				free(new_path);
 				if (reject_tree_in_index(repo, only_to_die, ce,
-							 stage, prefix, cp))
+							 stage, prefix, cp)) {
+					free(new_path);
 					return -1;
+				}
+				free(new_path);
 				oidcpy(oid, &ce->oid);
 				oc->mode = ce->ce_mode;
 				return 0;
