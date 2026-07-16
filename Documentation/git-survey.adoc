@@ -20,6 +20,7 @@ deployments and new features should use `git repo structure`; its
 same detail tables. During the deprecation phase, `git survey` is
 a thin shim over `git repo structure`. See linkgit:git-repo[1].
 
+
 Survey the repository and measure various dimensions of scale.
 
 As repositories grow to "monorepo" size, certain data shapes can cause
