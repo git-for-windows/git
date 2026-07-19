@@ -7,6 +7,15 @@ struct string_list;
 struct worktree;
 
 /*
+ * Translate POSIX-style drive paths produced by Git running under WSL2
+ * (`/mnt/<x>/...`) or Cygwin/MSYS (`/cygdrive/<x>/...`) into Windows
+ * drive-letter form (`<x>:/...`). Edits `path` in place; the result is
+ * never longer than the input. No-op on non-Windows platforms, where
+ * these prefixes may name real directories on the host filesystem.
+ */
+void translate_wsl_path(char *path);
+
+/*
  * The result to all functions which return statically allocated memory may be
  * overwritten by another call to _any_ one of these functions. Consider using
  * the safer variants which operate on strbufs or return allocated memory.

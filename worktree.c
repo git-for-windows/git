@@ -155,6 +155,9 @@ struct worktree *get_linked_worktree(const char *id,
 	strbuf_rtrim(&worktree_path);
 	strbuf_strip_suffix(&worktree_path, "/.git");
 
+	/* Worktree path may have been recorded under WSL/Cygwin. */
+	translate_wsl_path(worktree_path.buf);
+
 	if (!is_absolute_path(worktree_path.buf)) {
 		strbuf_strip_suffix(&path, "gitdir");
 		strbuf_addbuf(&path, &worktree_path);
@@ -992,6 +995,8 @@ int should_prune_worktree(const char *id, struct strbuf *reason, char **wtpath, 
 		goto done;
 	}
 	path[len] = '\0';
+	/* Worktree path may have been recorded under WSL/Cygwin. */
+	translate_wsl_path(path);
 	if (is_absolute_path(path)) {
 		strbuf_addstr(&dotgit, path);
 	} else {
