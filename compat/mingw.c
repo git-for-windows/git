@@ -509,9 +509,9 @@ static char *phantom_symlink_target_key(const wchar_t *wtarget,
 	return rel ? phantom_symlink_canonicalize(rel) : NULL;
 }
 
-static struct phantom_trie_node *phantom_trie_child(struct phantom_trie_node *node,
-						     const char *component, size_t len,
-						     int create)
+static struct phantom_trie_node *phantom_trie_child(
+	struct phantom_trie_node *node, const char *component,
+	size_t len, int create)
 {
 	char buf[MAX_LONG_PATH * 3];
 	struct hashmap_entry key;
@@ -556,6 +556,42 @@ static struct phantom_trie_node *phantom_trie_walk(const char *path, int create)
 }
 
 static void phantom_trie_wake_node(struct phantom_trie_node *node);
+static void phantom_symlink_directory_resolved(const wchar_t *wtarget,
+						const wchar_t *wlink);
+
+/*
+ * Moves everything nested under `from` (not `from` itself) to the same
+ * relative position under `to`. Used when a symlink at `from`'s path
+ * turns out to point at `to`'s path: anything registered through the
+ * symlink can then still be found by mkdir() under the real path it
+ * points at, not just under the symlink's own path.
+ * assumes phantom_symlinks_cs is held
+ */
+static void phantom_trie_graft_children(struct phantom_trie_node *to,
+					 struct phantom_trie_node *from)
+{
+	struct hashmap_iter iter;
+	struct phantom_trie_node *from_child;
+
+	hashmap_iter_init(&from->children, &iter);
+	while ((from_child = container_of_or_null(hashmap_iter_next(&iter),
+						   struct phantom_trie_node, ent))) {
+		struct phantom_trie_node *to_child = phantom_trie_child(
+			to, from_child->component, strlen(from_child->component), 1);
+		if (!to_child)
+			continue;
+		if (from_child->waiters) {
+			struct phantom_symlink_info *last = from_child->waiters;
+
+			while (last->next)
+				last = last->next;
+			last->next = to_child->waiters;
+			to_child->waiters = from_child->waiters;
+			from_child->waiters = NULL;
+		}
+		phantom_trie_graft_children(to_child, from_child);
+	}
+}
 
 /* assumes phantom_symlinks_cs is held */
 static void phantom_trie_drain_waiters(struct phantom_trie_node *node)
@@ -569,7 +605,6 @@ static void phantom_trie_drain_waiters(struct phantom_trie_node *node)
 		while ((current = *psi)) {
 			enum phantom_symlink_result result =
 				process_phantom_symlink(current->wtarget, current->wlink);
-			char *woken;
 
 			if (result == PHANTOM_SYMLINK_RETRY) {
 				psi = &current->next;
@@ -577,16 +612,13 @@ static void phantom_trie_drain_waiters(struct phantom_trie_node *node)
 			}
 
 			*psi = current->next;
-			woken = result == PHANTOM_SYMLINK_DIRECTORY ?
-				phantom_symlink_canonicalize(current->wlink) : NULL;
+			if (result == PHANTOM_SYMLINK_DIRECTORY)
+				phantom_symlink_directory_resolved(current->wtarget,
+								    current->wlink);
 			free(current);
 
-			if (woken) {
+			if (result == PHANTOM_SYMLINK_DIRECTORY) {
 				/* may wake into this same node; restart, don't trust *psi */
-				struct phantom_trie_node *n = phantom_trie_walk(woken, 0);
-				free(woken);
-				if (n)
-					phantom_trie_wake_node(n);
 				restart = 1;
 				break;
 			}
@@ -610,6 +642,34 @@ static void phantom_trie_wake_node(struct phantom_trie_node *node)
 {
 	phantom_trie_drain_waiters(node);
 	phantom_trie_wake_children(node);
+}
+
+/*
+ * wlink just became a directory symlink pointing at wtarget (whether
+ * converted from a phantom, or created that way outright): graft
+ * anything registered through wlink's own path onto wtarget's resolved
+ * path (see phantom_trie_graft_children()), then wake both.
+ */
+static void phantom_symlink_directory_resolved(const wchar_t *wtarget,
+						const wchar_t *wlink)
+{
+	char *own_key = phantom_symlink_canonicalize(wlink);
+	char *real_key = phantom_symlink_target_key(wtarget, wlink);
+	struct phantom_trie_node *n, *real_node;
+
+	EnterCriticalSection(&phantom_symlinks_cs);
+	n = own_key ? phantom_trie_walk(own_key, 0) : NULL;
+	real_node = real_key ? phantom_trie_walk(real_key, 1) : NULL;
+	if (n && real_node && real_node != n)
+		phantom_trie_graft_children(real_node, n);
+	if (n)
+		phantom_trie_wake_node(n);
+	if (real_node)
+		phantom_trie_wake_node(real_node);
+	LeaveCriticalSection(&phantom_symlinks_cs);
+
+	free(own_key);
+	free(real_key);
 }
 
 /* target_key: as returned by phantom_symlink_canonicalize(); not freed here */
@@ -677,13 +737,10 @@ static int create_phantom_symlink(wchar_t *wtarget, wchar_t *wlink)
 		free(target_key);
 		break;
 	}
-	case PHANTOM_SYMLINK_DIRECTORY: {
+	case PHANTOM_SYMLINK_DIRECTORY:
 		/* if we created a dir symlink, wake others waiting on it */
-		char *woken = phantom_symlink_canonicalize(wlink);
-		process_phantom_symlinks_under(woken);
-		free(woken);
+		phantom_symlink_directory_resolved(wtarget, wlink);
 		break;
-	}
 	default:
 		break;
 	}
@@ -3659,11 +3716,7 @@ int mingw_create_symlink(struct index_state *index, const char *target, const ch
 			break;
 		/* There may be dangling phantom symlinks that point at this
 		 * one, which should now morph into directory symlinks. */
-		{
-			char *woken = phantom_symlink_canonicalize(wlink);
-			process_phantom_symlinks_under(woken);
-			free(woken);
-		}
+		phantom_symlink_directory_resolved(wtarget, wlink);
 		return 0;
 	default:
 		BUG("unhandled symlink type");
