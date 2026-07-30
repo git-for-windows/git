@@ -450,43 +450,54 @@ process_phantom_symlink(const wchar_t *wtarget, const wchar_t *wlink)
 }
 
 /*
- * Newly created symlinks to non-existing targets are indexed by a trie
- * over their target path's components, so mkdir() (or a symlink turning
- * into a directory symlink) can wake only the entries nested under the
- * path that just became traversable, instead of re-probing everything.
+ * Newly created symlinks to non-existing targets are indexed by a
+ * hashmap keyed by their (canonicalized, absolute) target path, so
+ * that mkdir() creating that path -- or a symlink at that path turning
+ * out to be a directory symlink -- wakes only the entries actually
+ * waiting on it, instead of re-probing every phantom symlink created
+ * so far.
  */
 struct phantom_symlink_info {
-	struct phantom_symlink_info *next;
 	wchar_t *wlink;
-	wchar_t *wtarget;
 };
 
-struct phantom_trie_node {
+struct phantom_symlink_target {
 	struct hashmap_entry ent;
-	char *component;
-	struct hashmap children;
-	struct phantom_symlink_info *waiters;
+	wchar_t *wtarget;
+	size_t nr, alloc;
+	struct phantom_symlink_info *items;
+	char target[FLEX_ARRAY];
 };
 
-static CRITICAL_SECTION phantom_symlinks_cs;
-
-static int phantom_trie_node_cmp(const void *cmp_data UNUSED,
-				  const struct hashmap_entry *eptr,
-				  const struct hashmap_entry *entry_or_key,
-				  const void *keydata)
+static int phantom_symlink_target_cmp(const void *cmp_data UNUSED,
+				       const struct hashmap_entry *eptr,
+				       const struct hashmap_entry *entry_or_key,
+				       const void *keydata)
 {
-	const struct phantom_trie_node *e =
-		container_of(eptr, const struct phantom_trie_node, ent);
+	const struct phantom_symlink_target *e =
+		container_of(eptr, const struct phantom_symlink_target, ent);
 
-	return !fspatheq(e->component, keydata ? keydata :
-		container_of(entry_or_key, const struct phantom_trie_node,
-			     ent)->component);
+	return !fspatheq(e->target, keydata ? keydata :
+		container_of(entry_or_key, const struct phantom_symlink_target,
+			     ent)->target);
 }
 
-static struct phantom_trie_node phantom_trie_root =
-	{ .children = HASHMAP_INIT(phantom_trie_node_cmp, NULL) };
+static struct hashmap phantom_symlinks =
+	HASHMAP_INIT(phantom_symlink_target_cmp, NULL);
+static CRITICAL_SECTION phantom_symlinks_cs;
 
-static char *phantom_symlink_canonicalize(const wchar_t *wpath)
+static wchar_t *xwcsdup(const wchar_t *s)
+{
+	size_t size = sizeof(wchar_t) * (wcslen(s) + 1);
+	return memcpy(xmalloc(size), s, size);
+}
+
+/*
+ * Returns the canonicalized, absolute UTF-8 form of wpath. If wout is
+ * non-NULL, also fills it with the canonicalized, absolute wide form
+ * (must have room for at least MAX_LONG_PATH wchar_t).
+ */
+static char *canonicalize_path(const wchar_t *wpath, wchar_t *wout)
 {
 	wchar_t wfullpath[MAX_LONG_PATH];
 	char utf8[MAX_LONG_PATH * 3];
@@ -495,202 +506,60 @@ static char *phantom_symlink_canonicalize(const wchar_t *wpath)
 	if (!len || len >= ARRAY_SIZE(wfullpath) ||
 	    xwcstoutf(utf8, wfullpath, sizeof(utf8)) < 0)
 		return NULL;
+	if (wout)
+		wcscpy(wout, wfullpath);
 	return xstrdup(utf8);
 }
 
-/* the path process_phantom_symlink() itself probes with CreateFileW() */
-static char *phantom_symlink_target_key(const wchar_t *wtarget,
-					 const wchar_t *wlink)
+/*
+ * Wakes every phantom symlink whose target is exactly wpath: mkdir()
+ * creating that path, or a symlink at that path turning out to be a
+ * directory symlink, may let them resolve.
+ */
+static void process_phantom_symlinks(const wchar_t *wpath)
 {
-	wchar_t relative[MAX_LONG_PATH];
-	const wchar_t *rel = make_relative_to(wtarget, wlink, relative,
-					       ARRAY_SIZE(relative));
-
-	return rel ? phantom_symlink_canonicalize(rel) : NULL;
-}
-
-static struct phantom_trie_node *phantom_trie_child(
-	struct phantom_trie_node *node, const char *component,
-	size_t len, int create)
-{
-	char buf[MAX_LONG_PATH * 3];
+	char *target_key = canonicalize_path(wpath, NULL);
 	struct hashmap_entry key;
-	struct phantom_trie_node *child;
-
-	if (!len || len >= sizeof(buf))
-		return NULL;
-	memcpy(buf, component, len);
-	buf[len] = '\0';
-
-	hashmap_entry_init(&key, fspathhash(buf));
-	child = hashmap_get_entry_from_hash(&node->children, key.hash, buf,
-					     struct phantom_trie_node, ent);
-	if (!child && create) {
-		child = xcalloc(1, sizeof(*child));
-		child->component = xstrdup(buf);
-		hashmap_init(&child->children, phantom_trie_node_cmp, NULL, 0);
-		hashmap_entry_init(&child->ent, key.hash);
-		hashmap_add(&node->children, &child->ent);
-	}
-	return child;
-}
-
-static struct phantom_trie_node *phantom_trie_walk(const char *path, int create)
-{
-	struct phantom_trie_node *node = &phantom_trie_root;
-	const char *p = path;
-
-	while (*p && node) {
-		const char *start;
-
-		while (*p == '/' || *p == '\\')
-			p++;
-		start = p;
-		while (*p && *p != '/' && *p != '\\')
-			p++;
-		if (p == start)
-			break;
-		node = phantom_trie_child(node, start, (size_t)(p - start), create);
-	}
-	return node;
-}
-
-static void phantom_trie_wake_node(struct phantom_trie_node *node);
-static void phantom_symlink_directory_resolved(const wchar_t *wtarget,
-						const wchar_t *wlink);
-
-/*
- * Moves everything nested under `from` (not `from` itself) to the same
- * relative position under `to`. Used when a symlink at `from`'s path
- * turns out to point at `to`'s path: anything registered through the
- * symlink can then still be found by mkdir() under the real path it
- * points at, not just under the symlink's own path.
- * assumes phantom_symlinks_cs is held
- */
-static void phantom_trie_graft_children(struct phantom_trie_node *to,
-					 struct phantom_trie_node *from)
-{
-	struct hashmap_iter iter;
-	struct phantom_trie_node *from_child;
-
-	hashmap_iter_init(&from->children, &iter);
-	while ((from_child = container_of_or_null(hashmap_iter_next(&iter),
-						   struct phantom_trie_node, ent))) {
-		struct phantom_trie_node *to_child = phantom_trie_child(
-			to, from_child->component, strlen(from_child->component), 1);
-		if (!to_child)
-			continue;
-		if (from_child->waiters) {
-			struct phantom_symlink_info *last = from_child->waiters;
-
-			while (last->next)
-				last = last->next;
-			last->next = to_child->waiters;
-			to_child->waiters = from_child->waiters;
-			from_child->waiters = NULL;
-		}
-		phantom_trie_graft_children(to_child, from_child);
-	}
-}
-
-/* assumes phantom_symlinks_cs is held */
-static void phantom_trie_drain_waiters(struct phantom_trie_node *node)
-{
-	struct phantom_symlink_info *current, **psi;
-	int restart;
-
-	do {
-		restart = 0;
-		psi = &node->waiters;
-		while ((current = *psi)) {
-			enum phantom_symlink_result result =
-				process_phantom_symlink(current->wtarget, current->wlink);
-
-			if (result == PHANTOM_SYMLINK_RETRY) {
-				psi = &current->next;
-				continue;
-			}
-
-			*psi = current->next;
-			if (result == PHANTOM_SYMLINK_DIRECTORY)
-				phantom_symlink_directory_resolved(current->wtarget,
-								    current->wlink);
-			free(current);
-
-			if (result == PHANTOM_SYMLINK_DIRECTORY) {
-				/* may wake into this same node; restart, don't trust *psi */
-				restart = 1;
-				break;
-			}
-		}
-	} while (restart);
-}
-
-/* assumes phantom_symlinks_cs is held */
-static void phantom_trie_wake_children(struct phantom_trie_node *node)
-{
-	struct hashmap_iter iter;
-	struct phantom_trie_node *child;
-
-	hashmap_iter_init(&node->children, &iter);
-	while ((child = container_of_or_null(hashmap_iter_next(&iter),
-					      struct phantom_trie_node, ent)))
-		phantom_trie_wake_node(child);
-}
-
-static void phantom_trie_wake_node(struct phantom_trie_node *node)
-{
-	phantom_trie_drain_waiters(node);
-	phantom_trie_wake_children(node);
-}
-
-/*
- * wlink just became a directory symlink pointing at wtarget (whether
- * converted from a phantom, or created that way outright): graft
- * anything registered through wlink's own path onto wtarget's resolved
- * path (see phantom_trie_graft_children()), then wake both.
- */
-static void phantom_symlink_directory_resolved(const wchar_t *wtarget,
-						const wchar_t *wlink)
-{
-	char *own_key = phantom_symlink_canonicalize(wlink);
-	char *real_key = phantom_symlink_target_key(wtarget, wlink);
-	struct phantom_trie_node *n, *real_node;
-
-	EnterCriticalSection(&phantom_symlinks_cs);
-	n = own_key ? phantom_trie_walk(own_key, 0) : NULL;
-	real_node = real_key ? phantom_trie_walk(real_key, 1) : NULL;
-	if (n && real_node && real_node != n)
-		phantom_trie_graft_children(real_node, n);
-	if (n)
-		phantom_trie_wake_node(n);
-	if (real_node)
-		phantom_trie_wake_node(real_node);
-	LeaveCriticalSection(&phantom_symlinks_cs);
-
-	free(own_key);
-	free(real_key);
-}
-
-/* target_key: as returned by phantom_symlink_canonicalize(); not freed here */
-static void process_phantom_symlinks_under(const char *target_key)
-{
-	struct phantom_trie_node *node;
+	struct phantom_symlink_target *e;
+	size_t i;
 
 	if (!target_key)
 		return;
 
 	EnterCriticalSection(&phantom_symlinks_cs);
-	node = phantom_trie_walk(target_key, 0);
-	if (node)
-		phantom_trie_wake_node(node);
+	hashmap_entry_init(&key, fspathhash(target_key));
+	e = hashmap_get_entry_from_hash(&phantom_symlinks, key.hash, target_key,
+					 struct phantom_symlink_target, ent);
+
+	for (i = 0; e && i < e->nr; ) {
+		enum phantom_symlink_result result =
+			process_phantom_symlink(e->wtarget, e->items[i].wlink);
+		wchar_t *wlink = e->items[i].wlink;
+
+		if (result == PHANTOM_SYMLINK_RETRY) {
+			i++;
+			continue;
+		}
+
+		e->items[i] = e->items[--e->nr];
+		if (result == PHANTOM_SYMLINK_DIRECTORY)
+			process_phantom_symlinks(wlink);
+		free(wlink);
+	}
+
+	if (e && !e->nr) {
+		hashmap_remove(&phantom_symlinks, &e->ent, target_key);
+		free(e->wtarget);
+		free(e->items);
+		free(e);
+	}
 	LeaveCriticalSection(&phantom_symlinks_cs);
+
+	free(target_key);
 }
 
 static int create_phantom_symlink(wchar_t *wtarget, wchar_t *wlink)
 {
-	int len;
-
 	/* create file symlink */
 	if (!CreateSymbolicLinkW(wlink, wtarget, symlink_file_flags)) {
 		errno = err_win_to_posix(GetLastError());
@@ -700,46 +569,47 @@ static int create_phantom_symlink(wchar_t *wtarget, wchar_t *wlink)
 	/* convert to directory symlink if target exists */
 	switch (process_phantom_symlink(wtarget, wlink)) {
 	case PHANTOM_SYMLINK_RETRY: {
-		/* if target doesn't exist, add to phantom symlinks trie */
-		wchar_t wfullpath[MAX_LONG_PATH];
-		struct phantom_symlink_info *psi;
-		struct phantom_trie_node *node;
-		char *target_key;
+		/* the path process_phantom_symlink() itself probes */
+		wchar_t relative[MAX_LONG_PATH], wfulltarget[MAX_LONG_PATH];
+		wchar_t wfulllink[MAX_LONG_PATH];
+		const wchar_t *rel = make_relative_to(wtarget, wlink, relative,
+						       ARRAY_SIZE(relative));
+		char *target_key = rel ? canonicalize_path(rel, wfulltarget) : NULL;
+		struct hashmap_entry key;
+		struct phantom_symlink_target *e;
+		int len;
 
-		/* convert to absolute path to be independent of cwd */
-		len = GetFullPathNameW(wlink, MAX_LONG_PATH, wfullpath, NULL);
-		if (!len || len >= MAX_LONG_PATH) {
-			errno = err_win_to_posix(GetLastError());
-			return -1;
-		}
-
-		target_key = phantom_symlink_target_key(wtarget, wlink);
 		if (!target_key)
 			break;
 
-		/* over-allocate and fill phantom_symlink_info structure */
-		psi = xmalloc(sizeof(struct phantom_symlink_info) +
-			      sizeof(wchar_t) * (len + wcslen(wtarget) + 2));
-		psi->wlink = (wchar_t *)(psi + 1);
-		wcscpy(psi->wlink, wfullpath);
-		psi->wtarget = psi->wlink + len + 1;
-		wcscpy(psi->wtarget, wtarget);
+		/* convert to absolute path to be independent of cwd */
+		len = GetFullPathNameW(wlink, ARRAY_SIZE(wfulllink), wfulllink, NULL);
+		if (!len || len >= ARRAY_SIZE(wfulllink)) {
+			errno = err_win_to_posix(GetLastError());
+			free(target_key);
+			return -1;
+		}
 
 		EnterCriticalSection(&phantom_symlinks_cs);
-		node = phantom_trie_walk(target_key, 1);
-		if (node) {
-			psi->next = node->waiters;
-			node->waiters = psi;
-		} else {
-			free(psi);
+		hashmap_entry_init(&key, fspathhash(target_key));
+		e = hashmap_get_entry_from_hash(&phantom_symlinks, key.hash,
+						 target_key,
+						 struct phantom_symlink_target, ent);
+		if (!e) {
+			FLEX_ALLOC_STR(e, target, target_key);
+			e->wtarget = xwcsdup(wfulltarget);
+			hashmap_entry_init(&e->ent, key.hash);
+			hashmap_add(&phantom_symlinks, &e->ent);
 		}
+		ALLOC_GROW(e->items, e->nr + 1, e->alloc);
+		e->items[e->nr++].wlink = xwcsdup(wfulllink);
 		LeaveCriticalSection(&phantom_symlinks_cs);
 		free(target_key);
 		break;
 	}
 	case PHANTOM_SYMLINK_DIRECTORY:
 		/* if we created a dir symlink, wake others waiting on it */
-		phantom_symlink_directory_resolved(wtarget, wlink);
+		process_phantom_symlinks(wlink);
 		break;
 	default:
 		break;
@@ -976,11 +846,8 @@ int mingw_mkdir(const char *path, int mode UNUSED)
 		return -1;
 
 	ret = _wmkdir(wpath);
-	if (!ret) {
-		char *created = phantom_symlink_canonicalize(wpath);
-		process_phantom_symlinks_under(created);
-		free(created);
-	}
+	if (!ret)
+		process_phantom_symlinks(wpath);
 	if (!ret && needs_hiding(path))
 		return set_hidden_flag(wpath, 1);
 	return ret;
@@ -3716,7 +3583,7 @@ int mingw_create_symlink(struct index_state *index, const char *target, const ch
 			break;
 		/* There may be dangling phantom symlinks that point at this
 		 * one, which should now morph into directory symlinks. */
-		phantom_symlink_directory_resolved(wtarget, wlink);
+		process_phantom_symlinks(wlink);
 		return 0;
 	default:
 		BUG("unhandled symlink type");
