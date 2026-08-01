@@ -322,11 +322,11 @@ test_expect_success 'repo.structure.top supplies the default for --top' '
 
 		git -c repo.structure.top=2 \
 			repo structure --format=lines >with-config &&
-		grep "^objects.blobs.top.by_count.1.path=" with-config &&
+		test_grep "^objects.blobs.top.by_count.1.path=" with-config &&
 
 		git -c repo.structure.top=2 \
 			repo structure --format=lines --top=0 >cli-override &&
-		! grep "\.top\." cli-override
+		test_grep ! "\.top\." cli-override
 	)
 '
 
