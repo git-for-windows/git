@@ -27,7 +27,7 @@ test_expect_success 'create a semi-interesting repo' '
 
 test_expect_success 'survey prints a deprecation warning' '
 	git survey --all-refs >out 2>err &&
-	grep "is deprecated" err
+	test_grep "is deprecated" err
 '
 
 test_expect_success 'survey forwards to git repo structure' '
