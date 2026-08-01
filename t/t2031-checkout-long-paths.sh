@@ -29,7 +29,7 @@ test_expect_success setup '
 test_expect_success 'checkout of long paths without core.longpaths fails' '
 	git config core.longpaths false &&
 	test_must_fail git checkout -f 2>error &&
-	grep -q "Filename too long" error &&
+	test_grep -q "Filename too long" error &&
 	test ! -d longpa*
 '
 
