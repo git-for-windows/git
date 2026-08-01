@@ -271,7 +271,7 @@ test_expect_success '--top omitted: no top.* keys' '
 		test_commit foo &&
 
 		git repo structure --format=lines >out &&
-		! grep "\.top\." out
+		test_grep ! "\.top\." out
 	)
 '
 
@@ -295,16 +295,16 @@ test_expect_success '--top=N reports the N largest paths per axis' '
 			for type in trees blobs
 			do
 				key=objects.${type}.top.${axis} &&
-				grep -E "^${key}\.1\.path=" out &&
-				grep -E "^${key}\.2\.path=" out &&
-				! grep -E "^${key}\.3\." out || return 1
+				test_grep -E "^${key}\.1\.path=" out &&
+				test_grep -E "^${key}\.2\.path=" out &&
+				test_grep ! -E "^${key}\.3\." out || return 1
 			done
 		done &&
 
 		# The big blob outranks the small one on disk and inflated.
 		key=objects.blobs.top &&
-		grep "^${key}.by_disk_size.1.path=dir2/big.txt$" out &&
-		grep "^${key}.by_inflated_size.1.path=dir2/big.txt$" out
+		test_grep "^${key}.by_disk_size.1.path=dir2/big.txt$" out &&
+		test_grep "^${key}.by_inflated_size.1.path=dir2/big.txt$" out
 	)
 '
 
