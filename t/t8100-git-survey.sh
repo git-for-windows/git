@@ -12,7 +12,7 @@ export TEST_PASSES_SANITIZE_LEAK
 
 test_expect_success 'git survey -h shows the deprecated banner' '
 	test_expect_code 129 git survey -h >usage &&
-	grep "DEPRECATED!" usage
+	test_grep "DEPRECATED!" usage
 '
 
 test_expect_success 'create a semi-interesting repo' '
