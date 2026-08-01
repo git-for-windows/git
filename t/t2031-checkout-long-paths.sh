@@ -105,7 +105,7 @@ test_expect_success SYMLINKS_WINDOWS 'leave drive-less, short paths intact' '
 	git update-index --add --cacheinfo 120000,$symlink_target_oid,PF &&
 	git -c core.symlinks=true checkout -- PF &&
 	cmd //c dir >actual &&
-	grep "<SYMLINKD\\?> *PF *\\[\\\\Program Files\\]" actual
+	test_grep "<SYMLINKD\\?> *PF *\\[\\\\Program Files\\]" actual
 '
 
 test_done
