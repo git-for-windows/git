@@ -239,9 +239,9 @@ test_expect_success '--ref-filter narrows the set of refs' '
 
 		git repo structure --format=lines \
 			--ref-filter="refs/heads/*" >out &&
-		grep "^references.branches.count=1$" out &&
-		grep "^references.tags.count=0$" out &&
-		grep "^references.remotes.count=0$" out
+		test_grep "^references.branches.count=1$" out &&
+		test_grep "^references.tags.count=0$" out &&
+		test_grep "^references.remotes.count=0$" out
 	)
 '
 
@@ -257,9 +257,9 @@ test_expect_success '--ref-filter unions multiple patterns' '
 		git repo structure --format=lines \
 			--ref-filter="refs/heads/*" \
 			--ref-filter="refs/tags/*" >out &&
-		grep "^references.branches.count=1$" out &&
-		grep "^references.tags.count=2$" out &&
-		grep "^references.remotes.count=0$" out
+		test_grep "^references.branches.count=1$" out &&
+		test_grep "^references.tags.count=2$" out &&
+		test_grep "^references.remotes.count=0$" out
 	)
 '
 
