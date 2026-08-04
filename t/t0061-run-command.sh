@@ -16,6 +16,11 @@ test_expect_success MINGW 'subprocess inherits only std handles' '
 	test-tool run-command inherited-handle
 '
 
+test_expect_success MINGW 'missing shell path is reported' '
+	test_must_fail test-tool run-command shell-path-without-path 2>err &&
+	test_grep "cannot find .sh. in PATH" err
+'
+
 test_expect_success 'start_command reports ENOENT (slash)' '
 	test-tool run-command start-command-ENOENT ./does-not-exist 2>err &&
 	test_grep "\./does-not-exist" err
