@@ -200,8 +200,8 @@ static size_t component_len(const char *path)
 }
 
 /* Is `path` equal to, or nested somewhere below, `prefix`? */
-static int path_is_at_or_below(const struct path_trie *trie,
-			       const char *path, const char *prefix)
+static int path_is_at_or_below(const char *path, const char *prefix,
+			       unsigned int icase)
 {
 	while (1) {
 		size_t p_len, x_len;
@@ -219,7 +219,7 @@ static int path_is_at_or_below(const struct path_trie *trie,
 		x_len = component_len(path);
 		if (p_len != x_len)
 			return 0;
-		if (trie->icase ? strncasecmp(path, prefix, p_len) :
+		if (icase ? strncasecmp(path, prefix, p_len) :
 		    strncmp(path, prefix, p_len))
 			return 0;
 		prefix += p_len;
@@ -238,7 +238,7 @@ void path_trie_move(struct path_trie *trie, const char *from,
 	 * Moving a subtree into itself (or below itself) cannot
 	 * terminate meaningfully; treat it as a no-op.
 	 */
-	if (path_is_at_or_below(trie, to, from))
+	if (path_is_at_or_below(to, from, trie->icase))
 		return;
 
 	from_node = walk(trie, from, 0);
