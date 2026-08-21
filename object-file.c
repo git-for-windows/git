@@ -324,6 +324,8 @@ int parse_loose_header(const char *hdr, struct object_info *oi)
 	return 0;
 }
 
+
+
 #define CHECK_COLLISION_DEST_VANISHED -2
 
 static int check_collision(const char *source, const char *dest)

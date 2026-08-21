@@ -238,6 +238,7 @@ test_expect_success "test bundle-uri with $BUNDLE_URI_PROTOCOL:// using protocol
 	test_cmp_config_output expect actual
 '
 
+
 # Advertised bundle URIs are subject to protocol.*.allow; "file" (and bare or
 # UNC paths) is denied by default, so such a URI must be skipped, not fetched.
 advertise_uri () {

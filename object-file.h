@@ -118,6 +118,8 @@ void hash_object_file(const struct git_hash_algo *algo, const void *buf,
 		      size_t len, enum object_type type,
 		      struct object_id *oid);
 
+
+
 /* Helper to check and "touch" a file */
 int check_and_freshen_file(const char *fn, int freshen,
 			   const time_t *mtime);
