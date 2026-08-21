@@ -164,6 +164,9 @@ static inline int is_xplatform_dir_sep(int c)
 #include "compat/msvc.h"
 #include "compat/win32/fscache.h"
 #endif
+#ifndef warn_about_git_lfs_on_windows7
+#define warn_about_git_lfs_on_windows7(status, argv0) do { } while (0)
+#endif
 #ifdef DARWIN_REGEXEC
 #include "compat/darwin.h"
 #endif
@@ -268,6 +271,13 @@ static inline int git_offset_1st_component(const char *path)
 
 #ifndef fspathncmp
 #define fspathncmp git_fspathncmp
+#endif
+
+#ifndef warn_about_git_lfs_on_windows7
+static inline void warn_about_git_lfs_on_windows7(int exit_code UNUSED,
+						  const char *argv0 UNUSED)
+{
+}
 #endif
 
 #ifndef is_valid_path
