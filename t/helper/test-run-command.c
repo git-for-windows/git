@@ -103,6 +103,16 @@ static int test_stdin_pipe_feed(int hook_stdin_fd, void *cb UNUSED, void *task_c
 	return !(*lines_remaining);
 }
 
+static int shell_path_without_path(void)
+{
+	char *path;
+
+	unsetenv("PATH");
+	path = git_shell_path();
+	free(path);
+	return 0;
+}
+
 struct testsuite {
 	struct string_list tests, failed;
 	int next;
@@ -450,6 +460,8 @@ int cmd__run_command(int argc, const char **argv)
 
 	if (argc > 1 && !strcmp(argv[1], "testsuite"))
 		return testsuite(argc - 1, argv + 1);
+	if (argc > 1 && !strcmp(argv[1], "shell-path-without-path"))
+		return shell_path_without_path();
 	if (!strcmp(argv[1], "inherited-handle"))
 		return inherit_handle(argv[0]);
 	if (!strcmp(argv[1], "inherited-handle-child"))
