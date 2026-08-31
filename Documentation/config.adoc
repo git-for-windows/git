@@ -574,6 +574,7 @@ include::config/repo.adoc[]
 
 include::config/replay.adoc[]
 
+
 include::config/rerere.adoc[]
 
 include::config/revert.adoc[]
