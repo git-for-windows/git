@@ -1893,6 +1893,7 @@ void run_processes_parallel(const struct run_process_parallel_opts *opts)
 	int i, code;
 	int timeout = 100;
 	int spawn_cap = 4;
+	size_t max_live;
 	struct parallel_processes_for_signal pp_sig;
 	struct parallel_processes pp = {
 		.buffered_output = STRBUF_INIT,
@@ -1901,6 +1902,18 @@ void run_processes_parallel(const struct run_process_parallel_opts *opts)
 	const char *tr2_category = opts->tr2_category;
 	const char *tr2_label = opts->tr2_label;
 	const int do_trace2 = tr2_category && tr2_label;
+
+	/*
+	 * Unless the caller handles its own output, pp_buffer_io() polls one
+	 * pipe for each child that is sending output and a second one for each
+	 * child that is being fed on stdin. Limit how many children run at once
+	 * so that the worst case stays within what poll() can wait on. Only
+	 * concurrency is limited; the configured maximum is still honoured for
+	 * the number of tasks that are run in total.
+	 */
+	max_live = opts->processes;
+	if (!opts->ungroup && max_live > POLL_MAX_DESCRIPTORS / 2)
+		max_live = POLL_MAX_DESCRIPTORS / 2;
 
 	if (do_trace2)
 		trace2_region_enter_printf(tr2_category, tr2_label, NULL,
@@ -1923,7 +1936,7 @@ void run_processes_parallel(const struct run_process_parallel_opts *opts)
 	while (1) {
 		for (i = 0;
 		    i < spawn_cap && !pp.shutdown &&
-		    pp.nr_processes < opts->processes;
+		    pp.nr_processes < max_live;
 		    i++) {
 			code = pp_start_one(&pp, opts);
 			if (!code)
