@@ -9,6 +9,7 @@
 #include "dir.h"
 #include "environment.h"
 #include "gettext.h"
+#include "path-trie.h"
 #include "repository.h"
 #include "run-command.h"
 #include "strbuf.h"
@@ -448,43 +449,159 @@ process_phantom_symlink(const wchar_t *wtarget, const wchar_t *wlink)
 	return PHANTOM_SYMLINK_RETRY;
 }
 
-/* keep track of newly created symlinks to non-existing targets */
+/*
+ * Newly created symlinks to non-existing targets are indexed by a
+ * path trie keyed by their (canonicalized, absolute) target path, so
+ * that mkdir() creating that path -- or a symlink at that path
+ * turning out to be a directory symlink -- wakes only the entries
+ * actually waiting on it, instead of re-probing every phantom
+ * symlink created so far. A trie rather than a flat map because a
+ * phantom symlink's target may pass through *another* symlink; once
+ * that one resolves, everything registered through it is moved to
+ * the corresponding real path (path_trie_move()), where later
+ * mkdir()s can find it.
+ */
 struct phantom_symlink_info {
-	struct phantom_symlink_info *next;
+	struct path_trie_entry ent;
 	wchar_t *wlink;
 	wchar_t *wtarget;
 };
 
-static struct phantom_symlink_info *phantom_symlinks = NULL;
+static struct path_trie phantom_symlinks;
 static CRITICAL_SECTION phantom_symlinks_cs;
 
-static void process_phantom_symlinks(void)
+static void free_phantom_symlink(struct phantom_symlink_info *psi)
 {
-	struct phantom_symlink_info *current, **psi;
+	path_trie_entry_clear(&psi->ent);
+	free(psi->wlink);
+	free(psi->wtarget);
+	free(psi);
+}
+
+static wchar_t *xwcsdup(const wchar_t *s)
+{
+	size_t size = sizeof(wchar_t) * (wcslen(s) + 1);
+	return memcpy(xmalloc(size), s, size);
+}
+
+/* Returns the canonicalized, absolute UTF-8 form of wpath. */
+static char *canonicalize_path(const wchar_t *wpath)
+{
+	wchar_t wfullpath[MAX_LONG_PATH];
+	char utf8[MAX_LONG_PATH * 3];
+	int len = GetFullPathNameW(wpath, ARRAY_SIZE(wfullpath), wfullpath, NULL);
+
+	if (!len || len >= ARRAY_SIZE(wfullpath) ||
+	    xwcstoutf(utf8, wfullpath, sizeof(utf8)) < 0)
+		return NULL;
+	return xstrdup(utf8);
+}
+
+/*
+ * The canonicalized, absolute UTF-8 form of wtarget, resolved against
+ * wlink's directory if relative: the path process_phantom_symlink()
+ * itself probes, and thus the path whose creation can resolve the
+ * symlink.
+ */
+static char *canonicalize_target(const wchar_t *wtarget, const wchar_t *wlink)
+{
+	wchar_t relative[MAX_LONG_PATH];
+	const wchar_t *rel = make_relative_to(wtarget, wlink, relative,
+					       ARRAY_SIZE(relative));
+
+	return rel ? canonicalize_path(rel) : NULL;
+}
+
+/*
+ * Wakes every phantom symlink registered at or below `key` (a
+ * canonicalized, absolute UTF-8 path; ownership is taken): the path
+ * just came into existence, which may let them resolve. Every
+ * resolved directory symlink queues its own target for waking in
+ * turn, since other phantom symlinks may point through it.
+ */
+static void process_phantom_symlinks_at(char *key)
+{
+	char **queue = NULL;
+	size_t queue_nr = 0, queue_alloc = 0;
+
+	ALLOC_GROW(queue, queue_nr + 1, queue_alloc);
+	queue[queue_nr++] = key;
+
 	EnterCriticalSection(&phantom_symlinks_cs);
-	/* process phantom symlinks list */
-	psi = &phantom_symlinks;
-	while ((current = *psi)) {
-		enum phantom_symlink_result result = process_phantom_symlink(
-				current->wtarget, current->wlink);
-		if (result == PHANTOM_SYMLINK_RETRY) {
-			psi = &current->next;
-		} else {
-			/* symlink was processed, remove from list */
-			*psi = current->next;
-			free(current);
-			/* if symlink was a directory, start over */
-			if (result == PHANTOM_SYMLINK_DIRECTORY)
-				psi = &phantom_symlinks;
+	while (queue_nr) {
+		char *current = queue[--queue_nr];
+		struct path_trie_entry *drained =
+			path_trie_drain(&phantom_symlinks, current);
+
+		while (drained) {
+			struct phantom_symlink_info *psi = container_of(
+				drained, struct phantom_symlink_info, ent);
+
+			drained = drained->next;
+
+			switch (process_phantom_symlink(psi->wtarget,
+							 psi->wlink)) {
+			case PHANTOM_SYMLINK_RETRY:
+				path_trie_add(&phantom_symlinks, psi->ent.key,
+					      &psi->ent);
+				break;
+			case PHANTOM_SYMLINK_DIRECTORY: {
+				/*
+				 * This symlink is now a directory symlink;
+				 * anything registered through its own path
+				 * is reachable via its target from now on,
+				 * and may be able to resolve.
+				 */
+				char *own = canonicalize_path(psi->wlink);
+
+				if (own) {
+					path_trie_move(&phantom_symlinks, own,
+						       psi->ent.key);
+					free(own);
+				}
+				ALLOC_GROW(queue, queue_nr + 1, queue_alloc);
+				queue[queue_nr++] = xstrdup(psi->ent.key);
+				free_phantom_symlink(psi);
+				break;
+			}
+			default:
+				free_phantom_symlink(psi);
+				break;
+			}
 		}
+		free(current);
 	}
 	LeaveCriticalSection(&phantom_symlinks_cs);
+	free(queue);
+}
+
+static void process_phantom_symlinks(const wchar_t *wpath)
+{
+	char *key = canonicalize_path(wpath);
+
+	if (key)
+		process_phantom_symlinks_at(key);
+}
+
+/* A directory symlink wlink -> wtarget was created (or so resolved). */
+static void directory_symlink_created(const wchar_t *wtarget,
+				      const wchar_t *wlink)
+{
+	char *own = canonicalize_path(wlink);
+	char *target_key = canonicalize_target(wtarget, wlink);
+
+	if (own && target_key) {
+		EnterCriticalSection(&phantom_symlinks_cs);
+		path_trie_move(&phantom_symlinks, own, target_key);
+		LeaveCriticalSection(&phantom_symlinks_cs);
+	}
+	free(own);
+	if (target_key)
+		process_phantom_symlinks_at(target_key);
 }
 
 static int create_phantom_symlink(wchar_t *wtarget, wchar_t *wlink)
 {
-	int len;
-
 	/* create file symlink */
 	if (!CreateSymbolicLinkW(wlink, wtarget, symlink_file_flags)) {
 		errno = err_win_to_posix(GetLastError());
@@ -494,34 +611,35 @@ static int create_phantom_symlink(wchar_t *wtarget, wchar_t *wlink)
 	/* convert to directory symlink if target exists */
 	switch (process_phantom_symlink(wtarget, wlink)) {
 	case PHANTOM_SYMLINK_RETRY: {
-		/* if target doesn't exist, add to phantom symlinks list */
-		wchar_t wfullpath[MAX_LONG_PATH];
+		wchar_t wfulllink[MAX_LONG_PATH];
+		char *target_key = canonicalize_target(wtarget, wlink);
 		struct phantom_symlink_info *psi;
+		int len;
+
+		if (!target_key)
+			break;
 
 		/* convert to absolute path to be independent of cwd */
-		len = GetFullPathNameW(wlink, MAX_LONG_PATH, wfullpath, NULL);
-		if (!len || len >= MAX_LONG_PATH) {
+		len = GetFullPathNameW(wlink, ARRAY_SIZE(wfulllink), wfulllink, NULL);
+		if (!len || len >= ARRAY_SIZE(wfulllink)) {
 			errno = err_win_to_posix(GetLastError());
+			free(target_key);
 			return -1;
 		}
 
-		/* over-allocate and fill phantom_symlink_info structure */
-		psi = xmalloc(sizeof(struct phantom_symlink_info) +
-			      sizeof(wchar_t) * (len + wcslen(wtarget) + 2));
-		psi->wlink = (wchar_t *)(psi + 1);
-		wcscpy(psi->wlink, wfullpath);
-		psi->wtarget = psi->wlink + len + 1;
-		wcscpy(psi->wtarget, wtarget);
+		psi = xcalloc(1, sizeof(*psi));
+		psi->wlink = xwcsdup(wfulllink);
+		psi->wtarget = xwcsdup(wtarget);
 
 		EnterCriticalSection(&phantom_symlinks_cs);
-		psi->next = phantom_symlinks;
-		phantom_symlinks = psi;
+		path_trie_add(&phantom_symlinks, target_key, &psi->ent);
 		LeaveCriticalSection(&phantom_symlinks_cs);
+		free(target_key);
 		break;
 	}
 	case PHANTOM_SYMLINK_DIRECTORY:
-		/* if we created a dir symlink, process other phantom symlinks */
-		process_phantom_symlinks();
+		/* if we created a dir symlink, wake others waiting on it */
+		directory_symlink_created(wtarget, wlink);
 		break;
 	default:
 		break;
@@ -759,7 +877,7 @@ int mingw_mkdir(const char *path, int mode UNUSED)
 
 	ret = _wmkdir(wpath);
 	if (!ret)
-		process_phantom_symlinks();
+		process_phantom_symlinks(wpath);
 	if (!ret && needs_hiding(path))
 		return set_hidden_flag(wpath, 1);
 	return ret;
@@ -3495,7 +3613,7 @@ int mingw_create_symlink(struct index_state *index, const char *target, const ch
 			break;
 		/* There may be dangling phantom symlinks that point at this
 		 * one, which should now morph into directory symlinks. */
-		process_phantom_symlinks();
+		directory_symlink_created(wtarget, wlink);
 		return 0;
 	default:
 		BUG("unhandled symlink type");
@@ -4448,6 +4566,7 @@ int wmain(int argc, const wchar_t **wargv)
 	/* initialize critical section for waitpid pinfo_t list */
 	InitializeCriticalSection(&pinfo_cs);
 	InitializeCriticalSection(&phantom_symlinks_cs);
+	path_trie_init(&phantom_symlinks, 1);
 
 	/* initialize critical section for fscache */
 	InitializeCriticalSection(&fscache_cs);
