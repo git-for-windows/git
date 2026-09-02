@@ -616,4 +616,9 @@ enum start_bg_result start_bg_command(struct child_process *cmd,
 
 int sane_execvp(const char *file, char *const argv[]);
 
+/*
+ * Get the path of the POSIX shell to use in `start_command()`.
+ */
+const char *get_shell_path(const char *fallback);
+
 #endif
