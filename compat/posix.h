@@ -123,7 +123,6 @@
 #include <signal.h>
 #include <assert.h>
 #include <regex.h>
-#include <utime.h>
 #include <syslog.h>
 #if !defined(NO_POLL_H)
 #include <poll.h>
@@ -148,6 +147,9 @@
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <sys/statvfs.h>
+#ifndef NO_WRITEV
+#include <sys/uio.h>
+#endif
 #include <termios.h>
 #ifndef NO_SYS_SELECT_H
 #include <sys/select.h>
@@ -334,6 +336,35 @@ int git_lstat(const char *, struct stat *);
 ssize_t git_pread(int fd, void *buf, size_t count, off_t offset);
 #endif
 
+#ifdef NO_WRITEV
+#define writev git_writev
+#define iovec git_iovec
+struct git_iovec {
+	void *iov_base;
+	size_t iov_len;
+};
+
+ssize_t git_writev(int fd, const struct iovec *iov, int iovcnt);
+#endif
+
+#ifndef AT_FDCWD
+#define AT_FDCWD (-100)
+#endif
+#ifndef UTIME_NOW
+#define UTIME_NOW ((1L << 30) - 1L)
+#endif
+#ifndef UTIME_OMIT
+#define UTIME_OMIT ((1L << 30) - 2L)
+#endif
+
+#ifdef NO_UTIMENSAT
+#ifdef utimensat
+#undef utimensat
+#endif
+#define utimensat git_utimensat
+int git_utimensat(int fd, const char *path, const struct timespec times[2], int flag);
+#endif
+
 #ifdef NO_SETENV
 #define setenv gitsetenv
 int gitsetenv(const char *, const char *, int);
@@ -487,14 +518,16 @@ int git_qsort_s(void *base, size_t nmemb, size_t size,
 } while (0)
 
 #ifdef NO_NSEC
-#undef USE_NSEC
+#define ST_ATIME_NSEC(st) 0
 #define ST_CTIME_NSEC(st) 0
 #define ST_MTIME_NSEC(st) 0
 #else
 #ifdef USE_ST_TIMESPEC
+#define ST_ATIME_NSEC(st) ((unsigned int)((st).st_atimespec.tv_nsec))
 #define ST_CTIME_NSEC(st) ((unsigned int)((st).st_ctimespec.tv_nsec))
 #define ST_MTIME_NSEC(st) ((unsigned int)((st).st_mtimespec.tv_nsec))
 #else
+#define ST_ATIME_NSEC(st) ((unsigned int)((st).st_atim.tv_nsec))
 #define ST_CTIME_NSEC(st) ((unsigned int)((st).st_ctim.tv_nsec))
 #define ST_MTIME_NSEC(st) ((unsigned int)((st).st_mtim.tv_nsec))
 #endif

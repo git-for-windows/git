@@ -128,7 +128,7 @@ test_expect_success 'renaming tag A to Q locally produces a warning' "
 	warning: tag 'Q' is externally known as 'A'
 	EOF
 	test_cmp expected err &&
-	grep -E '^A-8-g[0-9a-f]+$' out
+	test_grep -E '^A-8-g[0-9a-f]+$' out
 "
 
 test_expect_success 'misnamed annotated tag forces long output' '
@@ -160,7 +160,7 @@ check_describe A-8-gHASH HEAD
 test_expect_success 'describe works from outside repo using --git-dir' '
 	git clone --bare "$TRASH_DIRECTORY" "$TRASH_DIRECTORY/bare" &&
 	git --git-dir "$TRASH_DIRECTORY/bare" describe >out &&
-	grep -E "^A-8-g[0-9a-f]+$" out
+	test_grep -E "^A-8-g[0-9a-f]+$" out
 '
 
 check_describe "A-8-gHASH" --dirty
@@ -170,7 +170,7 @@ test_expect_success 'describe --dirty with --work-tree' '
 		cd "$TEST_DIRECTORY" &&
 		git --git-dir "$TRASH_DIRECTORY/.git" --work-tree "$TRASH_DIRECTORY" describe --dirty >"$TRASH_DIRECTORY/out"
 	) &&
-	grep -E "^A-8-g[0-9a-f]+$" out
+	test_grep -E "^A-8-g[0-9a-f]+$" out
 '
 
 test_expect_success 'set-up dirty work tree' '
@@ -183,7 +183,7 @@ test_expect_success 'describe --dirty with --work-tree (dirty)' '
 		cd "$TEST_DIRECTORY" &&
 		git --git-dir "$TRASH_DIRECTORY/.git" --work-tree "$TRASH_DIRECTORY" describe --dirty >"$TRASH_DIRECTORY/out"
 	) &&
-	grep -E "^A-8-g[0-9a-f]+-dirty$" out &&
+	test_grep -E "^A-8-g[0-9a-f]+-dirty$" out &&
 	test_cmp expected out
 '
 
@@ -193,7 +193,7 @@ test_expect_success 'describe --dirty=.mod with --work-tree (dirty)' '
 		cd "$TEST_DIRECTORY" &&
 		git --git-dir "$TRASH_DIRECTORY/.git" --work-tree "$TRASH_DIRECTORY" describe --dirty=.mod >"$TRASH_DIRECTORY/out"
 	) &&
-	grep -E "^A-8-g[0-9a-f]+.mod$" out &&
+	test_grep -E "^A-8-g[0-9a-f]+.mod$" out &&
 	test_cmp expected out
 '
 
@@ -399,7 +399,7 @@ test_expect_success 'describe chokes on severely broken submodules' '
 
 test_expect_success 'describe ignoring a broken submodule' '
 	git describe --broken >out &&
-	grep broken out
+	test_grep broken out
 '
 
 test_expect_success 'describe with --work-tree ignoring a broken submodule' '
@@ -408,7 +408,7 @@ test_expect_success 'describe with --work-tree ignoring a broken submodule' '
 		git --git-dir "$TRASH_DIRECTORY/.git" --work-tree "$TRASH_DIRECTORY" describe --broken >"$TRASH_DIRECTORY/out"
 	) &&
 	test_when_finished "mv .git/modules/sub_moved .git/modules/sub1" &&
-	grep broken out
+	test_grep broken out
 '
 
 test_expect_success 'describe a blob at a directly tagged commit' '
@@ -1016,5 +1016,63 @@ do
 		test_cmp expect actual
 	'
 done <stdin-modes
+
+format_rev_cmp_log () {
+	opts="$1"
+	format=reference
+	cat >input <<-\EOF &&
+	third
+	second
+	first
+	EOF
+	git -C repo-format log --stdin --no-walk \
+		--format="$format" "$opts" >expect <input &&
+	git -C repo-format format-rev --stdin-mode=revs \
+		--format="$format" "$opts" >actual <input &&
+	test_cmp expect actual
+}
+
+format_rev_err_cmp_log () {
+	opts="$1"
+	format=reference
+	# No input since we ought to fail while parsing options
+	test_must_fail git -C repo-format log --stdin --no-walk \
+		--format="$format" "$opts" 2>expect &&
+	test_must_fail git -C repo-format format-rev \
+		--stdin-mode=revs --format="$format" "$opts" 2>actual &&
+	test_cmp expect actual
+}
+
+test_expect_success 'format-rev --color' '
+	format_rev_cmp_log --color=always &&
+	format_rev_cmp_log --color &&
+	format_rev_cmp_log --no-color &&
+	format_rev_err_cmp_log --color=not-valid
+'
+
+test_expect_success 'format-rev --abbrev' '
+	format_rev_cmp_log --abbrev &&
+	format_rev_cmp_log --abbrev=31 &&
+	format_rev_cmp_log --no-abbrev
+'
+
+test_expect_success 'format-rev --date' '
+	format_rev_cmp_log --date=relative &&
+	format_rev_cmp_log --date=iso-strict &&
+	# This also tests the only case where we need to release
+	# the data for the parsed format
+	format_rev_cmp_log --date="format:%c" &&
+	format_rev_err_cmp_log --date=not-valid &&
+	# Test --date (no arg) next
+	# We cannot compare the output to git-log(1)
+	# because that command uses a slightly different
+	# error message (different library)
+	cat >expect <<-EOF &&
+	error: option \`date${SQ} requires a value
+	EOF
+	test_must_fail git -C repo-format format-rev \
+		--stdin-mode=revs --format="$format" --date 2>actual &&
+	test_cmp expect actual
+'
 
 test_done

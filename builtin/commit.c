@@ -484,7 +484,7 @@ static const char *prepare_index(const char **argv, const char *prefix,
 				       LOCK_DIE_ON_ERROR);
 		refresh_cache_or_die(refresh_flags);
 		if (the_repository->index->cache_changed
-		    || !cache_tree_fully_valid(the_repository->index->cache_tree))
+		    || !cache_tree_fully_valid(the_repository->index))
 			cache_tree_update(the_repository->index, WRITE_TREE_SILENT);
 		if (write_locked_index(the_repository->index, &index_lock,
 				       COMMIT_LOCK | SKIP_IF_UNCHANGED))
@@ -515,13 +515,25 @@ static const char *prepare_index(const char **argv, const char *prefix,
 	 */
 	commit_style = COMMIT_PARTIAL;
 
-	if (whence != FROM_COMMIT) {
-		if (whence == FROM_MERGE)
-			die(_("cannot do a partial commit during a merge."));
-		else if (is_from_cherry_pick(whence))
-			die(_("cannot do a partial commit during a cherry-pick."));
-		else if (is_from_rebase(whence))
-			die(_("cannot do a partial commit during a rebase."));
+	switch (sequencer_ongoing_operation(the_repository, whence)) {
+	case ONGOING_NONE:
+		break;
+	case ONGOING_MERGE:
+		die(_("cannot do a partial commit during a merge."));
+	case ONGOING_CHERRY_PICK:
+		die(_("cannot do a partial commit during a cherry-pick."));
+	case ONGOING_REBASE_NOW_EMPTY:
+		/*
+		 * A pick that became empty is not a conflict, and creating
+		 * a new commit (partial or not) poses no problem.
+		 */
+		break;
+	case ONGOING_REVERT:
+		die(_("cannot do a partial commit during a revert."));
+	case ONGOING_AM:
+		die(_("cannot do a partial commit during an am session."));
+	case ONGOING_REBASE_CONFLICT:
+		die(_("cannot do a partial commit while resolving conflicts during a rebase."));
 	}
 
 	if (list_paths(&partial, !current_head ? NULL : "HEAD", &pathspec))
@@ -804,18 +816,18 @@ static int prepare_to_commit(const char *index_file, const char *prefix,
 	if (have_option_m && !fixup_message) {
 		strbuf_addbuf(&sb, &message);
 		hook_arg1 = "message";
-	} else if (logfile && !strcmp(logfile, "-")) {
+	} else if (logfile && !fixup_message && !strcmp(logfile, "-")) {
 		if (isatty(0))
 			fprintf(stderr, _("(reading log message from standard input)\n"));
 		if (strbuf_read(&sb, 0, 0) < 0)
 			die_errno(_("could not read log from standard input"));
 		hook_arg1 = "message";
-	} else if (logfile) {
+	} else if (logfile && !fixup_message) {
 		if (strbuf_read_file(&sb, logfile, 0) < 0)
 			die_errno(_("could not read log file '%s'"),
 				  logfile);
 		hook_arg1 = "message";
-	} else if (use_message) {
+	} else if (use_message && !fixup_message) {
 		const char *buffer;
 		buffer = strstr(use_message_buffer, "\n\n");
 		if (buffer)
@@ -837,20 +849,26 @@ static int prepare_to_commit(const char *index_file, const char *prefix,
 		hook_arg1 = "message";
 
 		/*
-		 * Only `-m` commit message option is checked here, as
-		 * it supports `--fixup` to append the commit message.
-		 *
-		 * The other commit message options `-c`/`-C`/`-F` are
-		 * incompatible with all the forms of `--fixup` and
-		 * have already errored out while parsing the `git commit`
-		 * options.
+		 * `-m`, `-F`, `-C`, and `-c` provide the message body.
+		 * If none was given and this is an amend, use the target
+		 * commit's body instead.
 		 */
-		if (have_option_m && !strcmp(fixup_prefix, "fixup"))
+		if (have_option_m) {
 			strbuf_addbuf(&sb, &message);
-
-		if (!strcmp(fixup_prefix, "amend")) {
-			if (have_option_m)
-				die(_("options '%s' and '%s:%s' cannot be used together"), "-m", "--fixup", fixup_message);
+		} else if (logfile && !strcmp(logfile, "-")) {
+			if (isatty(0))
+				fprintf(stderr, _("(reading log message from standard input)\n"));
+			if (strbuf_read(&sb, 0, 0) < 0)
+				die_errno(_("could not read log from standard input"));
+		} else if (logfile) {
+			if (strbuf_read_file(&sb, logfile, 0) < 0)
+				die_errno(_("could not read log file '%s'"), logfile);
+		} else if (use_message) {
+			struct commit *c = lookup_commit_reference_by_name(use_message);
+			if (!c)
+				die(_("could not lookup commit '%s'"), use_message);
+			prepare_amend_commit(c, &sb, &ctx);
+		} else if (!strcmp(fixup_prefix, "amend")) {
 			prepare_amend_commit(commit, &sb, &ctx);
 		}
 	} else if (!stat(git_path_merge_msg(the_repository), &statbuf)) {
@@ -893,7 +911,7 @@ static int prepare_to_commit(const char *index_file, const char *prefix,
 	 */
 	else if (whence == FROM_MERGE)
 		hook_arg1 = "merge";
-	else if (is_from_cherry_pick(whence) || whence == FROM_REBASE_PICK) {
+	else if (is_from_cherry_pick(whence) || is_from_rebase_now_empty(whence)) {
 		hook_arg1 = "commit";
 		hook_arg2 = "CHERRY_PICK_HEAD";
 	}
@@ -1086,7 +1104,7 @@ static int prepare_to_commit(const char *index_file, const char *prefix,
 		if (amend)
 			fputs(_(empty_amend_advice), stderr);
 		else if (is_from_cherry_pick(whence) ||
-			 whence == FROM_REBASE_PICK) {
+			 is_from_rebase_now_empty(whence)) {
 			fputs(_(empty_cherry_pick_advice), stderr);
 			if (whence == FROM_CHERRY_PICK_SINGLE)
 				fputs(_(empty_cherry_pick_advice_single), stderr);
@@ -1326,22 +1344,36 @@ static int parse_and_validate_options(int argc, const char *argv[],
 		use_editor = 0;
 
 	/* Sanity check options */
-	if (amend && !current_head)
-		die(_("You have nothing to amend."));
-	if (amend && whence != FROM_COMMIT) {
-		if (whence == FROM_MERGE)
+	if (amend) {
+		if (!current_head)
+			die(_("You have nothing to amend."));
+		/*
+		 * Refuse to amend in the middle of any operation that is
+		 * meant to record its result as a new commit on top of HEAD
+		 * rather than by rewriting HEAD.
+		 */
+		switch (sequencer_ongoing_operation(s->repo, whence)) {
+		case ONGOING_NONE:
+			break;
+		case ONGOING_MERGE:
 			die(_("You are in the middle of a merge -- cannot amend."));
-		else if (is_from_cherry_pick(whence))
+		case ONGOING_CHERRY_PICK:
 			die(_("You are in the middle of a cherry-pick -- cannot amend."));
-		else if (whence == FROM_REBASE_PICK)
-			die(_("You are in the middle of a rebase -- cannot amend."));
+		case ONGOING_REBASE_NOW_EMPTY:
+			die(_("The now-empty commit has been dropped -- cannot amend."));
+		case ONGOING_REVERT:
+			die(_("You are in the middle of a revert -- cannot amend."));
+		case ONGOING_AM:
+			die(_("You are in the middle of an am session -- cannot amend."));
+		case ONGOING_REBASE_CONFLICT:
+			die(_("You are resolving conflicts during a rebase -- cannot amend."));
+		}
 	}
 	if (fixup_message && squash_message)
 		die(_("options '%s' and '%s' cannot be used together"), "--squash", "--fixup");
-	die_for_incompatible_opt4(!!use_message, "-C",
+	die_for_incompatible_opt3(!!use_message, "-C",
 				  !!edit_message, "-c",
-				  !!logfile, "-F",
-				  !!fixup_message, "--fixup");
+				  !!logfile, "-F");
 	die_for_incompatible_opt4(have_option_m, "-m",
 				  !!edit_message, "-c",
 				  !!use_message, "-C",
@@ -1353,7 +1385,7 @@ static int parse_and_validate_options(int argc, const char *argv[],
 	if (amend && !use_message && !fixup_message)
 		use_message = "HEAD";
 	if (!use_message && !is_from_cherry_pick(whence) &&
-	    !is_from_rebase(whence) && renew_authorship)
+	    !is_from_rebase_now_empty(whence) && renew_authorship)
 		die(_("--reset-author can be used only with -C, -c or --amend."));
 	if (use_message) {
 		use_message_buffer = read_commit_message(use_message);
@@ -1362,7 +1394,7 @@ static int parse_and_validate_options(int argc, const char *argv[],
 			author_message_buffer = use_message_buffer;
 		}
 	}
-	if ((is_from_cherry_pick(whence) || whence == FROM_REBASE_PICK) &&
+	if ((is_from_cherry_pick(whence) || is_from_rebase_now_empty(whence)) &&
 	    !renew_authorship) {
 		author_message = "CHERRY_PICK_HEAD";
 		author_message_buffer = read_commit_message(author_message);
@@ -1889,7 +1921,7 @@ int cmd_commit(int argc,
 		if (!reflog_msg)
 			reflog_msg = is_from_cherry_pick(whence)
 					? "commit (cherry-pick)"
-					: is_from_rebase(whence)
+					: is_from_rebase_now_empty(whence)
 					? "commit (rebase)"
 					: "commit";
 		commit_list_insert(current_head, &parents);

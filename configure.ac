@@ -351,12 +351,6 @@ GIT_PARSE_WITH(iconv))
 
 ## --enable-FEATURE[=ARG] and --disable-FEATURE
 #
-# Define USE_NSEC below if you want git to care about sub-second file mtimes
-# and ctimes. Note that you need recent glibc (at least 2.2.4) for this, and
-# it will BREAK YOUR LOCAL DIFFS! show-diff and anything using it will likely
-# randomly break unless your underlying filesystem supports those sub-second
-# times (my ext3 doesn't).
-#
 # Define USE_STDEV below if you want git to care about the underlying device
 # change being considered an inode change from the update-index perspective.
 
@@ -1145,6 +1139,12 @@ GIT_CHECK_FUNC(mkdtemp,
 [NO_MKDTEMP=],
 [NO_MKDTEMP=YesPlease])
 GIT_CONF_SUBST([NO_MKDTEMP])
+#
+# Define NO_UTIMENSAT if you don't have utimensat in the C library.
+GIT_CHECK_FUNC(utimensat,
+[NO_UTIMENSAT=],
+[NO_UTIMENSAT=YesPlease])
+GIT_CONF_SUBST([NO_UTIMENSAT])
 #
 # Define NO_INITGROUPS if you don't have initgroups in the C library.
 GIT_CHECK_FUNC(initgroups,

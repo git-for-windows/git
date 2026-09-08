@@ -95,6 +95,7 @@ git-describe                            mainporcelain
 git-diagnose                            ancillaryinterrogators
 git-diff                                mainporcelain           info
 git-diff-files                          plumbinginterrogators
+git-diff-hunks                          plumbingmanipulators
 git-diff-index                          plumbinginterrogators
 git-diff-pairs                          plumbinginterrogators
 git-diff-tree                           plumbinginterrogators
@@ -218,13 +219,16 @@ gitcli                                  userinterfaces
 gitcore-tutorial                        guide
 gitcredentials                          guide
 gitcvs-migration                        guide
+gitdatamodel                            guide
 gitdiffcore                             guide
 giteveryday                             guide
 gitfaq                                  guide
 gitformat-bundle                        developerinterfaces
 gitformat-chunk                         developerinterfaces
 gitformat-commit-graph                  developerinterfaces
+gitformat-diff-hunks                    developerinterfaces
 gitformat-index                         developerinterfaces
+gitformat-loose                         developerinterfaces
 gitformat-pack                          developerinterfaces
 gitformat-signature                     developerinterfaces
 gitglossary                             guide
@@ -234,6 +238,7 @@ gitk                                    mainporcelain
 gitmailmap                              userinterfaces
 gitmodules                              userinterfaces
 gitnamespaces                           guide
+gitpacking                              guide
 gitprotocol-capabilities                developerinterfaces
 gitprotocol-common                      developerinterfaces
 gitprotocol-http                        developerinterfaces

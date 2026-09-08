@@ -413,11 +413,11 @@ endif()
 #function checks
 set(function_checks
 	strcasestr memmem strlcpy strtoimax strtoumax strtoull
-	setenv mkdtemp poll pread memmem)
+	setenv mkdtemp poll pread memmem writev)
 
-#unsetenv,hstrerror are incompatible with windows build
+#unsetenv,hstrerror,utimensat are incompatible with windows build (provided by compat/mingw.c)
 if(NOT WIN32)
-	list(APPEND function_checks unsetenv hstrerror)
+	list(APPEND function_checks unsetenv hstrerror utimensat)
 endif()
 
 foreach(f ${function_checks})
@@ -458,7 +458,15 @@ if(NOT HAVE_MEMMEM)
 	list(APPEND compat_SOURCES compat/memmem.c)
 endif()
 
+if(NOT HAVE_WRITEV)
+	list(APPEND compat_SOURCES compat/writev.c)
+endif()
+
 if(NOT WIN32)
+	if(NOT HAVE_UTIMENSAT)
+		list(APPEND compat_SOURCES compat/utimensat.c)
+	endif()
+
 	if(NOT HAVE_UNSETENV)
 		list(APPEND compat_SOURCES compat/unsetenv.c)
 	endif()
@@ -554,6 +562,9 @@ if(NOT HAVE_REGEX)
 	include_directories(${CMAKE_SOURCE_DIR}/compat/regex)
 	list(APPEND compat_SOURCES compat/regex/regex.c )
 	add_compile_definitions(NO_REGEX NO_MBSUPPORT GAWK)
+elseif(APPLE)
+	list(APPEND compat_SOURCES compat/darwin/regexec.c)
+	add_compile_definitions(DARWIN_REGEXEC)
 endif()
 
 

@@ -278,9 +278,9 @@ test_expect_success POSIXPERM 'init creates a new deep directory (umask vs. shar
 		git init --bare --shared=0660 newdir/a/b/c &&
 		test_path_is_dir newdir/a/b/c/refs &&
 		ls -ld newdir/a newdir/a/b > lsab.out &&
-		! grep -v "^drwxrw[sx]r-x" lsab.out &&
+		test_grep ! -v "^drwxrw[sx]r-x" lsab.out &&
 		ls -ld newdir/a/b/c > lsc.out &&
-		! grep -v "^drwxrw[sx]---" lsc.out
+		test_grep ! -v "^drwxrw[sx]---" lsc.out
 	)
 '
 
@@ -619,7 +619,7 @@ test_expect_success DEFAULT_REPO_FORMAT 'extensions.refStorage is not allowed wi
 	git init refstorage &&
 	git -C refstorage config extensions.refStorage files &&
 	test_must_fail git -C refstorage rev-parse 2>err &&
-	grep "repo version is 0, but v1-only extension found" err
+	test_grep "repo version is 0, but v1-only extension found" err
 '
 
 test_expect_success DEFAULT_REPO_FORMAT 'extensions.refStorage with files backend' '
@@ -637,48 +637,58 @@ test_expect_success DEFAULT_REPO_FORMAT 'extensions.refStorage with unknown back
 	git -C refstorage config core.repositoryformatversion 1 &&
 	git -C refstorage config extensions.refStorage garbage &&
 	test_must_fail git -C refstorage rev-parse 2>err &&
-	grep "invalid value for ${SQ}extensions.refstorage${SQ}: ${SQ}garbage${SQ}" err
+	test_grep "invalid value for ${SQ}extensions.refstorage${SQ}: ${SQ}garbage${SQ}" err
 '
 
-test_expect_success 'init with GIT_DEFAULT_REF_FORMAT=garbage' '
+test_expect_success 'init with GIT_DEFAULT_REF_STORAGE_FORMAT=garbage' '
 	test_when_finished "rm -rf refformat" &&
 	cat >expect <<-EOF &&
-	fatal: unknown ref storage format ${SQ}garbage${SQ}
+	fatal: unknown ref storage format specified via GIT_DEFAULT_REF_STORAGE_FORMAT: ${SQ}garbage${SQ}
 	EOF
-	test_must_fail env GIT_DEFAULT_REF_FORMAT=garbage git init refformat 2>err &&
+	test_must_fail env GIT_DEFAULT_REF_STORAGE_FORMAT=garbage git init refformat 2>err &&
 	test_cmp expect err
 '
 
-test_expect_success 'init warns about invalid init.defaultRefFormat' '
+test_expect_success 'GIT_REF_STORAGE_FORMAT refuses to reinitialize with different storage format' '
+	test_when_finished "rm -rf refbackend" &&
+	git init --ref-storage-format=files refbackend &&
+	cat >expect <<-EOF &&
+	fatal: attempt to reinitialize repository with different reference storage format
+	EOF
+	test_must_fail env GIT_REF_STORAGE_FORMAT=reftable git init refbackend 2>err &&
+	test_cmp expect err
+'
+
+test_expect_success 'init warns about invalid init.defaultRefStorageFormat' '
 	test_when_finished "rm -rf repo" &&
-	test_config_global init.defaultRefFormat garbage &&
+	test_config_global init.defaultRefStorageFormat garbage &&
 
 	echo "warning: unknown ref storage format ${SQ}garbage${SQ}" >expect &&
 	git init repo 2>err &&
 	test_cmp expect err &&
 
-	git -C repo rev-parse --show-ref-format >actual &&
-	echo $GIT_DEFAULT_REF_FORMAT >expected &&
+	git -C repo rev-parse --show-ref-storage-format >actual &&
+	echo $GIT_DEFAULT_REF_STORAGE_FORMAT >expected &&
 	test_cmp expected actual
 '
 
 test_expect_success 'default ref format' '
 	test_when_finished "rm -rf refformat" &&
 	(
-		sane_unset GIT_DEFAULT_REF_FORMAT &&
+		sane_unset GIT_DEFAULT_REF_STORAGE_FORMAT &&
 		git init refformat
 	) &&
-	git version --build-options | sed -ne "s/^default-ref-format: //p" >expect &&
-	git -C refformat rev-parse --show-ref-format >actual &&
+	git version --build-options | sed -ne "s/^default-ref-storage-format: //p" >expect &&
+	git -C refformat rev-parse --show-ref-storage-format >actual &&
 	test_cmp expect actual
 '
 
 backends="files reftable"
 for format in $backends
 do
-	test_expect_success DEFAULT_REPO_FORMAT "init with GIT_DEFAULT_REF_FORMAT=$format" '
+	test_expect_success DEFAULT_REPO_FORMAT "init with GIT_DEFAULT_REF_STORAGE_FORMAT=$format" '
 		test_when_finished "rm -rf refformat" &&
-		GIT_DEFAULT_REF_FORMAT=$format git init refformat &&
+		GIT_DEFAULT_REF_STORAGE_FORMAT=$format git init refformat &&
 
 		if test $format = files
 		then
@@ -692,64 +702,64 @@ do
 		test_cmp expect actual &&
 
 		echo $format >expect &&
-		git -C refformat rev-parse --show-ref-format >actual &&
+		git -C refformat rev-parse --show-ref-storage-format >actual &&
 		test_cmp expect actual
 	'
 
-	test_expect_success "init with --ref-format=$format" '
+	test_expect_success "init with --ref-storage-format=$format" '
 		test_when_finished "rm -rf refformat" &&
-		git init --ref-format=$format refformat &&
+		git init --ref-storage-format=$format refformat &&
 		echo $format >expect &&
-		git -C refformat rev-parse --show-ref-format >actual &&
+		git -C refformat rev-parse --show-ref-storage-format >actual &&
 		test_cmp expect actual
 	'
 
-	test_expect_success "init with init.defaultRefFormat=$format" '
+	test_expect_success "init with init.defaultRefStorageFormat=$format" '
 		test_when_finished "rm -rf refformat" &&
-		test_config_global init.defaultRefFormat $format &&
+		test_config_global init.defaultRefStorageFormat $format &&
 		(
-			sane_unset GIT_DEFAULT_REF_FORMAT &&
+			sane_unset GIT_DEFAULT_REF_STORAGE_FORMAT &&
 			git init refformat
 		) &&
 
 		echo $format >expect &&
-		git -C refformat rev-parse --show-ref-format >actual &&
+		git -C refformat rev-parse --show-ref-storage-format >actual &&
 		test_cmp expect actual
 	'
 
-	test_expect_success "--ref-format=$format overrides GIT_DEFAULT_REF_FORMAT" '
+	test_expect_success "--ref-storage-format=$format overrides GIT_DEFAULT_REF_STORAGE_FORMAT" '
 		test_when_finished "rm -rf refformat" &&
-		GIT_DEFAULT_REF_FORMAT=garbage git init --ref-format=$format refformat &&
+		GIT_DEFAULT_REF_STORAGE_FORMAT=garbage git init --ref-storage-format=$format refformat &&
 		echo $format >expect &&
-		git -C refformat rev-parse --show-ref-format >actual &&
+		git -C refformat rev-parse --show-ref-storage-format >actual &&
 		test_cmp expect actual
 	'
 
-	test_expect_success "reinit repository with GIT_DEFAULT_REF_FORMAT=$format does not change format" '
+	test_expect_success "reinit repository with GIT_DEFAULT_REF_STORAGE_FORMAT=$format does not change format" '
 		test_when_finished "rm -rf refformat" &&
 		git init refformat &&
-		git -C refformat rev-parse --show-ref-format >expect &&
-		GIT_DEFAULT_REF_FORMAT=$format git init refformat &&
-		git -C refformat rev-parse --show-ref-format >actual &&
+		git -C refformat rev-parse --show-ref-storage-format >expect &&
+		GIT_DEFAULT_REF_STORAGE_FORMAT=$format git init refformat &&
+		git -C refformat rev-parse --show-ref-storage-format >actual &&
 		test_cmp expect actual
 	'
 done
 
-test_expect_success "--ref-format= overrides GIT_DEFAULT_REF_FORMAT" '
+test_expect_success "--ref-storage-format= overrides GIT_DEFAULT_REF_STORAGE_FOMAT" '
 	test_when_finished "rm -rf refformat" &&
-	GIT_DEFAULT_REF_FORMAT=files git init --ref-format=reftable refformat &&
+	GIT_DEFAULT_REF_STORAGE_FORMAT=files git init --ref-storage-format=reftable refformat &&
 	echo reftable >expect &&
-	git -C refformat rev-parse --show-ref-format >actual &&
+	git -C refformat rev-parse --show-ref-storage-format >actual &&
 	test_cmp expect actual
 '
 
-test_expect_success "GIT_DEFAULT_REF_FORMAT= overrides init.defaultRefFormat" '
+test_expect_success "GIT_DEFAULT_REF_STORAGE_FORMAT= overrides init.defaultRefStorageFormat" '
 	test_when_finished "rm -rf refformat" &&
-	test_config_global init.defaultRefFormat files &&
+	test_config_global init.defaultRefStorageFormat files &&
 
-	GIT_DEFAULT_REF_FORMAT=reftable git init refformat &&
+	GIT_DEFAULT_REF_STORAGE_FORMAT=reftable git init refformat &&
 	echo reftable >expect &&
-	git -C refformat rev-parse --show-ref-format >actual &&
+	git -C refformat rev-parse --show-ref-storage-format >actual &&
 	test_cmp expect actual
 '
 
@@ -757,33 +767,33 @@ test_expect_success "init with feature.experimental=true" '
 	test_when_finished "rm -rf refformat" &&
 	test_config_global feature.experimental true &&
 	(
-		sane_unset GIT_DEFAULT_REF_FORMAT &&
+		sane_unset GIT_DEFAULT_REF_STORAGE_FORMAT &&
 		git init refformat
 	) &&
 	echo reftable >expect &&
-	git -C refformat rev-parse --show-ref-format >actual &&
+	git -C refformat rev-parse --show-ref-storage-format >actual &&
 	test_cmp expect actual
 '
 
-test_expect_success "init.defaultRefFormat overrides feature.experimental=true" '
+test_expect_success "init.defaultRefStorageFormat overrides feature.experimental=true" '
 	test_when_finished "rm -rf refformat" &&
 	test_config_global feature.experimental true &&
-	test_config_global init.defaultRefFormat files &&
+	test_config_global init.defaultRefStorageFormat files &&
 	(
-		sane_unset GIT_DEFAULT_REF_FORMAT &&
+		sane_unset GIT_DEFAULT_REF_STORAGE_FORMAT &&
 		git init refformat
 	) &&
 	echo files >expect &&
-	git -C refformat rev-parse --show-ref-format >actual &&
+	git -C refformat rev-parse --show-ref-storage-format >actual &&
 	test_cmp expect actual
 '
 
-test_expect_success "GIT_DEFAULT_REF_FORMAT= overrides feature.experimental=true" '
+test_expect_success "GIT_DEFAULT_REF_STORAGE_FORMAT= overrides feature.experimental=true" '
 	test_when_finished "rm -rf refformat" &&
 	test_config_global feature.experimental true &&
-	GIT_DEFAULT_REF_FORMAT=files git init refformat &&
+	GIT_DEFAULT_REF_STORAGE_FORMAT=files git init refformat &&
 	echo files >expect &&
-	git -C refformat rev-parse --show-ref-format >actual &&
+	git -C refformat rev-parse --show-ref-storage-format >actual &&
 	test_cmp expect actual
 '
 
@@ -791,10 +801,10 @@ for from_format in $backends
 do
 	test_expect_success "re-init with same format ($from_format)" '
 		test_when_finished "rm -rf refformat" &&
-		git init --ref-format=$from_format refformat &&
-		git init --ref-format=$from_format refformat &&
+		git init --ref-storage-format=$from_format refformat &&
+		git init --ref-storage-format=$from_format refformat &&
 		echo $from_format >expect &&
-		git -C refformat rev-parse --show-ref-format >actual &&
+		git -C refformat rev-parse --show-ref-storage-format >actual &&
 		test_cmp expect actual
 	'
 
@@ -807,25 +817,25 @@ do
 
 		test_expect_success "re-init with different format fails ($from_format -> $to_format)" '
 			test_when_finished "rm -rf refformat" &&
-			git init --ref-format=$from_format refformat &&
+			git init --ref-storage-format=$from_format refformat &&
 			cat >expect <<-EOF &&
 			fatal: attempt to reinitialize repository with different reference storage format
 			EOF
-			test_must_fail git init --ref-format=$to_format refformat 2>err &&
+			test_must_fail git init --ref-storage-format=$to_format refformat 2>err &&
 			test_cmp expect err &&
 			echo $from_format >expect &&
-			git -C refformat rev-parse --show-ref-format >actual &&
+			git -C refformat rev-parse --show-ref-storage-format >actual &&
 			test_cmp expect actual
 		'
 	done
 done
 
-test_expect_success 'init with --ref-format=garbage' '
+test_expect_success 'init with --ref-storage-format=garbage' '
 	test_when_finished "rm -rf refformat" &&
 	cat >expect <<-EOF &&
-	fatal: unknown ref storage format ${SQ}garbage${SQ}
+	fatal: unknown ref storage format specified via command line: ${SQ}garbage${SQ}
 	EOF
-	test_must_fail git init --ref-format=garbage refformat 2>err &&
+	test_must_fail git init --ref-storage-format=garbage refformat 2>err &&
 	test_cmp expect err
 '
 
@@ -848,8 +858,8 @@ test_expect_success MINGW 'redirect std handles' '
 		GIT_REDIRECT_STDOUT=output.txt \
 		GIT_REDIRECT_STDERR="2>&1" \
 		git rev-parse --git-dir --verify refs/invalid &&
-	grep "^\\.git\$" output.txt &&
-	grep "Needed a single revision" output.txt
+	test_grep "^\\.git\$" output.txt &&
+	test_grep "Needed a single revision" output.txt
 '
 
 test_expect_success '--initial-branch' '
@@ -862,14 +872,14 @@ test_expect_success '--initial-branch' '
 	git init --initial-branch=ignore initial-branch-option 2>err &&
 	test_grep "ignored --initial-branch" err &&
 	git -C initial-branch-option symbolic-ref HEAD >actual &&
-	grep hello actual
+	test_grep hello actual
 '
 
 test_expect_success 'overridden default initial branch name (config)' '
 	test_config_global init.defaultBranch nmb &&
 	GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME= git init initial-branch-config &&
 	git -C initial-branch-config symbolic-ref HEAD >actual &&
-	grep nmb actual
+	test_grep nmb actual
 '
 
 test_expect_success 'advice on unconfigured init.defaultBranch' '
@@ -907,7 +917,7 @@ test_expect_success 'overridden default main branch name (env)' '
 	test_config_global init.defaultBranch nmb &&
 	GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME=env git init main-branch-env &&
 	git -C main-branch-env symbolic-ref HEAD >actual &&
-	grep env actual
+	test_grep env actual
 '
 
 test_expect_success 'invalid default branch name' '
@@ -932,8 +942,8 @@ test_expect_success 'branch -m with the initial branch' '
 test_expect_success 'init with includeIf.onbranch condition' '
 	test_when_finished "rm -rf repo" &&
 	git -c includeIf.onbranch:main.path=nonexistent init repo &&
-	echo $GIT_DEFAULT_REF_FORMAT >expect &&
-	git -C repo rev-parse --show-ref-format >actual &&
+	echo $GIT_DEFAULT_REF_STORAGE_FORMAT >expect &&
+	git -C repo rev-parse --show-ref-storage-format >actual &&
 	test_cmp expect actual
 '
 
@@ -941,8 +951,8 @@ test_expect_success 'init with includeIf.onbranch condition with existing direct
 	test_when_finished "rm -rf repo" &&
 	mkdir repo &&
 	git -c includeIf.onbranch:nonexistent.path=/does/not/exist init repo &&
-	echo $GIT_DEFAULT_REF_FORMAT >expect &&
-	git -C repo rev-parse --show-ref-format >actual &&
+	echo $GIT_DEFAULT_REF_STORAGE_FORMAT >expect &&
+	git -C repo rev-parse --show-ref-storage-format >actual &&
 	test_cmp expect actual
 '
 
@@ -950,8 +960,8 @@ test_expect_success 're-init with includeIf.onbranch condition' '
 	test_when_finished "rm -rf repo" &&
 	git init repo &&
 	git -c includeIf.onbranch:nonexistent.path=/does/not/exist init repo &&
-	echo $GIT_DEFAULT_REF_FORMAT >expect &&
-	git -C repo rev-parse --show-ref-format >actual &&
+	echo $GIT_DEFAULT_REF_STORAGE_FORMAT >expect &&
+	git -C repo rev-parse --show-ref-storage-format >actual &&
 	test_cmp expect actual
 '
 

@@ -7,6 +7,7 @@ void fprintf_or_die(FILE *, const char *fmt, ...);
 void fwrite_or_die(FILE *f, const void *buf, size_t count);
 void fflush_or_die(FILE *f);
 void write_or_die(int fd, const void *buf, size_t count);
+void writev_or_die(int fd, struct iovec *iov, int iovlen);
 
 /*
  * These values are used to help identify parts of a repository to fsync.
@@ -22,13 +23,15 @@ enum fsync_component {
 	FSYNC_COMPONENT_INDEX			= 1 << 4,
 	FSYNC_COMPONENT_REFERENCE		= 1 << 5,
 	FSYNC_COMPONENT_OBJECT_MAP		= 1 << 6,
+	FSYNC_COMPONENT_DIFF_HUNKS		= 1 << 7,
 };
 
 #define FSYNC_COMPONENTS_OBJECTS (FSYNC_COMPONENT_LOOSE_OBJECT | \
 				  FSYNC_COMPONENT_PACK)
 
 #define FSYNC_COMPONENTS_DERIVED_METADATA (FSYNC_COMPONENT_PACK_METADATA | \
-					   FSYNC_COMPONENT_COMMIT_GRAPH)
+					   FSYNC_COMPONENT_COMMIT_GRAPH | \
+					   FSYNC_COMPONENT_DIFF_HUNKS)
 
 #define FSYNC_COMPONENTS_DEFAULT ((FSYNC_COMPONENTS_OBJECTS | \
 				   FSYNC_COMPONENTS_DERIVED_METADATA) & \
@@ -46,7 +49,8 @@ enum fsync_component {
 			      FSYNC_COMPONENT_COMMIT_GRAPH | \
 			      FSYNC_COMPONENT_INDEX | \
 			      FSYNC_COMPONENT_REFERENCE | \
-			      FSYNC_COMPONENT_OBJECT_MAP)
+			      FSYNC_COMPONENT_OBJECT_MAP | \
+			      FSYNC_COMPONENT_DIFF_HUNKS)
 
 #ifndef FSYNC_COMPONENTS_PLATFORM_DEFAULT
 #define FSYNC_COMPONENTS_PLATFORM_DEFAULT FSYNC_COMPONENTS_DEFAULT

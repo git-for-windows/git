@@ -13,7 +13,7 @@ libgit_rs_sources = [
 cargo_command = [
   shell,
   meson.current_source_dir() / 'cargo-meson.sh',
-  meson.project_source_root(),
+  meson.current_source_dir(),
   meson.current_build_dir(),
 ]
 if get_option('buildtype') == 'release'
@@ -22,7 +22,7 @@ endif
 
 libgit_rs = custom_target('git_rs',
   input: libgit_rs_sources + [
-    meson.project_source_root() / 'Cargo.toml',
+    meson.current_source_dir() / 'Cargo.toml',
   ],
   output: 'libgitcore.a',
   command: cargo_command,
@@ -35,7 +35,7 @@ if get_option('tests')
     args: [
       'test',
       '--manifest-path',
-      meson.project_source_root() / 'Cargo.toml',
+      meson.current_source_dir() / 'Cargo.toml',
       '--target-dir',
       meson.current_build_dir() / 'target',
     ],

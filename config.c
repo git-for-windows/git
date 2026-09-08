@@ -235,23 +235,20 @@ static int prepare_include_condition_pattern(const struct key_value_info *kvi,
 	return 0;
 }
 
-static int include_by_gitdir(const struct key_value_info *kvi,
-			     const struct config_options *opts,
-			     const char *cond, size_t cond_len, int icase)
+static int include_by_path(const struct key_value_info *kvi,
+			   const char *path,
+			   const char *cond, size_t cond_len, int icase)
 {
 	struct strbuf text = STRBUF_INIT;
 	struct strbuf pattern = STRBUF_INIT;
 	size_t prefix;
 	int ret = 0;
-	const char *git_dir;
 	int already_tried_absolute = 0;
 
-	if (opts->git_dir)
-		git_dir = opts->git_dir;
-	else
+	if (!path)
 		goto done;
 
-	strbuf_realpath(&text, git_dir, 1);
+	strbuf_realpath(&text, path, 1);
 	strbuf_add(&pattern, cond, cond_len);
 	ret = prepare_include_condition_pattern(kvi, &pattern, &prefix);
 	if (ret < 0)
@@ -284,7 +281,7 @@ again:
 		 * which'll do the right thing
 		 */
 		strbuf_reset(&text);
-		strbuf_add_absolute_path(&text, git_dir);
+		strbuf_add_absolute_path(&text, path);
 		already_tried_absolute = 1;
 		goto again;
 	}
@@ -400,9 +397,15 @@ static int include_condition_is_true(const struct key_value_info *kvi,
 	const struct config_options *opts = inc->opts;
 
 	if (skip_prefix_mem(cond, cond_len, "gitdir:", &cond, &cond_len))
-		return include_by_gitdir(kvi, opts, cond, cond_len, 0);
+		return include_by_path(kvi, opts->git_dir, cond, cond_len, 0);
 	else if (skip_prefix_mem(cond, cond_len, "gitdir/i:", &cond, &cond_len))
-		return include_by_gitdir(kvi, opts, cond, cond_len, 1);
+		return include_by_path(kvi, opts->git_dir, cond, cond_len, 1);
+	else if (skip_prefix_mem(cond, cond_len, "worktree:", &cond, &cond_len))
+		return include_by_path(kvi, inc->repo ? repo_get_work_tree(inc->repo) : NULL,
+				       cond, cond_len, 0);
+	else if (skip_prefix_mem(cond, cond_len, "worktree/i:", &cond, &cond_len))
+		return include_by_path(kvi, inc->repo ? repo_get_work_tree(inc->repo) : NULL,
+				       cond, cond_len, 1);
 	else if (skip_prefix_mem(cond, cond_len, "onbranch:", &cond, &cond_len))
 		return include_by_branch(inc, cond, cond_len);
 	else if (skip_prefix_mem(cond, cond_len, "hasconfig:remote.*.url:", &cond,
@@ -447,18 +450,24 @@ static int git_config_include(const char *var, const char *value,
 	return ret;
 }
 
+void git_config_append_parameter(struct strbuf *env, const char *key,
+				 const char *value)
+{
+	if (env->len)
+		strbuf_addch(env, ' ');
+	sq_quote_buf(env, key);
+	strbuf_addch(env, '=');
+	if (value)
+		sq_quote_buf(env, value);
+}
+
 static void git_config_push_split_parameter(const char *key, const char *value)
 {
 	struct strbuf env = STRBUF_INIT;
 	const char *old = getenv(CONFIG_DATA_ENVIRONMENT);
-	if (old && *old) {
+	if (old && *old)
 		strbuf_addstr(&env, old);
-		strbuf_addch(&env, ' ');
-	}
-	sq_quote_buf(&env, key);
-	strbuf_addch(&env, '=');
-	if (value)
-		sq_quote_buf(&env, value);
+	git_config_append_parameter(&env, key, value);
 	setenv(CONFIG_DATA_ENVIRONMENT, env.buf, 1);
 	strbuf_release(&env);
 }
@@ -1268,6 +1277,15 @@ ssize_t git_config_ssize_t(const char *name, const char *value,
 	return ret;
 }
 
+size_t git_config_size_t(const char *name, const char *value,
+			 const struct key_value_info *kvi)
+{
+	size_t ret;
+	if (!git_parse_size_t(value, &ret))
+		die_bad_number(name, value, kvi);
+	return ret;
+}
+
 double git_config_double(const char *name, const char *value,
 			 const struct key_value_info *kvi)
 {
@@ -1541,11 +1559,27 @@ int git_config_system(void)
 	return !git_env_bool("GIT_CONFIG_NOSYSTEM", 0);
 }
 
+static void attempt_git_config_from_file_with_options(config_fn_t fn,
+						      const char *filename,
+						      void *data,
+						      enum config_scope scope,
+						      const struct config_options *opts,
+						      int *success_count,
+						      int *cumulative_ret)
+{
+	int ret = git_config_from_file_with_options(fn, filename, data,
+						    scope, opts);
+	if (!ret)
+		(*success_count)++;
+	*cumulative_ret += ret;
+}
+
 static int do_git_config_sequence(const struct config_options *opts,
-				  const struct repository *repo,
-				  config_fn_t fn, void *data)
+				  const struct repository *repo, config_fn_t fn,
+				  void *data, int require_successful_config)
 {
 	int ret = 0;
+	int success_count = 0;
 	char *system_config = git_system_config();
 	char *xdg_config = NULL;
 	char *user_config = NULL;
@@ -1568,44 +1602,54 @@ static int do_git_config_sequence(const struct config_options *opts,
 		worktree_config = NULL;
 	}
 
-	if (git_config_system() && system_config &&
+	if (!opts->ignore_system && git_config_system() && system_config &&
 	    !access_or_die(system_config, R_OK,
 			   opts->system_gently ? ACCESS_EACCES_OK : 0))
-		ret += git_config_from_file_with_options(fn, system_config,
-							 data, CONFIG_SCOPE_SYSTEM,
-							 NULL);
+		attempt_git_config_from_file_with_options(fn, system_config, data,
+							  CONFIG_SCOPE_SYSTEM, NULL,
+							  &success_count, &ret);
 
-	git_global_config_paths(&user_config, &xdg_config);
+	if (!opts->ignore_global) {
+		git_global_config_paths(&user_config, &xdg_config);
 
-	if (xdg_config && !access_or_die(xdg_config, R_OK, ACCESS_EACCES_OK))
-		ret += git_config_from_file_with_options(fn, xdg_config, data,
-							 CONFIG_SCOPE_GLOBAL, NULL);
+		if (xdg_config && !access_or_die(xdg_config, R_OK, ACCESS_EACCES_OK))
+			attempt_git_config_from_file_with_options(fn, xdg_config,
+								  data,
+								  CONFIG_SCOPE_GLOBAL,
+								  NULL, &success_count, &ret);
 
-	if (user_config && !access_or_die(user_config, R_OK, ACCESS_EACCES_OK))
-		ret += git_config_from_file_with_options(fn, user_config, data,
-							 CONFIG_SCOPE_GLOBAL, NULL);
+		if (user_config && !access_or_die(user_config, R_OK, ACCESS_EACCES_OK))
+			attempt_git_config_from_file_with_options(fn, user_config,
+								  data,
+								  CONFIG_SCOPE_GLOBAL,
+								  NULL, &success_count, &ret);
+
+		free(xdg_config);
+		free(user_config);
+	}
 
 	if (!opts->ignore_repo && repo_config &&
 	    !access_or_die(repo_config, R_OK, 0))
-		ret += git_config_from_file_with_options(fn, repo_config, data,
-							 CONFIG_SCOPE_LOCAL, NULL);
+		attempt_git_config_from_file_with_options(fn, repo_config, data,
+							  CONFIG_SCOPE_LOCAL, NULL, &success_count, &ret);
 
 	if (!opts->ignore_worktree && worktree_config &&
 	    repo && repo->repository_format_worktree_config &&
-	    !access_or_die(worktree_config, R_OK, 0)) {
-			ret += git_config_from_file_with_options(fn, worktree_config, data,
-								 CONFIG_SCOPE_WORKTREE,
-								 NULL);
-	}
+	    !access_or_die(worktree_config, R_OK, 0))
+		attempt_git_config_from_file_with_options(fn, worktree_config, data,
+							  CONFIG_SCOPE_WORKTREE,
+							  NULL, &success_count, &ret);
 
 	if (!opts->ignore_cmdline && git_config_from_parameters(fn, data) < 0)
 		die(_("unable to parse command-line config"));
 
 	free(system_config);
-	free(xdg_config);
-	free(user_config);
 	free(repo_config);
 	free(worktree_config);
+
+	if (require_successful_config && !success_count && !ret)
+		ret = -1;
+
 	return ret;
 }
 
@@ -1633,7 +1677,8 @@ int config_with_options(config_fn_t fn, void *data,
 	 */
 	if (config_source && config_source->use_stdin) {
 		ret = git_config_from_stdin(fn, data, config_source->scope);
-	} else if (config_source && config_source->file) {
+	} else if (config_source && config_source->file &&
+		   config_source->scope != CONFIG_SCOPE_GLOBAL) {
 		ret = git_config_from_file_with_options(fn, config_source->file,
 							data, config_source->scope,
 							NULL);
@@ -1641,7 +1686,8 @@ int config_with_options(config_fn_t fn, void *data,
 		ret = git_config_from_blob_ref(fn, repo, config_source->blob,
 					       data, config_source->scope);
 	} else {
-		ret = do_git_config_sequence(opts, repo, fn, data);
+		ret = do_git_config_sequence(opts, repo, fn, data,
+					     config_source && config_source->scope == CONFIG_SCOPE_GLOBAL);
 	}
 
 	if (inc.remote_urls) {
@@ -2951,6 +2997,24 @@ char *git_config_prepare_comment_string(const char *comment)
 	return prepared;
 }
 
+/*
+ * How long to retry acquiring config.lock when another process holds
+ * it. Default matches core.packedRefsTimeout; override via
+ * core.configLockTimeout.
+ */
+static long config_lock_timeout_ms(struct repository *r)
+{
+	static int configured;
+	static int timeout_ms = 1000;
+
+	if (!configured) {
+		repo_config_get_int(r, "core.configlocktimeout", &timeout_ms);
+		configured = 1;
+	}
+
+	return timeout_ms;
+}
+
 static void validate_comment_string(const char *comment)
 {
 	size_t leading_blanks;
@@ -3034,7 +3098,8 @@ int repo_config_set_multivar_in_file_gently(struct repository *r,
 	 * The lock serves a purpose in addition to locking: the new
 	 * contents of .git/config will be written into it.
 	 */
-	fd = hold_lock_file_for_update(&lock, config_filename, 0);
+	fd = repo_hold_lock_file_for_update_timeout(r, &lock, config_filename, 0,
+						    config_lock_timeout_ms(r));
 	if (fd < 0) {
 		error_errno(_("could not lock config file %s"), config_filename);
 		ret = CONFIG_NO_LOCK;
@@ -3379,7 +3444,9 @@ static int repo_config_copy_or_rename_section_in_file(
 	if (!config_filename)
 		config_filename = filename_buf = repo_git_path(r, "config");
 
-	out_fd = hold_lock_file_for_update(&lock, config_filename, 0);
+	out_fd = repo_hold_lock_file_for_update_timeout(r, &lock,
+							config_filename, 0,
+							config_lock_timeout_ms(r));
 	if (out_fd < 0) {
 		ret = error(_("could not lock config file %s"), config_filename);
 		goto out;

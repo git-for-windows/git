@@ -181,6 +181,16 @@ including not with each other:
 
 --continue::
 	Restart the rebasing process after having resolved a merge conflict.
++
+-e::
+--edit::
+--no-edit::
+	With `--continue`, edit or do not edit the commit message,
+	respectively. By default, the configured $EDITOR is opened so you
+	can update the commit message after resolving conflicts.
+	`--no-edit` reuses the existing message without launching an
+	editor. The `rebase.noEdit` configuration variable can be used to
+	enable `--no-edit` by default; `--edit` overrides that setting.
 
 --skip::
 	Restart the rebasing process by skipping the current patch.
@@ -281,6 +291,11 @@ is specified), and commits which are clean cherry-picks (as determined
 by `git log --cherry-mark ...`) are detected and dropped as a
 preliminary step (unless `--reapply-cherry-picks` or `--keep-base` is
 passed).
++
+A commit can also become empty when `--autosquash` squashes a `fixup!`
+or `squash!` commit into it that cancels out all of its changes.  This
+option governs such a commit as well; it is dropped, kept, or stopped
+at just like a commit that becomes empty when it is picked.
 +
 See also INCOMPATIBLE OPTIONS below.
 
@@ -591,6 +606,12 @@ changed from `pick` to `squash`, `fixup` or `fixup -C`, respectively, and they
 are moved right after the commit they modify.  The `--interactive` option can
 be used to review and edit the todo list before proceeding.
 +
+Squashing a `fixup!` or `squash!` commit into its target can cancel out all
+of the changes of that target, leaving an empty commit behind.  What happens
+then is governed by the `--empty` option, so a change can be backed out of a
+series by committing a revert of it as a `fixup!` and letting
+`--autosquash --empty=drop` remove the two together.
++
 The recommended way to create commits with squash markers is by using the
 `--squash`, `--fixup`, `--fixup=amend:` or `--fixup=reword:` options of
 linkgit:git-commit[1], which take the target commit as an argument and
@@ -783,9 +804,10 @@ Commit Rewording
 When a conflict occurs while rebasing, rebase stops and asks the user
 to resolve.  Since the user may need to make notable changes while
 resolving conflicts, after conflicts are resolved and the user has run
-`git rebase --continue`, the rebase should open an editor and ask the
-user to update the commit message.  The 'merge' backend does this, while
-the 'apply' backend blindly applies the original commit message.
+`git rebase --continue`, the rebase opens an editor and asks the
+user to update the commit message, unless `rebase.noEdit` is set or
+`--no-edit` is passed to `--continue`.  The 'merge' backend does this,
+while the 'apply' backend blindly applies the original commit message.
 
 Miscellaneous differences
 ~~~~~~~~~~~~~~~~~~~~~~~~~

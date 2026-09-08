@@ -33,6 +33,7 @@ MAN5_TXT += gitattributes.adoc
 MAN5_TXT += gitformat-bundle.adoc
 MAN5_TXT += gitformat-chunk.adoc
 MAN5_TXT += gitformat-commit-graph.adoc
+MAN5_TXT += gitformat-diff-hunks.adoc
 MAN5_TXT += gitformat-index.adoc
 MAN5_TXT += gitformat-loose.adoc
 MAN5_TXT += gitformat-pack.adoc
@@ -66,6 +67,8 @@ MAN7_TXT += gitsubmodules.adoc
 MAN7_TXT += gittutorial-2.adoc
 MAN7_TXT += gittutorial.adoc
 MAN7_TXT += gitworkflows.adoc
+
+MAN_GUIDES = $(patsubst %.adoc,%,$(MAN5_TXT) $(MAN7_TXT))
 
 HOWTO_TXT += $(wildcard howto/*.adoc)
 
@@ -129,6 +132,7 @@ TECH_DOCS += technical/long-running-process-protocol
 TECH_DOCS += technical/multi-pack-index
 TECH_DOCS += technical/packfile-uri
 TECH_DOCS += technical/pack-heuristics
+TECH_DOCS += technical/paint-down-to-common
 TECH_DOCS += technical/parallel-checkout
 TECH_DOCS += technical/partial-clone
 TECH_DOCS += technical/platform-support

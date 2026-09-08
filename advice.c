@@ -40,10 +40,19 @@ enum advice_level {
 	ADVICE_LEVEL_ENABLED,
 };
 
-static struct {
+enum advice_scope {
+	ADVICE_SCOPE_LOCAL = 0,
+	ADVICE_SCOPE_GLOBAL,
+	ADVICE_SCOPE_SYSTEM,
+};
+
+struct advice_setting {
 	const char *key;
+	enum advice_scope scope_hint;
 	enum advice_level level;
-} advice_setting[] = {
+};
+
+static struct advice_setting advice_setting[] = {
 	[ADVICE_ADD_EMBEDDED_REPO]			= { "addEmbeddedRepo" },
 	[ADVICE_ADD_EMPTY_PATHSPEC]			= { "addEmptyPathspec" },
 	[ADVICE_ADD_IGNORED_FILE]			= { "addIgnoredFile" },
@@ -51,13 +60,14 @@ static struct {
 	[ADVICE_AM_WORK_DIR] 				= { "amWorkDir" },
 	[ADVICE_CHECKOUT_AMBIGUOUS_REMOTE_BRANCH_NAME] 	= { "checkoutAmbiguousRemoteBranchName" },
 	[ADVICE_COMMIT_BEFORE_MERGE]			= { "commitBeforeMerge" },
-	[ADVICE_DEFAULT_BRANCH_NAME]			= { "defaultBranchName" },
+	[ADVICE_DEFAULT_BRANCH_NAME]			= { "defaultBranchName", ADVICE_SCOPE_GLOBAL },
 	[ADVICE_DETACHED_HEAD]				= { "detachedHead" },
 	[ADVICE_DIVERGING]				= { "diverging" },
 	[ADVICE_FETCH_SET_HEAD_WARN]			= { "fetchRemoteHEADWarn" },
 	[ADVICE_FETCH_SHOW_FORCED_UPDATES]		= { "fetchShowForcedUpdates" },
 	[ADVICE_FORCE_DELETE_BRANCH]			= { "forceDeleteBranch" },
 	[ADVICE_GRAFT_FILE_DEPRECATED]			= { "graftFileDeprecated" },
+	[ADVICE_HISTORY_UPDATE_REFS]			= { "historyUpdateRefs" },
 	[ADVICE_IGNORED_HOOK]				= { "ignoredHook" },
 	[ADVICE_IMPLICIT_IDENTITY]			= { "implicitIdentity" },
 	[ADVICE_MERGE_CONFLICT]				= { "mergeConflict" },
@@ -70,6 +80,8 @@ static struct {
 	[ADVICE_PUSH_NON_FF_CURRENT]			= { "pushNonFFCurrent" },
 	[ADVICE_PUSH_NON_FF_MATCHING]			= { "pushNonFFMatching" },
 	[ADVICE_PUSH_REF_NEEDS_UPDATE]			= { "pushRefNeedsUpdate" },
+	[ADVICE_PUSH_REF_UNVERIFIABLE]			= { "pushRefUnverifiable" },
+	[ADVICE_PUSH_REPO_LOOKS_LIKE_REF]		= { "pushRepoLooksLikeRef" },
 	[ADVICE_PUSH_UNQUALIFIED_REF_NAME]		= { "pushUnqualifiedRefName" },
 	[ADVICE_PUSH_UPDATE_REJECTED]			= { "pushUpdateRejected" },
 	[ADVICE_PUSH_UPDATE_REJECTED_ALIAS]		= { "pushNonFastForward" }, /* backwards compatibility */
@@ -97,18 +109,31 @@ static struct {
 
 static const char turn_off_instructions[] =
 N_("\n"
-   "Disable this message with \"git config set advice.%s false\"");
+   "Disable this message with \"git config set%s advice.%s false\"");
 
-static void vadvise(const char *advice, int display_instructions,
-		    const char *key, va_list params)
+static void vadvise(const char *advice,
+	const struct advice_setting *setting, va_list params)
 {
 	struct strbuf buf = STRBUF_INIT;
 	const char *cp, *np;
 
 	strbuf_vaddf(&buf, advice, params);
 
-	if (display_instructions)
-		strbuf_addf(&buf, turn_off_instructions, key);
+	if (setting && setting->level == 0) {
+		const char *scope = "";
+		switch (setting->scope_hint) {
+			case ADVICE_SCOPE_LOCAL:
+				break;
+			case ADVICE_SCOPE_GLOBAL:
+				scope = " --global";
+				break;
+			case ADVICE_SCOPE_SYSTEM:
+				scope = " --system";
+				break;
+		}
+		strbuf_addf(&buf, turn_off_instructions,
+				scope, setting->key);
+	}
 
 	for (cp = buf.buf; *cp; cp = np) {
 		np = strchrnul(cp, '\n');
@@ -127,7 +152,7 @@ void advise(const char *advice, ...)
 {
 	va_list params;
 	va_start(params, advice);
-	vadvise(advice, 0, "", params);
+	vadvise(advice, NULL, params);
 	va_end(params);
 }
 
@@ -156,8 +181,7 @@ void advise_if_enabled(enum advice_type type, const char *advice, ...)
 		return;
 
 	va_start(params, advice);
-	vadvise(advice, !advice_setting[type].level, advice_setting[type].key,
-		params);
+	vadvise(advice, &advice_setting[type], params);
 	va_end(params);
 }
 

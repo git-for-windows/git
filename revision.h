@@ -66,7 +66,9 @@ struct repository;
 struct rev_info;
 struct string_list;
 struct saved_parents;
+struct follow_pathspec_slab;
 struct bloom_keyvec;
+struct bloom_filter;
 struct bloom_filter_settings;
 struct option;
 struct parse_opt_ctx_t;
@@ -313,6 +315,8 @@ struct rev_info {
 	/* Display history graph */
 	struct git_graph *graph;
 	int graph_max_lanes;
+	unsigned int no_graph_indent:1;
+	unsigned int graph_indent_set:1;
 
 	/* special limits */
 	int skip_count;
@@ -363,6 +367,9 @@ struct rev_info {
 	/* copies of the parent lists, for --full-diff display */
 	struct saved_parents *saved_parents_slab;
 
+	/* per-commit pathspec for --follow across merges */
+	struct follow_pathspec_slab *follow_pathspec_slab;
+
 	struct commit_list *previous_parents;
 	struct commit_list *ancestry_path_bottoms;
 	const char *break_bar;
@@ -390,6 +397,14 @@ struct rev_info {
 
 	/* Missing commits to be tracked without failing traversal. */
 	struct oidset missing_commits;
+
+	/*
+	 * Strings whose ownership has been handed over to us, but which
+	 * we may be referencing in any of the above options (including
+	 * within the diffopt struct). These will remain valid until
+	 * release_revisions() is called.
+	 */
+	struct strvec argv_to_free;
 };
 
 /**
@@ -427,6 +442,7 @@ struct rev_info {
 	.commit_format = CMIT_FMT_DEFAULT, \
 	.expand_tabs_in_log_default = 8, \
 	.rdiff_log_arg = STRVEC_INIT, \
+	.argv_to_free = STRVEC_INIT, \
 }
 
 /**
@@ -488,6 +504,25 @@ void reset_revision_walk(void);
  * get_revision() to do the iteration.
  */
 int prepare_revision_walk(struct rev_info *revs);
+
+/**
+ * Consult a changed-path Bloom filter to determine if the commit to which the
+ * filter belongs might have changed any of the paths in the `revs`.
+ * prepare_revision_walk() needs to be called in advance to ensure
+ * pathspec key vectors are set up.
+ *
+ * Returns false iff the commit definitely did not change any of the paths.
+ */
+bool revs_maybe_changed_in_bloom(struct rev_info *revs,
+				 struct bloom_filter *filter);
+
+/**
+ * Same as revs_maybe_changed_in_bloom(), but a change to any of the directories
+ * leading up to a path counts as well. Callers that track the tree entries
+ * containing the paths, and not just the paths themselves, need this.
+ */
+bool revs_maybe_changed_in_bloom_with_parents(struct rev_info *revs,
+					      struct bloom_filter *filter);
 
 /* Drain the commits linked list into the priority queue. */
 void rev_info_commit_list_to_queue(struct rev_info *revs);

@@ -176,24 +176,9 @@ test_expect_success '--name-status shows status and path' '
 	test_grep ! "^@@" actual
 '
 
-test_expect_success '--stat is not yet supported with -L' '
-	test_must_fail git log -L1,24:b.c --stat 2>err &&
-	test_grep "does not yet support" err
-'
-
-test_expect_success '--numstat is not yet supported with -L' '
-	test_must_fail git log -L1,24:b.c --numstat 2>err &&
-	test_grep "does not yet support" err
-'
-
-test_expect_success '--shortstat is not yet supported with -L' '
-	test_must_fail git log -L1,24:b.c --shortstat 2>err &&
-	test_grep "does not yet support" err
-'
-
-test_expect_success '--dirstat is not yet supported with -L' '
+test_expect_success '--dirstat is not supported with -L' '
 	test_must_fail git log -L1,24:b.c --dirstat 2>err &&
-	test_grep "does not yet support" err
+	test_grep "does not support" err
 '
 
 test_expect_success 'setup for checking fancy rename following' '
@@ -393,14 +378,14 @@ test_expect_success '-L diff output includes index and new file mode' '
 	git log -L:func2:file.c --format= >actual &&
 
 	# Output should contain index headers (not present in old code path)
-	grep "^index $head_blob_old\.\.$head_blob_new 100644" actual &&
+	test_grep "^index $head_blob_old\.\.$head_blob_new 100644" actual &&
 
 	# Root commit should show new file mode and null index
-	grep "^new file mode 100644" actual &&
-	grep "^index $null_blob\.\.$root_blob$" actual &&
+	test_grep "^new file mode 100644" actual &&
+	test_grep "^index $null_blob\.\.$root_blob$" actual &&
 
 	# Hunk headers should include funcname context
-	grep "^@@ .* @@ int func1()" actual
+	test_grep "^@@ .* @@ int func1()" actual
 '
 
 test_expect_success '-L with --word-diff' '
@@ -431,15 +416,15 @@ test_expect_success '-L with --word-diff' '
 
 test_expect_success '-L with --no-prefix' '
 	git log -L:func2:file.c --no-prefix --format= >actual &&
-	grep "^diff --git file.c file.c" actual &&
-	grep "^--- file.c" actual &&
-	! grep "^--- a/" actual
+	test_grep "^diff --git file.c file.c" actual &&
+	test_grep "^--- file.c" actual &&
+	test_grep ! "^--- a/" actual
 '
 
 test_expect_success '-L with --full-index' '
 	git log -L:func2:file.c --full-index --format= >actual &&
-	grep "^index $head_blob_old_full\.\.$head_blob_new_full 100644" actual &&
-	grep "^index $null_blob_full\.\.$root_blob_full$" actual
+	test_grep "^index $head_blob_old_full\.\.$head_blob_new_full 100644" actual &&
+	test_grep "^index $null_blob_full\.\.$root_blob_full$" actual
 '
 
 test_expect_success 'setup -L with whitespace change' '
@@ -548,29 +533,29 @@ test_expect_success '-L with --word-diff-regex' '
 	git log -L:func2:file.c --word-diff \
 		--word-diff-regex="[a-zA-Z0-9_]+" --format= >actual &&
 	# Word-diff markers must be present
-	grep "{+" actual &&
-	grep "+}" actual &&
+	test_grep "{+" actual &&
+	test_grep "+}" actual &&
 	# No line-level +/- markers (word-diff replaces them);
 	# exclude --- header lines from the check
-	! grep "^+[^+]" actual &&
-	! grep "^-[^-]" actual
+	test_grep ! "^+[^+]" actual &&
+	test_grep ! "^-[^-]" actual
 '
 
 test_expect_success '-L with --src-prefix and --dst-prefix' '
 	git checkout parent-oids &&
 	git log -L:func2:file.c --src-prefix=old/ --dst-prefix=new/ \
 		--format= >actual &&
-	grep "^diff --git old/file.c new/file.c" actual &&
-	grep "^--- old/file.c" actual &&
-	grep "^+++ new/file.c" actual &&
-	! grep "^--- a/" actual
+	test_grep "^diff --git old/file.c new/file.c" actual &&
+	test_grep "^--- old/file.c" actual &&
+	test_grep "^+++ new/file.c" actual &&
+	test_grep ! "^--- a/" actual
 '
 
 test_expect_success '-L with --abbrev' '
 	git checkout parent-oids &&
 	git log -L:func2:file.c --abbrev=4 --format= -1 >actual &&
 	# 4-char abbreviated hashes on index line
-	grep "^index [0-9a-f]\{4\}\.\.[0-9a-f]\{4\}" actual
+	test_grep "^index [0-9a-f]\{4\}\.\.[0-9a-f]\{4\}" actual
 '
 
 test_expect_success '-L with -b suppresses whitespace-only diff' '
@@ -586,24 +571,24 @@ test_expect_success '-L with --output-indicator-*' '
 	git log -L:func2:file.c --output-indicator-new=">" \
 		--output-indicator-old="<" --output-indicator-context="|" \
 		--format= -1 >actual &&
-	grep "^>" actual &&
-	grep "^<" actual &&
-	grep "^|" actual &&
+	test_grep "^>" actual &&
+	test_grep "^<" actual &&
+	test_grep "^|" actual &&
 	# No standard +/-/space content markers; exclude ---/+++ headers
-	! grep "^+[^+]" actual &&
-	! grep "^-[^-]" actual &&
-	! grep "^ " actual
+	test_grep ! "^+[^+]" actual &&
+	test_grep ! "^-[^-]" actual &&
+	test_grep ! "^ " actual
 '
 
 test_expect_success '-L with -R reverses diff' '
 	git checkout parent-oids &&
 	git log -L:func2:file.c -R --format= -1 >actual &&
-	grep "^diff --git b/file.c a/file.c" actual &&
-	grep "^--- b/file.c" actual &&
-	grep "^+++ a/file.c" actual &&
+	test_grep "^diff --git b/file.c a/file.c" actual &&
+	test_grep "^--- b/file.c" actual &&
+	test_grep "^+++ a/file.c" actual &&
 	# The modification added "F2 + 2", so reversed it is removed
-	grep "^-.*F2 + 2" actual &&
-	grep "^+.*return F2;" actual
+	test_grep "^-.*F2 + 2" actual &&
+	test_grep "^+.*return F2;" actual
 '
 
 test_expect_success 'setup for color-moved test' '
@@ -629,8 +614,8 @@ test_expect_success '-L with --color-moved' '
 		--color=always --format= -1 >actual.raw &&
 	test_decode_color <actual.raw >actual &&
 	# Old moved lines: bold magenta; new moved lines: bold cyan
-	grep "BOLD;MAGENTA" actual &&
-	grep "BOLD;CYAN" actual
+	test_grep "BOLD;MAGENTA" actual &&
+	test_grep "BOLD;CYAN" actual
 '
 
 test_expect_success 'setup for no-newline-at-eof tests' '
@@ -650,14 +635,14 @@ test_expect_success 'setup for no-newline-at-eof tests' '
 # newline, the "\ No newline at end of file" marker should appear.
 test_expect_success '-L no-newline-at-eof appears in tracked range' '
 	git log -L:bot:noeol.c --format= -1 HEAD~1 >actual &&
-	grep "No newline at end of file" actual
+	test_grep "No newline at end of file" actual
 '
 
 # When tracking a function that ends before the no-newline content,
 # the marker should not appear in the output.
 test_expect_success '-L no-newline-at-eof suppressed outside range' '
 	git log -L:top:noeol.c --format= >actual &&
-	! grep "No newline at end of file" actual
+	test_grep ! "No newline at end of file" actual
 '
 
 # When a commit removes a no-newline last line and replaces it with
@@ -665,7 +650,7 @@ test_expect_success '-L no-newline-at-eof suppressed outside range' '
 # old side of the diff).
 test_expect_success '-L no-newline-at-eof marker with deleted line' '
 	git log -L:bot:noeol.c --format= -1 >actual &&
-	grep "No newline at end of file" actual
+	test_grep "No newline at end of file" actual
 '
 
 test_expect_success 'setup for range boundary deletion test' '
@@ -718,24 +703,49 @@ test_expect_success '-L suppresses deletions outside tracked range' '
 	test $(grep -c "^diff --git" actual) = 1
 '
 
-test_expect_success '-L with -S filters to string-count changes' '
+test_expect_success '-L with -S selects only the matching commit' '
 	git checkout parent-oids &&
-	git log -L:func2:file.c -S "F2 + 2" --format= >actual &&
-	# -S searches the whole file, not just the tracked range;
-	# combined with the -L range walk, this selects commits that
-	# both touch func2 and change the count of "F2 + 2" in the file.
-	test $(grep -c "^diff --git" actual) = 1 &&
-	grep "F2 + 2" actual
+	git log -L:func2:file.c -S "F2 + 2" --format=%s --no-patch >actual &&
+	echo "Modify func2() in file.c" >expect &&
+	test_cmp expect actual
 '
 
-test_expect_success '-L with -G filters to diff-text matches' '
+test_expect_success '-L with -G selects only the matching commit' '
 	git checkout parent-oids &&
-	git log -L:func2:file.c -G "F2 [+] 2" --format= >actual &&
-	# -G greps the whole-file diff text, not just the tracked range;
-	# combined with -L, this selects commits that both touch func2
-	# and have "F2 + 2" in their diff.
-	test $(grep -c "^diff --git" actual) = 1 &&
-	grep "F2 + 2" actual
+	git log -L:func2:file.c -G "F2 [+] 2" --format=%s --no-patch >actual &&
+	echo "Modify func2() in file.c" >expect &&
+	test_cmp expect actual
+'
+
+test_expect_success 'setup for trailing deletion test' '
+	git checkout --orphan trailing-del &&
+	git reset --hard &&
+	cat >file.c <<-\EOF &&
+	void tracked()
+	{
+	    return 1;
+	}
+	// trailing comment outside tracked range
+	EOF
+	git add file.c &&
+	test_tick &&
+	git commit -m "add file with trailing comment" &&
+	# Remove the trailing comment AND modify tracked() so there
+	# is a modification to the line range we track and a
+	# modification to the following line, which we do not track.
+	cat >file.c <<-\EOF &&
+	void tracked()
+	{
+	    return 2;
+	}
+	EOF
+	git commit -a -m "modify tracked and delete trailing comment"
+'
+
+test_expect_success '-L does not include deletions past end of tracked range' '
+	git log -L:tracked:file.c --format= -1 -p >actual &&
+	test_grep "return 2" actual &&
+	test_grep ! "trailing comment" actual
 '
 
 test_expect_success '-L with --diff-filter=M excludes root commit' '
@@ -762,9 +772,9 @@ test_expect_success '-L with -S suppresses non-matching commits' '
 	test_cmp expect actual
 '
 
-test_expect_success '--full-diff is not yet supported with -L' '
+test_expect_success '--full-diff is not supported with -L' '
 	test_must_fail git log -L1,24:b.c --full-diff 2>err &&
-	test_grep "does not yet support" err
+	test_grep "does not support" err
 '
 
 test_expect_success '-L --oneline has no extra blank line before diff' '
@@ -775,10 +785,279 @@ test_expect_success '-L --oneline has no extra blank line before diff' '
 	test_grep "^diff --git" line2
 '
 
+test_expect_success 'setup for -L stat tests' '
+	git checkout --orphan stat-range &&
+	git reset --hard &&
+	cat >file.c <<-\EOF &&
+	int func1()
+	{
+	    return F1;
+	}
+
+	int tracked_fn()
+	{
+	    return F2;
+	}
+	EOF
+	git add file.c &&
+	test_tick &&
+	git commit -m "Add func1() and tracked_fn()" &&
+
+	# Modify both functions so whole-file stats (2 added, 2 deleted)
+	# differ from the tracked range of tracked_fn (1 and 1).
+	sed -e "s/F1/F1 + 1/" -e "s/F2/F2 + 2/" file.c >tmp &&
+	mv tmp file.c &&
+	git commit -a -m "Modify both functions"
+'
+
+test_expect_success '-L --numstat limits counts to the tracked range' '
+	git log -L:tracked_fn:file.c --numstat --format=%s >actual &&
+	cat >expect <<-\EOF &&
+	Modify both functions
+
+	1	1	file.c
+	Add func1() and tracked_fn()
+
+	4	0	file.c
+	EOF
+	test_cmp expect actual
+'
+
+test_expect_success '-L --stat and --shortstat limit counts to the tracked range' '
+	git log -L:tracked_fn:file.c --stat --format=%s -1 >actual &&
+	cat >expect <<-\EOF &&
+	Modify both functions
+
+	 file.c | 2 +-
+	 1 file changed, 1 insertion(+), 1 deletion(-)
+	EOF
+	test_cmp expect actual &&
+
+	git log -L:tracked_fn:file.c --shortstat --format=%s -1 >actual &&
+	cat >expect <<-\EOF &&
+	Modify both functions
+
+	 1 file changed, 1 insertion(+), 1 deletion(-)
+	EOF
+	test_cmp expect actual
+'
+
+test_expect_success '--numstat across renames and multiple commits' '
+	# parallel-change carries the tracked function f across an a.c -> b.c
+	# rename and a merge of two parallel histories.
+	git checkout parallel-change &&
+	git log -M -L ":f:b.c" --format= --numstat >actual &&
+	cat >expect <<-\EOF &&
+	1	1	b.c
+	1	1	a.c
+	1	1	a.c
+	1	1	a.c
+	1	0	a.c
+	13	0	a.c
+	EOF
+	test_cmp expect actual
+'
+
+test_expect_success '-L multiple ranges with --numstat excludes untracked change' '
+	git checkout --orphan multi-range &&
+	git reset --hard &&
+	cat >m.c <<-\EOF &&
+	int tracked_func1()
+	{
+	    return F1;
+	}
+
+	int tracked_func2()
+	{
+	    return F2;
+	}
+
+	int func3()
+	{
+	    return F3;
+	}
+	EOF
+	git add m.c &&
+	test_tick &&
+	git commit -m "add m.c" &&
+	sed -e "s/F1/F1 + 1/" -e "s/F2/F2 + 2/" -e "s/F3/F3 + 3/" m.c >tmp &&
+	mv tmp m.c &&
+	git commit -a -m "Modify all three functions" &&
+	git log -L:tracked_func1:m.c -L:tracked_func2:m.c --numstat --format=%s -1 >actual &&
+	cat >expect <<-\EOF &&
+	Modify all three functions
+
+	2	2	m.c
+	EOF
+	test_cmp expect actual
+'
+
 test_expect_success '--summary shows new file on root commit' '
 	git checkout parent-oids &&
 	git log -L:func2:file.c --summary --format= >actual &&
 	test_grep "create mode 100644 file.c" actual
+'
+
+test_expect_success 'get_commit_action() does not mutate a not-yet-walked commit' '
+	git init peek &&
+	(
+		cd peek &&
+		test_write_lines 1 2 3 4 5 >f.c &&
+		git add f.c && test_tick && git commit -m base &&
+		test_write_lines 1 two 3 4 5 >f.c &&
+		test_tick && git commit -am change &&
+
+		# Peek HEAD^, which the walk has not reached (the out-of-order
+		# call a lookahead makes), and confirm get_commit_action() leaves
+		# it untouched.  A side effect is invisible in the commit list
+		# (range merges are idempotent), so the helper reports whether the
+		# call mutated the peeked commit at all.
+		echo "mutated 0" >expect &&
+		test-tool revision-walking line-log-peek HEAD^ 1,3:f.c HEAD >actual &&
+		test_cmp expect actual
+	)
+'
+
+test_expect_success 'setup for --check test' '
+	git checkout --orphan check-test &&
+	git reset --hard &&
+	cat >check.c <<-\EOF &&
+	void tracked()
+	{
+	    return;
+	}
+
+	void other()
+	{
+	    return;
+	}
+	EOF
+	git add check.c &&
+	test_tick &&
+	git commit -m "add check.c" &&
+	sed "s/return;/return; /" check.c >check.c.tmp &&
+	mv check.c.tmp check.c &&
+	git commit -a -m "introduce trailing whitespace"
+'
+
+test_expect_success '--check is limited to tracked ranges and reports real file line numbers' '
+	test_must_fail git log -L:tracked:check.c --check --format= >raw &&
+	grep -E ":[0-9]+:" raw >actual &&
+	echo "check.c:3: trailing whitespace." >expect &&
+	test_cmp expect actual &&
+
+	test_must_fail git log -L:tracked:check.c -L:other:check.c \
+		--check --format= >raw &&
+	grep -E ":[0-9]+:" raw >actual &&
+	cat >expect <<-\EOF &&
+	check.c:3: trailing whitespace.
+	check.c:8: trailing whitespace.
+	EOF
+	test_cmp expect actual
+'
+
+test_expect_success '--check reports each error at its real line across a gap in one range' '
+	git checkout --orphan check-gap &&
+	git reset --hard &&
+	cat >gap.c <<-\EOF &&
+	void tracked()
+	{
+	    int a = 1;
+	    int b = 2;
+	    int c = 3;
+	    int d = 4;
+	    int e = 5;
+	    int g = 7;
+	    return;
+	}
+	EOF
+	git add gap.c &&
+	test_tick &&
+	git commit -m "add gap.c" &&
+	sed -e "s/int a = 1;/int a = 1; /" -e "s/int g = 7;/int g = 7; /" gap.c >tmp &&
+	mv tmp gap.c &&
+	git commit -a -m "ws errors with a gap" &&
+	test_must_fail git log -L:tracked:gap.c --check --format= >raw &&
+	grep -E ":[0-9]+:" raw >actual &&
+	cat >expect <<-\EOF &&
+	gap.c:3: trailing whitespace.
+	gap.c:8: trailing whitespace.
+	EOF
+	test_cmp expect actual
+'
+
+test_expect_success '--check does not report blank-at-eof outside the range' '
+	git checkout --orphan check-eof &&
+	git reset --hard &&
+	printf "void tracked()\n{\n    return;\n}\n\nint tail = 1;\n" >eof.c &&
+	git add eof.c &&
+	test_tick &&
+	git commit -m "add eof.c" &&
+	printf "void tracked()\n{\n    return; \n}\n\nint tail = 1;\n\n" >eof.c &&
+	git commit -a -m "ws in range, blank at eof out of range" &&
+	test_must_fail git log -L:tracked:eof.c --check --format= >raw &&
+	grep -E ":[0-9]+:" raw >actual &&
+	echo "eof.c:3: trailing whitespace." >expect &&
+	test_cmp expect actual
+'
+
+test_expect_success '-L -G is limited to the tracked range' '
+	git checkout --orphan grep-range &&
+	git reset --hard &&
+	cat >gp.c <<-\EOF &&
+	int func1()
+	{
+	    return ALPHA;
+	}
+
+	int func2()
+	{
+	    return BETA;
+	}
+	EOF
+	git add gp.c &&
+	test_tick &&
+	git commit -m "add gp.c" &&
+	sed -e "s/ALPHA/ALPHA2/" -e "s/BETA/BETA2/" gp.c >tmp &&
+	mv tmp gp.c &&
+	git commit -a -m "touch both functions" &&
+	git log -L:func2:gp.c -G BETA --format=%s --no-patch >actual &&
+	cat >expect <<-\EOF &&
+	touch both functions
+	add gp.c
+	EOF
+	test_cmp expect actual &&
+	git log -L:func2:gp.c -G ALPHA --format=%s --no-patch >actual &&
+	test_must_be_empty actual
+'
+
+test_expect_success '-L -G searches the whole file under textconv' '
+	git checkout --orphan grep-textconv &&
+	git reset --hard &&
+	cat >tc.c <<-\EOF &&
+	int func1()
+	{
+	    return F1;
+	}
+
+	int func2()
+	{
+	    return F2;
+	}
+	EOF
+	git add tc.c &&
+	test_tick &&
+	git commit -m "add tc.c" &&
+	sed -e "s/F1/F1 + 1/" -e "s/return F2/return FINDME/" tc.c >tmp &&
+	mv tmp tc.c &&
+	git commit -a -m "change both funcs" &&
+	echo "tc.c diff=tc" >.gitattributes &&
+	git log -L:func1:tc.c -G FINDME --format=%s --no-patch >actual &&
+	test_must_be_empty actual &&
+	git config diff.tc.textconv cat &&
+	git log -L:func1:tc.c -G FINDME --format=%s --no-patch >actual &&
+	echo "change both funcs" >expect &&
+	test_cmp expect actual
 '
 
 test_done

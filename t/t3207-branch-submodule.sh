@@ -98,6 +98,36 @@ test_expect_success 'should respect submodule.recurse when creating branches' '
 	)
 '
 
+test_expect_success 'should move a branch to a start point that names no ref' '
+	test_when_finished "rm -rf no-submodules" &&
+	git init no-submodules &&
+	(
+		cd no-submodules &&
+		test_commit one &&
+		test_commit two &&
+		git remote add origin . &&
+		git config submodule.propagateBranches true &&
+		git config submodule.recurse true &&
+		git branch branch-a HEAD~1 &&
+		oid=$(git rev-parse HEAD) &&
+		git branch -f branch-a "$oid" &&
+		test_cmp_rev HEAD branch-a
+	)
+'
+
+test_expect_success 'should recurse into submodules from a start point that names no ref' '
+	test_when_finished "reset_test" &&
+	(
+		cd super &&
+		oid=$(git rev-parse HEAD) &&
+		git branch --recurse-submodules branch-a "$oid" &&
+		git rev-parse branch-a &&
+		git -C sub rev-parse branch-a &&
+		git -C sub/sub-sub rev-parse branch-a &&
+		git -C second/sub rev-parse branch-a
+	)
+'
+
 test_expect_success 'should ignore submodule.recurse when not creating branches' '
 	test_when_finished "reset_test" &&
 	(
@@ -136,7 +166,7 @@ test_expect_success 'should not create any branches if branch is not valid for a
 		git -C sub branch branch-a &&
 		test_must_fail git branch --recurse-submodules branch-a 2>actual &&
 		test_no_branch . branch-a &&
-		grep "submodule .sub.: fatal: a branch named .branch-a. already exists" actual
+		test_grep "submodule .sub.: fatal: a branch named .branch-a. already exists" actual
 	)
 '
 
@@ -251,7 +281,7 @@ test_expect_success 'should get fatal error upon branch creation when submodule 
 		git branch --recurse-submodules branch-a origin/branch-a &&
 		# This should fail because super-clone does not have sub2 .git/modules
 		test_must_fail git branch --recurse-submodules branch-b origin/branch-b 2>actual &&
-		grep "fatal: submodule .sub2.: unable to find submodule" actual &&
+		test_grep "fatal: submodule .sub2.: unable to find submodule" actual &&
 		test_no_branch . branch-b &&
 		test_no_branch sub branch-b &&
 		# User can fix themselves by initializing the submodule

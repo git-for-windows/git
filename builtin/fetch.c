@@ -96,13 +96,14 @@ static struct string_list deepen_not = STRING_LIST_INIT_NODUP;
 static struct strbuf default_rla = STRBUF_INIT;
 static struct transport *gtransport;
 static struct transport *gsecondary;
-static struct refspec refmap = REFSPEC_INIT_FETCH;
+static struct refspec refmap;
 static struct string_list server_options = STRING_LIST_INIT_DUP;
 static struct string_list negotiation_restrict = STRING_LIST_INIT_NODUP;
 static struct string_list negotiation_include = STRING_LIST_INIT_NODUP;
 
 struct fetch_config {
 	enum display_format display_format;
+	enum follow_remote_head_settings follow_remote_head;
 	int all;
 	int prune;
 	int prune_tags;
@@ -110,7 +111,29 @@ struct fetch_config {
 	int recurse_submodules;
 	int parallel;
 	int submodule_fetch_jobs;
+	int submodule_errors;
 };
+
+/* really private - use accessors below to parse and format */
+static const char *submodule_error_name[] = {
+	[SUBMODULE_ERRORS_FAIL] = "fail",
+	[SUBMODULE_ERRORS_WARN] = "warn",
+};
+
+static const char *submodule_error(unsigned num)
+{
+	if (ARRAY_SIZE(submodule_error_name) <= num)
+		BUG("invalid submodule errors mode %u", num);
+	return submodule_error_name[num];
+}
+
+static int parse_submodule_error(const char *name)
+{
+	for (unsigned num = 0; num < ARRAY_SIZE(submodule_error_name); num++)
+		if (!strcmp(submodule_error_name[num], name))
+			return num;
+	return -1;
+}
 
 static int git_fetch_config(const char *k, const char *v,
 			    const struct config_context *ctx, void *cb)
@@ -152,6 +175,19 @@ static int git_fetch_config(const char *k, const char *v,
 		return 0;
 	}
 
+	if (!strcmp(k, "fetch.submoduleerrors")) {
+		int mode;
+
+		if (!v)
+			return config_error_nonbool(k);
+		mode = parse_submodule_error(v);
+		if (mode < 0)
+			die(_("invalid value for '%s': '%s'"),
+			    "fetch.submoduleErrors", v);
+		fetch_config->submodule_errors = mode;
+		return 0;
+	}
+
 	if (!strcmp(k, "fetch.parallel")) {
 		fetch_config->parallel = git_config_int(k, v, ctx->kvi);
 		if (fetch_config->parallel < 0)
@@ -171,6 +207,23 @@ static int git_fetch_config(const char *k, const char *v,
 		else
 			die(_("invalid value for '%s': '%s'"),
 			    "fetch.output", v);
+		return 0;
+	}
+
+	if (!strcmp(k, "fetch.followremotehead")) {
+		if (!v)
+			return config_error_nonbool(k);
+		else if (!strcmp(v, "never"))
+			fetch_config->follow_remote_head = FOLLOW_REMOTE_NEVER;
+		else if (!strcmp(v, "create"))
+			fetch_config->follow_remote_head = FOLLOW_REMOTE_CREATE;
+		else if (!strcmp(v, "warn"))
+			fetch_config->follow_remote_head = FOLLOW_REMOTE_WARN;
+		else if (!strcmp(v, "always"))
+			fetch_config->follow_remote_head = FOLLOW_REMOTE_ALWAYS;
+		else
+			warning(_("unrecognized fetch.followRemoteHEAD value '%s' ignored"), v);
+		return 0;
 	}
 
 	return git_default_config(k, v, ctx, cb);
@@ -583,7 +636,8 @@ static struct ref *get_ref_map(struct remote *remote,
 		struct refspec_item tag_refspec;
 
 		/* also fetch all tags */
-		refspec_item_init_push(&tag_refspec, TAG_REFSPEC);
+		refspec_item_init_push(&tag_refspec, TAG_REFSPEC,
+				       the_hash_algo);
 		get_fetch_map(remote_refs, &tag_refspec, &tail, 0);
 		refspec_item_clear(&tag_refspec);
 	} else if (tags == TAGS_DEFAULT && *autotags) {
@@ -1697,17 +1751,19 @@ static const char *strip_refshead(const char *name){
 static void set_head_advice_msg(const char *remote, const char *head_name)
 {
 	const char message_advice_set_head[] =
-	N_("Run 'git remote set-head %s %s' to follow the change, or set\n"
-	   "'remote.%s.followRemoteHEAD' configuration option to a different value\n"
-	   "if you do not want to see this message. Specifically running\n"
-	   "'git config set remote.%s.followRemoteHEAD warn-if-not-branch-%s'\n"
-	   "will disable the warning until the remote changes HEAD to something else.");
+	N_("Run 'git remote set-head %s %s' to follow the change, or modify\n"
+	   "either of the 'remote.%s.followRemoteHEAD' or 'fetch.followRemoteHEAD'\n"
+	   "configuration variables to handle the situation differently.\n\n"
+
+	   "Using this specific setting\n\n"
+	   "    git config set remote.%s.followRemoteHEAD warn-if-not-%s\n\n"
+	   "will suppress the warning until the remote changes HEAD to something else.");
 
 	advise_if_enabled(ADVICE_FETCH_SET_HEAD_WARN, _(message_advice_set_head),
 			remote, head_name, remote, remote, head_name);
 }
 
-static void report_set_head(const char *remote, const char *head_name,
+static void warn_set_head(const char *remote, const char *head_name,
 			struct strbuf *buf_prev, int updateres) {
 	struct strbuf buf_prefix = STRBUF_INIT;
 	const char *prev_head = NULL;
@@ -1729,12 +1785,12 @@ static void report_set_head(const char *remote, const char *head_name,
 	strbuf_release(&buf_prefix);
 }
 
-static int set_head(const struct ref *remote_refs, struct remote *remote)
+static int set_head(const struct ref *remote_refs, struct remote *remote,
+			int follow_remote_head)
 {
 	int result = 0, create_only, baremirror, was_detached;
 	struct strbuf b_head = STRBUF_INIT, b_remote_head = STRBUF_INIT,
 		      b_local_head = STRBUF_INIT;
-	int follow_remote_head = remote->follow_remote_head;
 	const char *no_warn_branch = remote->no_warn_branch;
 	char *head_name = NULL;
 	struct ref *ref, *matches;
@@ -1764,7 +1820,7 @@ static int set_head(const struct ref *remote_refs, struct remote *remote)
 
 	if (!head_name)
 		goto cleanup;
-	baremirror = is_bare_repository() && remote->mirror;
+	baremirror = is_bare_repository(the_repository) && remote->mirror;
 	create_only = follow_remote_head == FOLLOW_REMOTE_ALWAYS ? 0 : !baremirror;
 	if (baremirror) {
 		strbuf_addstr(&b_head, "HEAD");
@@ -1773,7 +1829,7 @@ static int set_head(const struct ref *remote_refs, struct remote *remote)
 		strbuf_addf(&b_head, "refs/remotes/%s/HEAD", remote->name);
 		strbuf_addf(&b_remote_head, "refs/remotes/%s/%s", remote->name, head_name);
 	}
-		/* make sure it's valid */
+	/* make sure it's valid */
 	if (!baremirror && !refs_ref_exists(refs, b_remote_head.buf)) {
 		result = 1;
 		goto cleanup;
@@ -1787,7 +1843,7 @@ static int set_head(const struct ref *remote_refs, struct remote *remote)
 	if (verbosity >= 0 &&
 		follow_remote_head == FOLLOW_REMOTE_WARN &&
 		(!no_warn_branch || strcmp(no_warn_branch, head_name)))
-		report_set_head(remote->name, head_name, &b_local_head, was_detached);
+		warn_set_head(remote->name, head_name, &b_local_head, was_detached);
 
 cleanup:
 	free(head_name);
@@ -1819,7 +1875,7 @@ static void ref_transaction_rejection_handler(const char *refname,
 {
 	struct ref_rejection_data *data = cb_data;
 
-	if (err == REF_TRANSACTION_ERROR_CASE_CONFLICT && ignore_case &&
+	if (err == REF_TRANSACTION_ERROR_CASE_CONFLICT && repo_ignore_case(the_repository) &&
 	    !data->case_sensitive_msg_shown) {
 		error(_("You're on a case-insensitive filesystem, and the remote you are\n"
 			"trying to fetch from has references that only differ in casing. It\n"
@@ -1827,7 +1883,7 @@ static void ref_transaction_rejection_handler(const char *refname,
 			"can either accept this as-is, in which case you won't be able to\n"
 			"store all remote references on disk. Or you can alternatively\n"
 			"migrate your repository to use the 'reftable' backend with the\n"
-			"following command:\n\n    git refs migrate --ref-format=reftable\n\n"
+			"following command:\n\n    git refs migrate --ref-storage-format=reftable\n\n"
 			"Please keep in mind that not all implementations of Git support this\n"
 			"new format yet. So if you use tools other than Git to access this\n"
 			"repository it may not be an option to migrate to reftables.\n"));
@@ -1901,6 +1957,7 @@ static int do_fetch(struct transport *transport,
 	struct ref_update_display_info_array display_array = { 0 };
 	struct strmap rejected_refs = STRMAP_INIT;
 	int summary_width = 0;
+	int follow_remote_head;
 
 	if (tags == TAGS_DEFAULT) {
 		if (transport->remote->fetch_tags == 2)
@@ -1916,6 +1973,22 @@ static int do_fetch(struct transport *transport,
 			goto cleanup;
 	}
 
+	/*
+	 * NEEDSWORK: By the time this function executes, we have already parsed
+	 * all such followRemoteHEAD values from the external configuration,
+	 * potentially emitting warning messages for bogus values.  Ideally, if
+	 * this fetch ends up not needing to consult these values, then git would
+	 * not ever output a value warning. (eg: when pulling from a URL directly -
+	 * rather than a configured remote, or when a remote's followRemoteHEAD
+	 * overrides the fallback fetch setting)
+	 */
+	if (transport->remote->follow_remote_head)
+		follow_remote_head = transport->remote->follow_remote_head;
+	else if (config->follow_remote_head)
+		follow_remote_head = config->follow_remote_head;
+	else
+		follow_remote_head = BUILTIN_FOLLOW_REMOTE_HEAD_DFLT;
+
 	if (rs->nr) {
 		refspec_ref_prefixes(rs, &transport_ls_refs_options.ref_prefixes);
 	} else {
@@ -1924,7 +1997,7 @@ static int do_fetch(struct transport *transport,
 		if (transport->remote->fetch.nr) {
 			refspec_ref_prefixes(&transport->remote->fetch,
 					     &transport_ls_refs_options.ref_prefixes);
-			if (transport->remote->follow_remote_head != FOLLOW_REMOTE_NEVER)
+			if (follow_remote_head != FOLLOW_REMOTE_NEVER)
 				do_set_head = 1;
 		}
 		if (branch && branch_has_merge_config(branch) &&
@@ -2131,7 +2204,7 @@ static int do_fetch(struct transport *transport,
 		 * Way too many cases where this can go wrong so let's just
 		 * ignore errors and fail silently for now.
 		 */
-		set_head(remote_refs, transport->remote);
+		set_head(remote_refs, transport->remote, follow_remote_head);
 	}
 
 cleanup:
@@ -2205,6 +2278,9 @@ static void add_options_to_argv(struct strvec *argv,
 		strvec_push(argv, "--no-recurse-submodules");
 	else if (config->recurse_submodules == RECURSE_SUBMODULES_ON_DEMAND)
 		strvec_push(argv, "--recurse-submodules=on-demand");
+	if (config->submodule_errors != -1)
+		strvec_pushf(argv, "--submodule-errors=%s",
+			     submodule_error(config->submodule_errors));
 	if (tags == TAGS_SET)
 		strvec_push(argv, "--tags");
 	else if (tags == TAGS_UNSET)
@@ -2391,7 +2467,7 @@ static int fetch_one(struct remote *remote, int argc, const char **argv,
 		     const struct fetch_config *config,
 		     struct list_objects_filter_options *filter_options)
 {
-	struct refspec rs = REFSPEC_INIT_FETCH;
+	struct refspec rs = REFSPEC_INIT_FETCH(the_hash_algo);
 	int i;
 	int exit_code;
 	int maybe_prune_tags;
@@ -2464,6 +2540,23 @@ static int fetch_one(struct remote *remote, int argc, const char **argv,
 	return exit_code;
 }
 
+static int option_parse_submodule_errors(const struct option *opt,
+					  const char *arg, int unset)
+{
+	int *v = opt->value;
+	int mode;
+
+	if (unset) {
+		*v = SUBMODULE_ERRORS_FAIL;
+		return 0;
+	}
+	mode = parse_submodule_error(arg);
+	if (mode < 0)
+		die(_("invalid value for '%s': '%s'"), "--submodule-errors", arg);
+	*v = mode;
+	return 0;
+}
+
 int cmd_fetch(int argc,
 	      const char **argv,
 	      const char *prefix,
@@ -2471,12 +2564,14 @@ int cmd_fetch(int argc,
 {
 	struct fetch_config config = {
 		.display_format = DISPLAY_FORMAT_FULL,
+		.follow_remote_head = FOLLOW_REMOTE_UNCONFIGURED,
 		.prune = -1,
 		.prune_tags = -1,
 		.show_forced_updates = 1,
 		.recurse_submodules = RECURSE_SUBMODULES_DEFAULT,
 		.parallel = 1,
 		.submodule_fetch_jobs = -1,
+		.submodule_errors = -1, /* unset */
 	};
 	const char *submodule_prefix = "";
 	const char *bundle_uri;
@@ -2491,6 +2586,7 @@ int cmd_fetch(int argc,
 	int max_jobs = -1;
 	int recurse_submodules_cli = RECURSE_SUBMODULES_DEFAULT;
 	int recurse_submodules_default = RECURSE_SUBMODULES_ON_DEMAND;
+	int submodule_errors_cli = -1; /* -1: not set on command line */
 	int fetch_write_commit_graph = -1;
 	int stdin_refspecs = 0;
 	int negotiate_only = 0;
@@ -2527,6 +2623,10 @@ int cmd_fetch(int argc,
 		OPT_CALLBACK_F(0, "recurse-submodules", &recurse_submodules_cli, N_("on-demand"),
 			    N_("control recursive fetching of submodules"),
 			    PARSE_OPT_OPTARG, option_fetch_parse_recurse_submodules),
+		OPT_CALLBACK_F(0, "submodule-errors", &submodule_errors_cli,
+			    N_("(fail|warn)"),
+			    N_("control how submodule fetch errors are handled"),
+			    0, option_parse_submodule_errors),
 		OPT_BOOL(0, "dry-run", &dry_run,
 			 N_("dry run")),
 		OPT_BOOL(0, "porcelain", &porcelain, N_("machine-readable output")),
@@ -2592,6 +2692,8 @@ int cmd_fetch(int argc,
 
 	filter_options.allow_auto_filter = 1;
 
+	refspec_init_fetch(&refmap, the_hash_algo);
+
 	packet_trace_identity("fetch");
 
 	/* Record the command line for the reflog */
@@ -2615,6 +2717,9 @@ int cmd_fetch(int argc,
 
 	if (recurse_submodules_cli != RECURSE_SUBMODULES_DEFAULT)
 		config.recurse_submodules = recurse_submodules_cli;
+
+	if (submodule_errors_cli != -1)
+		config.submodule_errors = submodule_errors_cli;
 
 	if (negotiate_only) {
 		switch (recurse_submodules_cli) {
@@ -2640,7 +2745,7 @@ int cmd_fetch(int argc,
 		int *rs = config.recurse_submodules == RECURSE_SUBMODULES_DEFAULT
 			  ? &config.recurse_submodules : NULL;
 
-		fetch_config_from_gitmodules(sfjc, rs);
+		fetch_config_from_gitmodules(the_repository, sfjc, rs);
 	}
 
 
@@ -2819,11 +2924,14 @@ int cmd_fetch(int argc,
 	if (!result && remote && (config.recurse_submodules != RECURSE_SUBMODULES_OFF)) {
 		struct strvec options = STRVEC_INIT;
 		int max_children = max_jobs;
+		int submodule_errors = config.submodule_errors;
 
 		if (max_children < 0)
 			max_children = config.submodule_fetch_jobs;
 		if (max_children < 0)
 			max_children = config.parallel;
+		if (submodule_errors < 0)
+			submodule_errors = SUBMODULE_ERRORS_FAIL;
 
 		add_options_to_argv(&options, &config);
 		trace2_region_enter_printf("fetch", "recurse-submodule", the_repository, "%s", submodule_prefix);
@@ -2833,7 +2941,8 @@ int cmd_fetch(int argc,
 					  config.recurse_submodules,
 					  recurse_submodules_default,
 					  verbosity < 0,
-					  max_children);
+					  max_children,
+					  submodule_errors);
 		trace2_region_leave_printf("fetch", "recurse-submodule", the_repository, "%s", submodule_prefix);
 		strvec_clear(&options);
 	}

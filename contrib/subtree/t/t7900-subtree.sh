@@ -99,7 +99,7 @@ test_create_subtree_add () {
 }
 
 test_expect_success 'shows short help text for -h' '
-	test_expect_code 129 git subtree -h >out 2>err &&
+	git subtree -h >out 2>err &&
 	test_must_be_empty err &&
 	grep -e "^ *or: git subtree pull" out &&
 	grep -F -e "--[no-]annotate" out
@@ -436,6 +436,24 @@ test_expect_success 'split sub dir/ with --rejoin' '
 		git subtree split --prefix="sub dir" --annotate="*" -b spl --rejoin &&
 		test "$(last_commit_subject)" = "Split '\''sub dir/'\'' into commit '\''$split_hash'\''" &&
 		test "$(git rev-list --count spl)" -eq 5
+	)
+'
+
+test_expect_success 'split fail on RIIR git subtree data' '
+	subtree_test_create_repo "$test_count" &&
+	subtree_test_create_repo "$test_count/sub proj" &&
+	test_create_commit "$test_count" main1 &&
+	test_create_commit "$test_count/sub proj" sub1 &&
+	(
+		cd "$test_count" &&
+		git fetch ./"sub proj" HEAD &&
+		git subtree add --prefix="sub dir" FETCH_HEAD &&
+		# simulate RIIR git-subtree generated data
+		mkdir .git-subtree &&
+		echo "# sabotage" >.git-subtree/config &&
+		git add .git-subtree/config &&
+		git commit -m sabotage &&
+		test_must_fail git subtree split -P "sub dir" HEAD
 	)
 '
 

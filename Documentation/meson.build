@@ -41,6 +41,7 @@ manpages = {
   'git-describe.adoc' : 1,
   'git-diagnose.adoc' : 1,
   'git-diff-files.adoc' : 1,
+  'git-diff-hunks.adoc' : 1,
   'git-diff-index.adoc' : 1,
   'git-diff-pairs.adoc' : 1,
   'git-difftool.adoc' : 1,
@@ -176,6 +177,7 @@ manpages = {
   'gitformat-bundle.adoc' : 5,
   'gitformat-chunk.adoc' : 5,
   'gitformat-commit-graph.adoc' : 5,
+  'gitformat-diff-hunks.adoc' : 5,
   'gitformat-index.adoc' : 5,
   'gitformat-loose.adoc' : 5,
   'gitformat-pack.adoc' : 5,
@@ -380,13 +382,18 @@ foreach manpage, category : manpages
       output: fs.stem(manpage) + '.xml',
     )
 
+    man_base_url = 'file://' + htmldir + '/'
+    if get_option('man_base_url') != ''
+      man_base_url = get_option('man_base_url')
+    endif
+
     doc_targets += custom_target(
       command: [
         xmlto,
         '-m', '@INPUT0@',
         '-m', '@INPUT1@',
         '--stringparam',
-        'man.base.url.for.relative.links=' + get_option('prefix') / get_option('mandir'),
+        'man.base.url.for.relative.links=' + man_base_url,
         'man',
         manpage_xml_target,
         '-o',

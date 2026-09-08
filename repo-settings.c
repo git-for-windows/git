@@ -77,6 +77,7 @@ void prepare_repo_settings(struct repository *r)
 	repo_cfg_bool(r, "pack.usesparse", &r->settings.pack_use_sparse, 1);
 	repo_cfg_bool(r, "pack.usepathwalk", &r->settings.pack_use_path_walk, 0);
 	repo_cfg_bool(r, "core.multipackindex", &r->settings.core_multi_pack_index, 1);
+	repo_cfg_bool(r, "core.diffhunks", &r->settings.core_diff_hunks, 1);
 	repo_cfg_bool(r, "index.sparse", &r->settings.sparse_index, 0);
 	repo_cfg_bool(r, "index.skiphash", &r->settings.index_skip_hash, r->settings.index_skip_hash);
 	repo_cfg_bool(r, "pack.readreverseindex", &r->settings.pack_read_reverse_index, 1);
@@ -175,22 +176,6 @@ unsigned long repo_settings_get_big_file_threshold(struct repository *repo)
 void repo_settings_set_big_file_threshold(struct repository *repo, unsigned long value)
 {
 	repo->settings.big_file_threshold = value;
-}
-
-enum log_refs_config repo_settings_get_log_all_ref_updates(struct repository *repo)
-{
-	const char *value;
-
-	if (!repo_config_get_string_tmp(repo, "core.logallrefupdates", &value)) {
-		if (value && !strcasecmp(value, "always"))
-			return LOG_REFS_ALWAYS;
-		else if (git_config_bool("core.logallrefupdates", value))
-			return LOG_REFS_NORMAL;
-		else
-			return LOG_REFS_NONE;
-	}
-
-	return LOG_REFS_UNSET;
 }
 
 int repo_settings_get_warn_ambiguous_refs(struct repository *repo)

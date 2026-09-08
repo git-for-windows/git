@@ -595,7 +595,8 @@ static void finish_request(struct transfer_request *request)
 
 	} else if (request->state == RUN_FETCH_PACKED) {
 		int fail = 1;
-		if (request->curl_result != CURLE_OK) {
+		if (request->curl_result != CURLE_OK &&
+		    request->http_code != 416) {
 			fprintf(stderr, "Unable to get pack file %s\n%s",
 				request->url, curl_errorstr);
 		} else {
@@ -776,7 +777,7 @@ static void handle_new_lock_ctx(struct xml_ctx *ctx, int tag_closed)
 		} else if (!strcmp(ctx->name, DAV_ACTIVELOCK_TOKEN)) {
 			lock->token = xstrdup(ctx->cdata);
 
-			the_hash_algo->init_fn(&hash_ctx);
+			git_hash_init(&hash_ctx, the_hash_algo);
 			git_hash_update(&hash_ctx, lock->token, strlen(lock->token));
 			git_hash_final(lock_token_hash, &hash_ctx);
 
@@ -1030,12 +1031,13 @@ static int get_oid_hex_from_objpath(const char *path, struct object_id *oid)
 	if (strlen(path) != the_hash_algo->hexsz + 1)
 		return -1;
 
-	if (hex_to_bytes(oid->hash, path, 1))
+	if (hex_to_bytes(oid->hash, path, 1, HEX_KIND_OID))
 		return -1;
 	path += 2;
 	path++; /* skip '/' */
 
-	return hex_to_bytes(oid->hash + 1, path, the_hash_algo->rawsz - 1);
+	return hex_to_bytes(oid->hash + 1, path, the_hash_algo->rawsz - 1,
+			    HEX_KIND_OID);
 }
 
 static void process_ls_object(struct remote_ls_ctx *ls)
@@ -1716,7 +1718,7 @@ int cmd_main(int argc, const char **argv)
 {
 	struct transfer_request *request;
 	struct transfer_request *next_request;
-	struct refspec rs = REFSPEC_INIT_PUSH;
+	struct refspec rs = REFSPEC_INIT_PUSH(the_hash_algo);
 	struct remote_lock *ref_lock = NULL;
 	struct remote_lock *info_ref_lock = NULL;
 	int delete_branch = 0;

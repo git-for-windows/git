@@ -510,6 +510,7 @@ int cmd_diff(int argc,
 	init_diffstat_widths(&rev.diffopt);
 	rev.diffopt.flags.allow_external = 1;
 	rev.diffopt.flags.allow_textconv = 1;
+	rev.diffopt.flags.allow_diff_process = 1;
 
 	/* If this is a no-index diff, just run it and exit there. */
 	if (no_index)
@@ -568,6 +569,15 @@ int cmd_diff(int argc,
 		}
 	}
 
+	/*
+	 * The hunk store is keyed by blob pair, so any diff whose
+	 * file pairs carry known blob object IDs (tree-to-tree,
+	 * index-to-tree) can consult the same entries that
+	 * "git log --stat" and "git blame" use; pairs without known
+	 * blobs bypass it at lookup time.
+	 */
+	diff_hunks_attach(&rev.diffopt);
+
 	symdiff_prepare(&rev, &sdiff);
 	for (i = 0; i < rev.pending.nr; i++) {
 		struct object_array_entry *entry = &rev.pending.objects[i];
@@ -579,9 +589,13 @@ int cmd_diff(int argc,
 		obj = deref_tag(the_repository, obj, NULL, 0);
 		if (!obj)
 			die(_("invalid object '%s' given."), name);
-		if (obj->type == OBJ_COMMIT)
-			obj = &repo_get_commit_tree(the_repository,
-						    ((struct commit *)obj))->object;
+		if (obj->type == OBJ_COMMIT) {
+			struct tree *tree = repo_get_commit_tree(
+				the_repository, (struct commit *)obj);
+			if (!tree)
+				die(_("unable to read tree object for commit '%s'"), name);
+			obj = &tree->object;
+		}
 
 		if (obj->type == OBJ_TREE) {
 			if (sdiff.skip && bitmap_get(sdiff.skip, i))
@@ -644,6 +658,7 @@ int cmd_diff(int argc,
 	result = diff_result_code(&rev);
 	if (1 < rev.diffopt.skip_stat_unmatch)
 		refresh_index_quietly();
+	diff_hunks_detach(&rev.diffopt);
 	release_revisions(&rev);
 	object_array_clear(&ent);
 	symdiff_release(&sdiff);

@@ -38,8 +38,9 @@ int is_nonbare_repository_dir(struct strbuf *path);
 #define READ_GITFILE_ERR_TOO_LARGE 8
 #define READ_GITFILE_ERR_MISSING 9
 #define READ_GITFILE_ERR_IS_A_DIR 10
-void read_gitfile_error_die(int error_code, const char *path, const char *dir);
+void read_gitfile_error_die(int error_code, const char *path);
 const char *read_gitfile_gently(const char *path, int *return_error_code);
+int read_gitfile_raw(struct strbuf *contents, const char *path);
 #define read_gitfile(path) read_gitfile_gently((path), NULL)
 const char *resolve_gitdir_gently(const char *suspect, int *return_error_code);
 #define resolve_gitdir(path) resolve_gitdir_gently((path), NULL)
@@ -95,8 +96,6 @@ static inline int discover_git_directory(struct strbuf *commondir,
 		return -1;
 	return 0;
 }
-
-void set_git_work_tree(struct repository *repo, const char *tree);
 
 /* Flags that can be passed to `enter_repo()`. */
 enum {
@@ -247,8 +246,8 @@ enum apply_repository_format_flags {
 
 /*
  * Apply the given repository format to the repo. This initializes extensions
- * and basic data structures required for normal operation. Returns 0 on
- * success, a negative error code when the format is not valid as determined by
+ * required for normal operation. Returns 0 on success, a negative error code
+ * when the format is not valid as determined by
  * `verify_repository_format()`.
  */
 int apply_repository_format(struct repository *repo,
@@ -258,21 +257,46 @@ int apply_repository_format(struct repository *repo,
 
 const char *get_template_dir(const char *option_template);
 
-#define INIT_DB_QUIET      (1 << 0)
-#define INIT_DB_EXIST_OK   (1 << 1)
-#define INIT_DB_SKIP_REFDB (1 << 2)
+/*
+ * Create the repository by creating the necessary directory structures,
+ * setting up the configuration and configuring the repository's format. If
+ * `template_dir` is set, copy over templates from that directory. Furthermore,
+ * if and only if `reinit_ok` is a non-NULL pointer, then the function may
+ * reinitialize a preexisting repository. In that case, the pointer will be set
+ * to `1` in case the repo was reinitialized and `0` if it didn't exist yet.
+ *
+ * Note that this function does not create the reference and object databases.
+ */
+void create_repository(struct repository *repo,
+		       const char *git_dir,
+		       const char *real_git_dir,
+		       const char *worktree,
+		       const char *template_dir,
+		       int hash_algo,
+		       const char *ref_storage_format_uri,
+		       int init_shared_repository,
+		       int *reinit_ok);
 
-int init_db(struct repository *repo,
-	    const char *git_dir, const char *real_git_dir,
-	    const char *template_dir, int hash_algo,
-	    enum ref_storage_format ref_storage_format,
-	    const char *initial_branch, int init_shared_repository,
-	    unsigned int flags);
 void initialize_repository_version(struct repository *repo,
 				   int hash_algo,
 				   enum ref_storage_format ref_storage_format,
 				   int reinit);
+
+/*
+ * Create the reference database for the repository. The repository and its ref
+ * storage format must have already been configured properly before calling
+ * this function. When set, `initial_branch` overrides the default branch that
+ * HEAD will point to.
+ */
 void create_reference_database(struct repository *repo, const char *initial_branch, int quiet);
+
+/*
+ * Create the object database for the repository. The repository must have
+ * already been configured properly before calling this function. When set,
+ * `alternates` is the list of alternates that should be written into the
+ * object database.
+ */
+void create_object_database(struct repository *repo, const struct strvec *alternates);
 
 /*
  * NOTE NOTE NOTE!!
@@ -292,11 +316,66 @@ enum sharedrepo {
 int git_config_perm(const char *var, const char *value);
 
 struct startup_info {
+	/*
+	 * Whether the user is asking us to treat the repository as bare via
+	 * `git --bare`, even if it's not.
+	 */
+	bool force_bare_repository;
+
 	int have_repository;
-	const char *prefix;
 	const char *original_cwd;
 };
 extern struct startup_info *startup_info;
 extern const char *tmp_original_cwd;
+
+/* Path allowlist */
+
+struct path_allowlist_cb_data {
+	const char *key;
+};
+
+/*
+ * Check the allowlist entry in `allowed` against `target_path`,
+ * updating `*matches` accordingly.
+ *
+ * `allowed` is a single entry of an allowlist of paths, typically one
+ * value of a multi-valued config variable, already expanded by
+ * git_config_pathname(). `target_path` is the (normalized) path being
+ * tested. `*matches` is updated in place:
+ *
+ *   - an empty `allowed` resets it to 'false' (so a later, more
+ *     specific config scope can clear entries from a broader one),
+ *   - "*" sets it to 'true' (allow everything),
+ *   - "<path>" sets it to 'true' if <path> equals `target_path`,
+ *   - "<path>" + "/" + "*" sets it to 'true' if <path> is a leading
+ *     directory of `target_path`,
+ *   - anything else leaves `*matches` unchanged.
+ *
+ * `allow_path` is called with `allowed` and `allow_path_cbdata`, and
+ * should return 'true' if the entry is acceptable to the caller. It
+ * lets each caller decide which paths it is willing to consider, and
+ * whether to warn about the ones it rejects. Returning 'false' leaves
+ * `*matches` unchanged.
+ *
+ * Callers are expected to invoke this once per allowlist entry,
+ * typically from a protected-config callback, so that untrusted
+ * repository config cannot influence the decision.
+ */
+void path_allowlist_apply(const char *allowed, const char *target_path,
+			  bool *matches,
+			  bool (*allow_path)(const char *path, void *cbdata),
+			  void *allow_path_cbdata);
+
+/*
+ * Apply one value of a multi-valued config variable holding an
+ * allowlist of paths, expanding it with git_config_pathname() before
+ * checking it against `target_path`. Empty and "*" values are passed
+ * through without expansion, as interpolating them is not
+ * meaningful. See path_allowlist_apply().
+ */
+void path_allowlist_config_apply(const char *key, const char *value,
+				 const char *target_path, bool *matches,
+				 bool (*allow_path)(const char *path, void *cbdata),
+				 void *allow_path_cbdata);
 
 #endif /* SETUP_H */

@@ -7,6 +7,18 @@
 struct object_database;
 
 /*
+ * Hunk descriptor for externally computed diffs, in xdiff's own
+ * coordinates: line numbers are 1-based and a hunk's start is the
+ * first line it covers.  A caller translates any external "empty side"
+ * idiom (such as git diff's start-0/count-0) to a 1-based start before
+ * storing hunks in this struct.
+ */
+struct xdl_hunk {
+	long old_start, old_count;
+	long new_start, new_count;
+};
+
+/*
  * xdiff isn't equipped to handle content over a gigabyte;
  * we make the cutoff 1GB - 1MB to give some breathing
  * room for constant-sized additions (e.g., merge markers)
@@ -46,6 +58,16 @@ int xdi_diff_outf(mmfile_t *mf1, mmfile_t *mf2,
 		  xdiff_emit_line_fn line_fn,
 		  void *consume_callback_data,
 		  xpparam_t const *xpp, xdemitconf_t const *xecfg);
+
+struct range_set;
+/*
+ * Like xdi_diff_outf(), but forwards only the lines within the given
+ * postimage line ranges to line_fn.
+ */
+int diff_emit_line_ranges(mmfile_t *mf1, mmfile_t *mf2,
+			  const struct range_set *ranges,
+			  xdiff_emit_line_fn line_fn, void *cb_data,
+			  xpparam_t *xpp, xdemitconf_t *xecfg);
 int read_mmfile(mmfile_t *ptr, const char *filename);
 void read_mmblob(mmfile_t *ptr, struct object_database *odb,
 		 const struct object_id *oid);
@@ -75,5 +97,18 @@ int xdiff_compare_lines(const char *l1, long s1,
  * are treated for the hash.
  */
 unsigned long xdiff_hash_string(const char *s, size_t len, long flags);
+
+struct strbuf;
+
+/*
+ * Append a unified-diff hunk header to `out`, e.g.
+ * "@@ -<old> +<new> @@ func\n". The header comes from wrapping xdiff's
+ * own hunk-header emitter, so it matches what a normal diff would
+ * produce for the given line number begins and line counts.
+ */
+void xdiff_emit_hunk_header(struct strbuf *out,
+			    long old_begin, long old_nr,
+			    long new_begin, long new_nr,
+			    const char *func, long funclen);
 
 #endif

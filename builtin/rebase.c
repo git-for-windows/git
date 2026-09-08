@@ -43,7 +43,7 @@ static char const * const builtin_rebase_usage[] = {
 		"[--onto <newbase> | --keep-base] [<upstream> [<branch>]]"),
 	N_("git rebase [-i] [options] [--exec <cmd>] [--onto <newbase>] "
 		"--root [<branch>]"),
-	"git rebase --continue | --abort | --skip | --edit-todo",
+	"git rebase --continue [--[no-]edit] | --abort | --skip | --edit-todo",
 	NULL
 };
 
@@ -135,6 +135,8 @@ struct rebase_options {
 	int config_autosquash;
 	int config_rebase_merges;
 	int config_update_refs;
+	int config_no_edit;
+	int edit;
 };
 
 #define REBASE_OPTIONS_INIT {			  	\
@@ -156,6 +158,8 @@ struct rebase_options {
 		.update_refs = -1,                      \
 		.config_update_refs = -1,               \
 		.strategy_opts = STRING_LIST_INIT_NODUP,\
+		.config_no_edit = -1,                   \
+		.edit = -1,                             \
 	}
 
 static void rebase_options_release(struct rebase_options *opts)
@@ -213,6 +217,13 @@ static struct replay_opts get_replay_opts(const struct rebase_options *opts)
 	if (opts->squash_onto) {
 		oidcpy(&replay.squash_onto, opts->squash_onto);
 		replay.have_squash_onto = 1;
+	}
+
+	if (opts->action == ACTION_CONTINUE) {
+		if (opts->edit >= 0)
+			replay.edit = opts->edit;
+		else if (opts->config_no_edit > 0)
+			replay.edit = 0;
 	}
 
 	return replay;
@@ -592,7 +603,7 @@ static int finish_rebase(struct rebase_options *opts)
 static int move_to_original_branch(struct rebase_options *opts)
 {
 	struct strbuf branch_reflog = STRBUF_INIT, head_reflog = STRBUF_INIT;
-	struct reset_head_opts ropts = { 0 };
+	struct reset_working_tree_options ropts = { 0 };
 	int ret;
 
 	if (!opts->head_name)
@@ -607,10 +618,11 @@ static int move_to_original_branch(struct rebase_options *opts)
 	strbuf_addf(&head_reflog, "%s (finish): returning to %s",
 		    opts->reflog_action, opts->head_name);
 	ropts.branch = opts->head_name;
-	ropts.flags = RESET_HEAD_REFS_ONLY;
+	ropts.flags = RESET_WORKING_TREE_REFS_ONLY |
+		      RESET_WORKING_TREE_UPDATE_HEAD;
 	ropts.branch_msg = branch_reflog.buf;
 	ropts.head_msg = head_reflog.buf;
-	ret = reset_head(the_repository, &ropts);
+	ret = reset_working_tree(the_repository, &ropts);
 
 	strbuf_release(&branch_reflog);
 	strbuf_release(&head_reflog);
@@ -685,7 +697,7 @@ static int run_am(struct rebase_options *opts)
 
 	status = run_command(&format_patch);
 	if (status) {
-		struct reset_head_opts ropts = { 0 };
+		struct reset_working_tree_options ropts = { 0 };
 		unlink(rebased_patches);
 		free(rebased_patches);
 		child_process_clear(&am);
@@ -693,7 +705,8 @@ static int run_am(struct rebase_options *opts)
 		ropts.oid = &opts->orig_head->object.oid;
 		ropts.branch = opts->head_name;
 		ropts.default_reflog_action = opts->reflog_action;
-		reset_head(the_repository, &ropts);
+		ropts.flags = RESET_WORKING_TREE_UPDATE_HEAD;
+		reset_working_tree(the_repository, &ropts);
 		error(_("\ngit encountered an error while preparing the "
 			"patches to replay\n"
 			"these revisions:\n"
@@ -760,9 +773,16 @@ static int run_specific_rebase(struct rebase_options *opts)
 
 	if (opts->dont_finish_rebase)
 		; /* do nothing */
-	else if (opts->type == REBASE_MERGE)
-		; /* merge backend cleans up after itself */
-	else if (status == 0) {
+	else if (opts->type == REBASE_MERGE) {
+		int quiet = !(opts->flags & (REBASE_NO_QUIET|REBASE_VERBOSE));
+
+		/*
+		 * The sequencer cleans up after itself. Its state directory
+		 * is gone once it is done, and stays while it is stopped.
+		 */
+		if (status == 0 && !is_directory(opts->state_dir))
+			run_auto_maintenance(the_repository, quiet);
+	} else if (status == 0) {
 		if (!file_exists(state_dir_path("stopped-sha", opts)))
 			finish_rebase(opts);
 	} else if (status == 2) {
@@ -839,6 +859,11 @@ static int rebase_config(const char *var, const char *value,
 		return 0;
 	}
 
+	if (!strcmp(var, "rebase.noedit")) {
+		opts->config_no_edit = git_config_bool(var, value);
+		return 0;
+	}
+
 	if (!strcmp(var, "rebase.forkpoint")) {
 		opts->fork_point = git_config_bool(var, value) ? -1 : 0;
 		return 0;
@@ -855,18 +880,19 @@ static int rebase_config(const char *var, const char *value,
 static int checkout_up_to_date(struct rebase_options *options)
 {
 	struct strbuf buf = STRBUF_INIT;
-	struct reset_head_opts ropts = { 0 };
+	struct reset_working_tree_options ropts = { 0 };
 	int ret = 0;
 
 	strbuf_addf(&buf, "%s: checkout %s",
 		    options->reflog_action, options->switch_to);
 	ropts.oid = &options->orig_head->object.oid;
 	ropts.branch = options->head_name;
-	ropts.flags = RESET_HEAD_RUN_POST_CHECKOUT_HOOK;
+	ropts.flags = RESET_WORKING_TREE_RUN_POST_CHECKOUT_HOOK |
+		      RESET_WORKING_TREE_UPDATE_HEAD;
 	if (!ropts.branch)
-		ropts.flags |=  RESET_HEAD_DETACH;
+		ropts.flags |=  RESET_WORKING_TREE_DETACH;
 	ropts.head_msg = buf.buf;
-	if (reset_head(the_repository, &ropts) < 0)
+	if (reset_working_tree(the_repository, &ropts) < 0)
 		ret = error(_("could not switch to %s"), options->switch_to);
 	strbuf_release(&buf);
 
@@ -1116,7 +1142,7 @@ int cmd_rebase(int argc,
 	int reschedule_failed_exec = -1;
 	int allow_preemptive_ff = 1;
 	int preserve_merges_selected = 0;
-	struct reset_head_opts ropts = { 0 };
+	struct reset_working_tree_options ropts = { 0 };
 	struct option builtin_rebase_options[] = {
 		OPT_STRING(0, "onto", &options.onto_name,
 			   N_("revision"),
@@ -1168,6 +1194,8 @@ int cmd_rebase(int argc,
 			    ACTION_CONTINUE),
 		OPT_CMDMODE(0, "skip", &options.action,
 			    N_("skip current patch and continue"), ACTION_SKIP),
+		OPT_BOOL('e', "edit", &options.edit,
+			 N_("edit the commit message")),
 		OPT_CMDMODE(0, "abort", &options.action,
 			    N_("abort and check out the original branch"),
 			    ACTION_ABORT),
@@ -1308,9 +1336,14 @@ int cmd_rebase(int argc,
 			"which is no longer supported; use 'merges' instead"));
 
 	if (options.action != ACTION_NONE && total_argc != 2) {
-		usage_with_options(builtin_rebase_usage,
-				   builtin_rebase_options);
+		if (options.action != ACTION_CONTINUE ||
+		    options.edit < 0 || total_argc != 3)
+			usage_with_options(builtin_rebase_usage,
+					   builtin_rebase_options);
 	}
+
+	if (options.edit >= 0 && options.action != ACTION_CONTINUE)
+		die(_("--edit and --no-edit can only be used with --continue"));
 
 	if (argc > 2)
 		usage_with_options(builtin_rebase_usage,
@@ -1384,8 +1417,9 @@ int cmd_rebase(int argc,
 
 		rerere_clear(the_repository, &merge_rr);
 		string_list_clear(&merge_rr, 1);
-		ropts.flags = RESET_HEAD_HARD;
-		if (reset_head(the_repository, &ropts) < 0)
+		ropts.flags = RESET_WORKING_TREE_HARD |
+			      RESET_WORKING_TREE_UPDATE_HEAD;
+		if (reset_working_tree(the_repository, &ropts) < 0)
 			die(_("could not discard worktree changes"));
 		remove_branch_state(the_repository, 0);
 		if (read_basic_state(&options))
@@ -1409,8 +1443,9 @@ int cmd_rebase(int argc,
 		ropts.oid = &options.orig_head->object.oid;
 		ropts.head_msg = head_msg.buf;
 		ropts.branch = options.head_name;
-		ropts.flags = RESET_HEAD_HARD;
-		if (reset_head(the_repository, &ropts) < 0)
+		ropts.flags = RESET_WORKING_TREE_HARD |
+			      RESET_WORKING_TREE_UPDATE_HEAD;
+		if (reset_working_tree(the_repository, &ropts) < 0)
 			die(_("could not move back to %s"),
 			    oid_to_hex(&options.orig_head->object.oid));
 		strbuf_release(&head_msg);
@@ -1876,11 +1911,13 @@ int cmd_rebase(int argc,
 		    options.reflog_action, options.onto_name);
 	ropts.oid = &options.onto->object.oid;
 	ropts.orig_head = &options.orig_head->object.oid;
-	ropts.flags = RESET_HEAD_DETACH | RESET_ORIG_HEAD |
-			RESET_HEAD_RUN_POST_CHECKOUT_HOOK;
+	ropts.flags = RESET_WORKING_TREE_DETACH |
+		      RESET_WORKING_TREE_UPDATE_HEAD |
+		      RESET_WORKING_TREE_UPDATE_ORIG_HEAD |
+		      RESET_WORKING_TREE_RUN_POST_CHECKOUT_HOOK;
 	ropts.head_msg = msg.buf;
 	ropts.default_reflog_action = options.reflog_action;
-	if (reset_head(the_repository, &ropts)) {
+	if (reset_working_tree(the_repository, &ropts)) {
 		ret = error(_("Could not detach HEAD"));
 		goto cleanup_autostash;
 	}

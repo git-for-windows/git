@@ -69,7 +69,7 @@ test_expect_success 'push to update (protected)' '
 		cd dst &&
 		test_commit D &&
 		test_must_fail git push --force-with-lease=main:main origin main 2>err &&
-		grep "stale info" err
+		test_grep "stale info" err
 	) &&
 	git ls-remote . refs/heads/main >expect &&
 	git ls-remote src refs/heads/main >actual &&
@@ -82,7 +82,7 @@ test_expect_success 'push to update (protected, forced)' '
 		cd dst &&
 		test_commit D &&
 		git push --force --force-with-lease=main:main origin main 2>err &&
-		grep "forced update" err
+		test_grep "forced update" err
 	) &&
 	git ls-remote dst refs/heads/main >expect &&
 	git ls-remote src refs/heads/main >actual &&
@@ -147,7 +147,7 @@ test_expect_success 'push to update (allowed, tracking)' '
 		cd dst &&
 		test_commit D &&
 		git push --force-with-lease=main origin main 2>err &&
-		! grep "forced update" err
+		test_grep ! "forced update" err
 	) &&
 	git ls-remote dst refs/heads/main >expect &&
 	git ls-remote src refs/heads/main >actual &&
@@ -161,7 +161,7 @@ test_expect_success 'push to update (allowed even though no-ff)' '
 		git reset --hard HEAD^ &&
 		test_commit D &&
 		git push --force-with-lease=main origin main 2>err &&
-		grep "forced update" err
+		test_grep "forced update" err
 	) &&
 	git ls-remote dst refs/heads/main >expect &&
 	git ls-remote src refs/heads/main >actual &&
@@ -194,7 +194,7 @@ test_expect_success 'push to delete (allowed)' '
 	(
 		cd dst &&
 		git push --force-with-lease=main origin :main 2>err &&
-		grep deleted err
+		test_grep deleted err
 	) &&
 	git ls-remote src refs/heads/main >actual &&
 	test_must_be_empty actual
@@ -311,7 +311,8 @@ test_expect_success 'background updates to remote can be mitigated with "--force
 		git switch main &&
 		test_commit J &&
 		git fetch --all &&
-		test_must_fail git push --force-with-lease --force-if-includes --all
+		test_must_fail git push --force-with-lease --force-if-includes --all 2>err &&
+		test_grep "remote ref updated since checkout" err
 	) &&
 	git ls-remote dst refs/heads/main >actual.main &&
 	git ls-remote dst refs/heads/branch >actual.branch &&
@@ -350,7 +351,7 @@ test_expect_success '"--force-if-includes" should be disabled for --force-with-l
 		remote_head="$(git rev-parse refs/remotes/origin/main)" &&
 		git fetch --all &&
 		test_must_fail git push --force-if-includes --force-with-lease="main:$remote_head" 2>err &&
-		grep "stale info" err
+		test_grep "stale info" err
 	) &&
 	git ls-remote dst refs/heads/main >actual.main &&
 	test_cmp expect.main actual.main
@@ -393,6 +394,91 @@ test_expect_success '"--force-if-includes" should allow deletes' '
 		git switch branch &&
 		git pull --rebase origin branch &&
 		git push --force-if-includes --force-with-lease="branch" origin :branch
+	)
+'
+
+test_expect_success '"--force-if-includes" should allow forced update when remote-tracking ref has no reflog' '
+	rm -fr dst src &&
+	test_when_finished "rm -fr dst src" &&
+	git init --bare dst &&
+	git push dst main main:branch &&
+	git clone --no-local dst src &&
+	(
+		cd src &&
+		# a clone leaves the remote-tracking refs without reflog
+		# entries with the files backend, but not with reftable
+		git reflog expire --all --expire=all &&
+		git switch -c branch --track origin/branch &&
+		git reset --hard HEAD^ &&
+		test_commit D &&
+		git push --force-if-includes --force-with-lease="branch"
+	)
+'
+
+test_expect_success '"--force-if-includes" should allow forced update when using differently named branches' '
+	setup_src_dup_dst &&
+	test_when_finished "rm -fr dst src dup" &&
+	(
+		cd src &&
+		git fetch &&
+		git switch -c newbranch origin/main &&
+		git rebase HEAD --onto HEAD^ &&
+		git push --force-if-includes --force-with-lease origin newbranch:main
+	)
+'
+test_expect_success '"--force-if-includes" should allow forced update from HEAD' '
+	setup_src_dup_dst &&
+	test_when_finished "rm -fr dst src dup" &&
+	(
+		cd src &&
+		git fetch &&
+		git switch -c newbranch origin/main &&
+		git rebase HEAD --onto HEAD^ &&
+		git push --force-if-includes --force-with-lease origin HEAD:main
+	)
+'
+
+test_expect_success '"--force-if-includes" should reject forced update from differently named branches when local lacks remote ref' '
+	setup_src_dup_dst &&
+	test_when_finished "rm -fr dst src dup" &&
+	(
+		cd src &&
+		git fetch &&
+		git switch main &&
+		git reset --hard origin/main &&
+		git switch --orphan orphan &&
+		test_commit I &&
+		test_must_fail git push --force-with-lease --force-if-includes origin orphan:main
+	)
+'
+
+test_expect_success '"--force-if-includes" should reject forced update from HEAD when it lacks remote ref' '
+	setup_src_dup_dst &&
+	test_when_finished "rm -fr dst src dup" &&
+	(
+		cd src &&
+		git fetch &&
+		git switch main &&
+		git reset --hard origin/main &&
+		git switch --orphan orphan &&
+		test_commit I &&
+		test_must_fail git push --force-with-lease --force-if-includes origin HEAD:main
+	)
+'
+
+test_expect_success '"--force-if-includes" should reject forced update from detached HEAD' '
+	setup_src_dup_dst &&
+	test_when_finished "rm -fr dst src dup" &&
+	(
+		cd src &&
+		git fetch &&
+		git switch main &&
+		git reset --hard origin/main &&
+		git switch -c newbranch origin/main &&
+		git checkout HEAD^ &&
+		test_must_fail git push --force-if-includes --force-with-lease origin HEAD:main 2>err &&
+		test_grep "remote ref unverifiable" err &&
+		test_grep "no-force-if-includes" err
 	)
 '
 

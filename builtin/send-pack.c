@@ -76,6 +76,11 @@ static void print_helper_status(struct ref *ref)
 			msg = "remote ref updated since checkout";
 			break;
 
+		case REF_STATUS_REJECT_UNVERIFIABLE:
+			res = "error";
+			msg = "remote ref unverifiable";
+			break;
+
 		case REF_STATUS_REJECT_ALREADY_EXISTS:
 			res = "error";
 			msg = "already exists";
@@ -153,7 +158,7 @@ int cmd_send_pack(int argc,
 		  const char *prefix,
 		  struct repository *repo)
 {
-	struct refspec rs = REFSPEC_INIT_PUSH;
+	struct refspec rs;
 	const char *remote_name = NULL;
 	struct remote *remote = NULL;
 	const char *dest = NULL;
@@ -214,6 +219,9 @@ int cmd_send_pack(int argc,
 
 	repo_config(repo, send_pack_config, NULL);
 	argc = parse_options(argc, argv, prefix, options, send_pack_usage, 0);
+
+	refspec_init_push(&rs, repo->hash_algo);
+
 	if (argc > 0) {
 		dest = argv[0];
 		refspec_appendn(&rs, argv + 1, argc - 1);

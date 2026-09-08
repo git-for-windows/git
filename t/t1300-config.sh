@@ -856,7 +856,7 @@ test_expect_success 'renaming a section with an overly-long line' '
 		printf "[a] g = h\\n"
 	} >y &&
 	test_must_fail git config ${mode_prefix}rename-section -f y a xyz 2>err &&
-	grep "refusing to work with overly long line in .y. on line 2" err
+	test_grep "refusing to work with overly long line in .y. on line 2" err
 '
 
 cat >> .git/config << EOF
@@ -1671,9 +1671,9 @@ test_expect_success 'git --config-env=key=envvar support' '
 
 test_expect_success 'git --config-env with missing value' '
 	test_must_fail env ENVVAR=value git --config-env 2>error &&
-	grep "no config key given for --config-env" error &&
+	test_grep "no config key given for --config-env" error &&
 	test_must_fail env ENVVAR=value git --config-env config core.name 2>error &&
-	grep "invalid config format: config" error
+	test_grep "invalid config format: config" error
 '
 
 test_expect_success 'git --config-env fails with invalid parameters' '
@@ -2104,7 +2104,7 @@ test_expect_success '--unset last key removes section (except if commented)' '
 	key = true
 	EOF
 	git config ${mode_unset} two.key &&
-	! grep two .git/config &&
+	test_grep ! two .git/config &&
 
 	q_to_tab >.git/config <<-\EOF &&
 	[one]
@@ -2124,7 +2124,7 @@ test_expect_success '--unset last key removes section (except if commented)' '
 	Qkey = true
 	EOF
 	git config ${mode_unset} two.key &&
-	grep two .git/config &&
+	test_grep two .git/config &&
 
 	q_to_tab >.git/config <<-\EOF &&
 	[one]
@@ -2350,6 +2350,38 @@ test_expect_success '--show-origin with --default' '
 	test_cmp expect actual
 '
 
+test_expect_success 'set up xdg config --show-origin tests' '
+	mkdir -p "$HOME"/.config/git &&
+	cat >"$HOME"/.config/git/config <<-EOF
+	[xdg]
+		config = true
+	EOF
+'
+
+test_expect_success MINGW '--show-origin converts backslashes in xdg path to forward slashes on Windows' '
+	backslash_home="$(echo "$HOME" | tr / \\\\)" &&
+	echo "file:$HOME/.config/git/config	true" >expect &&
+
+	(
+		sane_unset XDG_CONFIG_HOME &&
+		HOME="$backslash_home" git config ${mode_get} --show-origin xdg.config >actual
+	) &&
+	test_cmp expect actual &&
+
+	XDG_CONFIG_HOME="$backslash_home\\.config" git config ${mode_get} --show-origin xdg.config >actual &&
+	test_cmp expect actual
+'
+
+test_expect_success '--show-origin with default xdg path' '
+	echo "file:$HOME/.config/git/config	true" >expect &&
+	git config ${mode_get} --show-origin xdg.config >actual &&
+	test_cmp expect actual
+'
+
+test_expect_success 'clean up xdg config --show-origin tests' '
+	rm -rf "$HOME"/.config/git
+'
+
 test_expect_success '--show-scope with --list' '
 	cat >expect <<-EOF &&
 	global	user.global=true
@@ -2422,6 +2454,89 @@ test_expect_success '--show-scope with --show-origin' '
 test_expect_success '--show-scope with --default' '
 	git config --show-scope --default foo some.key >actual &&
 	echo "command	foo" >expect &&
+	test_cmp expect actual
+'
+
+test_expect_success 'list with nonexistent global config gracefully exits' '
+	rm -f "$HOME"/.gitconfig "$HOME"/.config/git/config &&
+	git config ${mode_prefix}list &&
+	git config ${mode_prefix}list --show-scope
+'
+
+test_expect_success 'list --global with nonexistent global config fails' '
+	rm -f "$HOME"/.gitconfig "$HOME"/.config/git/config &&
+	test_must_fail git config ${mode_prefix}list --global &&
+	test_must_fail git config ${mode_prefix}list --global --show-scope
+'
+
+test_expect_success 'list and get --global with only home' '
+	rm -f "$HOME"/.config/git/config &&
+
+	test_when_finished rm -f \"\$HOME\"/.gitconfig &&
+	cat >"$HOME"/.gitconfig <<-EOF &&
+	[home]
+		config = true
+	EOF
+
+	cat >expect <<-EOF &&
+	global	home.config=true
+	EOF
+	git config ${mode_prefix}list --global --show-scope >actual &&
+	test_cmp expect actual &&
+
+	echo true >expect &&
+	git config ${mode_get} --global home.config >actual &&
+	test_cmp expect actual
+'
+
+test_expect_success 'list and get --global with only xdg' '
+	rm -f "$HOME"/.gitconfig &&
+
+	test_when_finished rm -rf \"\$HOME\"/.config/git &&
+	mkdir -p "$HOME"/.config/git &&
+	cat >"$HOME"/.config/git/config <<-EOF &&
+	[xdg]
+		config = true
+	EOF
+
+	cat >expect <<-EOF &&
+	global	xdg.config=true
+	EOF
+	git config ${mode_prefix}list --global --show-scope >actual &&
+	test_cmp expect actual &&
+
+	echo true >expect &&
+	git config ${mode_get} --global xdg.config >actual &&
+	test_cmp expect actual
+'
+
+test_expect_success 'list and get --global with both home and xdg' '
+	test_when_finished rm -f \"\$HOME\"/.gitconfig &&
+	cat >"$HOME"/.gitconfig <<-EOF &&
+	[home]
+		config = home
+	EOF
+
+	test_when_finished rm -rf \"\$HOME\"/.config/git &&
+	mkdir -p "$HOME"/.config/git &&
+	cat >"$HOME"/.config/git/config <<-EOF &&
+	[xdg]
+		config = xdg
+	EOF
+
+	cat >expect <<-EOF &&
+	global	file:$HOME/.config/git/config	xdg.config=xdg
+	global	file:$HOME/.gitconfig	home.config=home
+	EOF
+	git config ${mode_prefix}list --global --show-scope --show-origin >actual &&
+	test_cmp expect actual &&
+
+	echo xdg >expect &&
+	git config ${mode_get} --global xdg.config >actual &&
+	test_cmp expect actual &&
+
+	echo home >expect &&
+	git config ${mode_get} --global home.config >actual &&
 	test_cmp expect actual
 '
 
@@ -2655,7 +2770,7 @@ test_expect_success '--type rejects unknown specifiers' '
 
 test_expect_success '--type=int requires at least one digit' '
 	test_must_fail git config --type int --default m some.key >out 2>error &&
-	grep "bad numeric config value" error &&
+	test_grep "bad numeric config value" error &&
 	test_must_be_empty out
 '
 
@@ -2967,12 +3082,12 @@ test_expect_success 'includeIf.hasconfig:remote.*.url forbids remote url in such
 
 	# test with any Git command
 	test_must_fail git -C hasremoteurlTest status 2>err &&
-	grep "fatal: remote URLs cannot be configured in file directly or indirectly included by includeIf.hasconfig:remote.*.url" err
+	test_grep "fatal: remote URLs cannot be configured in file directly or indirectly included by includeIf.hasconfig:remote.*.url" err
 '
 
 test_expect_success 'negated mode causes failure' '
 	test_must_fail git config --no-get 2>err &&
-	grep "unknown option \`no-get${SQ}" err
+	test_grep "unknown option \`no-get${SQ}" err
 '
 
 test_expect_success 'specifying multiple modes causes failure' '
@@ -3000,6 +3115,23 @@ test_expect_success 'writing value with trailing CR not stripped on read' '
 	git -C cr-test config get core.foo >actual &&
 
 	test_cmp expect actual
+'
+
+test_expect_success 'writing config fails immediately with core.configLockTimeout=0' '
+	test_when_finished "rm -f .git/config.lock" &&
+	>.git/config.lock &&
+	test_must_fail git -c core.configLockTimeout=0 config foo.bar baz 2>err &&
+	test_grep "could not lock config file" err
+'
+
+test_expect_success 'writing config retries until lock is released' '
+	test_when_finished "rm -f .git/config.lock" &&
+	>.git/config.lock &&
+	{
+		( sleep 1 && rm -f .git/config.lock ) &
+	} &&
+	git -c core.configLockTimeout=5000 config retried.key value &&
+	test "$(git config retried.key)" = value
 '
 
 test_done

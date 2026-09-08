@@ -3,6 +3,8 @@
 #include "strbuf.h"
 #include "trace2/tr2_tbuf.h"
 #include "trace2/tr2_sid.h"
+/* banned-die must be last. */
+#include "banned-die.h"
 
 #define TR2_ENVVAR_PARENT_SID "GIT_TRACE2_PARENT_SID"
 
@@ -45,7 +47,7 @@ static void tr2_sid_append_my_sid_component(void)
 	if (xgethostname(hostname, sizeof(hostname)))
 		strbuf_add(&tr2sid_buf, "Localhost", 9);
 	else {
-		algo->init_fn(&ctx);
+		git_hash_init(&ctx, algo);
 		git_hash_update(&ctx, hostname, strlen(hostname));
 		git_hash_final(hash, &ctx);
 		hash_to_hex_algop_r(hex, hash, algo);

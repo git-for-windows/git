@@ -133,7 +133,7 @@ int update_path_in_gitmodules(const char *oldpath, const char *newpath)
 	strbuf_addstr(&entry, "submodule.");
 	strbuf_addstr(&entry, submodule->name);
 	strbuf_addstr(&entry, ".path");
-	ret = config_set_in_gitmodules_file_gently(entry.buf, newpath);
+	ret = config_set_in_gitmodules_file_gently(the_repository, entry.buf, newpath);
 	strbuf_release(&entry);
 	return ret;
 }
@@ -1409,6 +1409,7 @@ struct submodule_parallel_fetch {
 	int oid_fetch_tasks_nr, oid_fetch_tasks_alloc;
 
 	struct strbuf submodules_with_errors;
+	int submodule_errors;
 };
 #define SPF_INIT { \
 	.args = STRVEC_INIT, \
@@ -1562,6 +1563,14 @@ static struct fetch_task *fetch_task_create(struct submodule_parallel_fetch *spf
 	return NULL;
 }
 
+static void record_fetch_error(struct submodule_parallel_fetch *spf,
+			       const char *name)
+{
+	if (spf->submodule_errors == SUBMODULE_ERRORS_FAIL)
+		spf->result = 1;
+	strbuf_addf(&spf->submodules_with_errors, "\t%s\n", name);
+}
+
 static struct fetch_task *
 get_fetch_task_from_index(struct submodule_parallel_fetch *spf,
 			  struct strbuf *err)
@@ -1599,7 +1608,7 @@ get_fetch_task_from_index(struct submodule_parallel_fetch *spf,
 							ce->name);
 			if (S_ISGITLINK(ce->ce_mode) &&
 			    !is_empty_dir(empty_submodule_path.buf)) {
-				spf->result = 1;
+				record_fetch_error(spf, ce->name);
 				strbuf_addf(err,
 					    _("Could not access submodule '%s'\n"),
 					    ce->name);
@@ -1753,7 +1762,7 @@ static int fetch_start_failure(struct strbuf *err UNUSED,
 	struct submodule_parallel_fetch *spf = cb;
 	struct fetch_task *task = task_cb;
 
-	spf->result = 1;
+	record_fetch_error(spf, task->sub->name);
 
 	fetch_task_free(task);
 	return 0;
@@ -1779,18 +1788,12 @@ static int fetch_finish(int retvalue, struct strbuf *err UNUSED,
 	if (!task || !task->sub)
 		BUG("callback cookie bogus");
 
-	if (retvalue) {
+	if (retvalue && task->commits) {
 		/*
-		 * NEEDSWORK: This indicates that the overall fetch
-		 * failed, even though there may be a subsequent fetch
-		 * by commit hash that might work. It may be a good
-		 * idea to not indicate failure in this case, and only
-		 * indicate failure if the subsequent fetch fails.
+		 * This is the second pass (OID-based fetch) and it failed.
+		 * The commits are genuinely unavailable from the remote.
 		 */
-		spf->result = 1;
-
-		strbuf_addf(&spf->submodules_with_errors, "\t%s\n",
-			    task->sub->name);
+		record_fetch_error(spf, task->sub->name);
 	}
 
 	/* Is this the second time we process this submodule? */
@@ -1798,9 +1801,17 @@ static int fetch_finish(int retvalue, struct strbuf *err UNUSED,
 		goto out;
 
 	it = string_list_lookup(&spf->changed_submodule_names, task->sub->name);
-	if (!it)
-		/* Could be an unchanged submodule, not contained in the list */
+	if (!it) {
+		/*
+		 * This submodule is not in the changed list (e.g. it was
+		 * fetched because RECURSE_SUBMODULES_ON fetches all populated
+		 * submodules). A phase 1 failure here has no OID-based retry
+		 * to fall back on, so it is a genuine error.
+		 */
+		if (retvalue)
+			record_fetch_error(spf, task->sub->name);
 		goto out;
+	}
 
 	cs_data = it->util;
 	oid_array_filter(&cs_data->new_commits,
@@ -1809,6 +1820,11 @@ static int fetch_finish(int retvalue, struct strbuf *err UNUSED,
 
 	/* Are there commits we want, but do not exist? */
 	if (cs_data->new_commits.nr) {
+		/*
+		 * Schedule an OID-based phase 2 fetch to retrieve the missing
+		 * commits directly. Defer any error from phase 1: if phase 2
+		 * succeeds, the overall operation should still succeed.
+		 */
 		task->commits = &cs_data->new_commits;
 		ALLOC_GROW(spf->oid_fetch_tasks,
 			   spf->oid_fetch_tasks_nr + 1,
@@ -1817,6 +1833,16 @@ static int fetch_finish(int retvalue, struct strbuf *err UNUSED,
 		spf->oid_fetch_tasks_nr++;
 		return 0;
 	}
+
+	/*
+	 * All required commits are already present locally (they were either
+	 * fetched by phase 1 or existed beforehand), so there is no phase 2
+	 * retry to defer to. If phase 1 failed, the fetch itself went wrong
+	 * (e.g. a transport error) and must still be reported, even though
+	 * the gitlinked commits are available.
+	 */
+	if (retvalue)
+		record_fetch_error(spf, task->sub->name);
 
 out:
 	fetch_task_free(task);
@@ -1827,7 +1853,8 @@ int fetch_submodules(struct repository *r,
 		     const struct strvec *options,
 		     const char *prefix, int command_line_option,
 		     int default_option,
-		     int quiet, int max_parallel_jobs)
+		     int quiet, int max_parallel_jobs,
+		     int submodule_errors)
 {
 	struct submodule_parallel_fetch spf = SPF_INIT;
 	const struct run_process_parallel_opts opts = {
@@ -1847,6 +1874,7 @@ int fetch_submodules(struct repository *r,
 	spf.default_option = default_option;
 	spf.quiet = quiet;
 	spf.prefix = prefix;
+	spf.submodule_errors = submodule_errors;
 
 	if (!r->worktree)
 		goto out;
@@ -2390,7 +2418,7 @@ static int validate_submodule_encoded_git_dir(char *git_dir, const char *submodu
 
 	/* Prevent conflicts on case-folding filesystems */
 	repo_config_get_bool(the_repository, "core.ignorecase", &config_ignorecase);
-	if (ignore_case || config_ignorecase) {
+	if (repo_ignore_case(the_repository) || config_ignorecase) {
 		bool suffixes_match = !strcmp(last_submodule_name, submodule_name);
 		return check_casefolding_conflict(git_dir, submodule_name,
 						  suffixes_match);
@@ -2494,7 +2522,7 @@ static void relocate_single_git_dir_into_superproject(const char *path,
 	if (validate_submodule_path(path) < 0)
 		exit(128);
 
-	if (submodule_uses_worktrees(path))
+	if (submodule_uses_worktrees(the_repository, path))
 		die(_("relocate_gitdir for submodule '%s' with "
 		      "more than one worktree not supported"), path);
 
@@ -2579,7 +2607,7 @@ void absorb_git_dir_into_superproject(const char *path,
 
 		if (err_code != READ_GITFILE_ERR_NOT_A_REPO)
 			/* We don't know what broke here. */
-			read_gitfile_error_die(err_code, path, NULL);
+			read_gitfile_error_die(err_code, path);
 
 		/*
 		* Maybe populated, but no git directory was found?
@@ -2627,13 +2655,12 @@ int get_superproject_working_tree(struct strbuf *buf)
 		 * We might have a superproject, but it is harder
 		 * to determine.
 		 */
-		return 0;
+		goto out;
 
 	if (!strbuf_realpath(&one_up, "../", 0))
-		return 0;
+		goto out;
 
 	subpath = relative_path(cwd, one_up.buf, &sb);
-	strbuf_release(&one_up);
 
 	prepare_submodule_repo_env(&cp.env);
 	strvec_pop(&cp.env);
@@ -2678,20 +2705,22 @@ int get_superproject_working_tree(struct strbuf *buf)
 		ret = 1;
 		free(super_wt);
 	}
-	free(cwd);
-	strbuf_release(&sb);
 
 	code = finish_command(&cp);
 
 	if (code == 128)
 		/* '../' is not a git repository */
-		return 0;
-	if (code == 0 && len == 0)
+		ret = 0;
+	else if (code == 0 && len == 0)
 		/* There is an unrelated git repository at '../' */
-		return 0;
-	if (code)
+		ret = 0;
+	else if (code)
 		die(_("ls-tree returned unexpected return code %d"), code);
 
+out:
+	strbuf_release(&sb);
+	strbuf_release(&one_up);
+	free(cwd);
 	return ret;
 }
 

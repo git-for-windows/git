@@ -56,6 +56,7 @@
 /git-diagnose
 /git-diff
 /git-diff-files
+/git-diff-hunks
 /git-diff-index
 /git-diff-pairs
 /git-diff-tree
@@ -263,3 +264,5 @@ Release/
 CMakeSettings.json
 /contrib/libgit-rs/target
 /contrib/libgit-sys/target
+/rust/target
+/rust/Cargo.lock

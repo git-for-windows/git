@@ -4,8 +4,8 @@ test_description='Test reffiles backend'
 
 GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME=main
 export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
-GIT_TEST_DEFAULT_REF_FORMAT=files
-export GIT_TEST_DEFAULT_REF_FORMAT
+GIT_TEST_DEFAULT_REF_STORAGE_FORMAT=files
+export GIT_TEST_DEFAULT_REF_STORAGE_FORMAT
 
 . ./test-lib.sh
 
@@ -517,6 +517,27 @@ test_expect_success 'symref transaction supports false symlink config' '
 	git symbolic-ref TEST_SYMREF_HEAD >actual &&
 	echo refs/heads/new >expect &&
 	test_cmp expect actual
+'
+
+test_expect_success SYMLINKS,!MINGW,!WITH_BREAKING_CHANGES 'core.preferSymlinkRefs can be set up via onbranch condition' '
+	test_when_finished "git symbolic-ref -d TEST_SYMREF_HEAD" &&
+	test_when_finished "rm -f .git/include" &&
+	git update-ref refs/heads/new @ &&
+	cat >.git/include <<-\EOF &&
+	[core]
+		preferSymlinkRefs = true
+	EOF
+	test_config includeIf.onbranch:"$(git branch --show-current)".path \
+		"$(pwd)/.git/include" &&
+	cat >stdin <<-EOF &&
+	start
+	symref-create TEST_SYMREF_HEAD refs/heads/new
+	prepare
+	commit
+	EOF
+	git update-ref --no-deref --stdin <stdin &&
+	test_path_is_symlink .git/TEST_SYMREF_HEAD &&
+	test "$(test_readlink .git/TEST_SYMREF_HEAD)" = refs/heads/new
 '
 
 test_done

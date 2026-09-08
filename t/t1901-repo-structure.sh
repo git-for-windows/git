@@ -239,9 +239,9 @@ test_expect_success '--ref-filter narrows the set of refs' '
 
 		git repo structure --format=lines \
 			--ref-filter="refs/heads/*" >out &&
-		grep "^references.branches.count=1$" out &&
-		grep "^references.tags.count=0$" out &&
-		grep "^references.remotes.count=0$" out
+		test_grep "^references.branches.count=1$" out &&
+		test_grep "^references.tags.count=0$" out &&
+		test_grep "^references.remotes.count=0$" out
 	)
 '
 
@@ -257,9 +257,9 @@ test_expect_success '--ref-filter unions multiple patterns' '
 		git repo structure --format=lines \
 			--ref-filter="refs/heads/*" \
 			--ref-filter="refs/tags/*" >out &&
-		grep "^references.branches.count=1$" out &&
-		grep "^references.tags.count=2$" out &&
-		grep "^references.remotes.count=0$" out
+		test_grep "^references.branches.count=1$" out &&
+		test_grep "^references.tags.count=2$" out &&
+		test_grep "^references.remotes.count=0$" out
 	)
 '
 
@@ -271,7 +271,7 @@ test_expect_success '--top omitted: no top.* keys' '
 		test_commit foo &&
 
 		git repo structure --format=lines >out &&
-		! grep "\.top\." out
+		test_grep ! "\.top\." out
 	)
 '
 
@@ -295,16 +295,16 @@ test_expect_success '--top=N reports the N largest paths per axis' '
 			for type in trees blobs
 			do
 				key=objects.${type}.top.${axis} &&
-				grep -E "^${key}\.1\.path=" out &&
-				grep -E "^${key}\.2\.path=" out &&
-				! grep -E "^${key}\.3\." out || return 1
+				test_grep -E "^${key}\.1\.path=" out &&
+				test_grep -E "^${key}\.2\.path=" out &&
+				test_grep ! -E "^${key}\.3\." out || return 1
 			done
 		done &&
 
 		# The big blob outranks the small one on disk and inflated.
 		key=objects.blobs.top &&
-		grep "^${key}.by_disk_size.1.path=dir2/big.txt$" out &&
-		grep "^${key}.by_inflated_size.1.path=dir2/big.txt$" out
+		test_grep "^${key}.by_disk_size.1.path=dir2/big.txt$" out &&
+		test_grep "^${key}.by_inflated_size.1.path=dir2/big.txt$" out
 	)
 '
 
@@ -322,16 +322,16 @@ test_expect_success 'repo.structure.top supplies the default for --top' '
 
 		git -c repo.structure.top=2 \
 			repo structure --format=lines >with-config &&
-		grep "^objects.blobs.top.by_count.1.path=" with-config &&
+		test_grep "^objects.blobs.top.by_count.1.path=" with-config &&
 
 		git -c repo.structure.top=2 \
 			repo structure --format=lines --top=0 >cli-override &&
-		! grep "\.top\." cli-override
+		test_grep ! "\.top\." cli-override
 	)
 '
 
 test_expect_success 'git repo structure -h shows only repo structure usage' '
-	test_must_fail git repo structure -h >actual &&
+	git repo structure -h >actual &&
 	test_grep "git repo structure" actual &&
 	test_grep ! "git repo info" actual
 '

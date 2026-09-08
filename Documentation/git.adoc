@@ -25,7 +25,8 @@ and full access to internals.
 See linkgit:gittutorial[7] to get started, then see
 linkgit:giteveryday[7] for a useful minimum set of
 commands.  The link:user-manual.html[Git User's Manual] has a more
-in-depth introduction.
+in-depth introduction.  See linkgit:gitdatamodel[7] if you want to
+learn about the data model and important terminology.
 
 After you mastered the basic concepts, you can come back to this
 page to learn what commands Git offers.  You can learn more about
@@ -469,7 +470,9 @@ Higher level SCMs may provide and manage additional information in the
 
 Terminology
 -----------
-Please see linkgit:gitglossary[7].
+Please see linkgit:gitglossary[7].  See linkgit:gitdatamodel[7] for a
+discussion of the core data model, which includes important terminology
+used throughout the documentation.
 
 
 Environment Variables
@@ -590,15 +593,21 @@ double-quotes and respecting backslash escapes. E.g., the value
 	is always used. The default is "sha1".
 	See `--object-format` in linkgit:git-init[1].
 
-`GIT_DEFAULT_REF_FORMAT`::
-	If this variable is set, the default reference backend format for new
+`GIT_DEFAULT_REF_STORAGE_FORMAT`::
+	If this variable is set, the default ref storage format for new
 	repositories will be set to this value. The default is "files".
-	See `--ref-format` in linkgit:git-init[1].
+	See `--ref-storage-format` in linkgit:git-init[1].
+
+`GIT_DEFAULT_REF_FORMAT`::
+	Deprecated alias of `GIT_DEFAULT_REF_STORAGE_FORMAT`.
+
+`GIT_REF_STORAGE_FORMAT`::
+	Specify which ref storage format to use along with its URI.
+	See `extensions.refStorage` option in linkgit:git-config[1] for more
+	details. Overrides the config variable when used.
 
 `GIT_REFERENCE_BACKEND`::
-    Specify which reference backend to be used along with its URI.
-    See `extensions.refStorage` option in linkgit:git-config[1] for more
-    details. Overrides the config variable when used.
+	Deprecated alias of `GIT_REF_STORAGE_FORMAT`.
 
 Git Commits
 ~~~~~~~~~~~
@@ -949,7 +958,9 @@ for full details.
 `GIT_NO_LAZY_FETCH`::
 	Setting this Boolean environment variable to true tells Git
 	not to lazily fetch missing objects from the promisor remote
-	on demand.
+	on demand. On the server side, the `uploadpack.lazyFetchTrusted`
+	configuration variable can control this per-repository. See
+	linkgit:git-upload-pack[1].
 
 `GIT_REFLOG_ACTION`::
 	When a ref is updated, reflog entries are created to keep
@@ -1199,8 +1210,9 @@ SEE ALSO
 --------
 linkgit:gittutorial[7], linkgit:gittutorial-2[7],
 linkgit:giteveryday[7], linkgit:gitcvs-migration[7],
-linkgit:gitglossary[7], linkgit:gitcore-tutorial[7],
-linkgit:gitcli[7], link:user-manual.html[The Git User's Manual],
+linkgit:gitglossary[7], linkgit:gitdatamodel[7],
+linkgit:gitcore-tutorial[7], linkgit:gitcli[7],
+link:user-manual.html[The Git User's Manual],
 linkgit:gitworkflows[7]
 
 GIT

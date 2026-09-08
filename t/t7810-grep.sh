@@ -89,6 +89,10 @@ test_expect_success setup '
 	function dummy() {}
 	EOF
 	printf "\200\nASCII\n" >invalid-utf8 &&
+	printf "before\346world\n" >invalid-utf8-embedded &&
+	printf "a\346b\347c\n" >invalid-utf8-multi &&
+	printf "\346world\n" >invalid-utf8-leading &&
+	printf "before\346\n" >invalid-utf8-trailing &&
 	if test_have_prereq FUNNYNAMES
 	then
 		echo unusual >"\"unusual\" pathname" &&
@@ -593,6 +597,39 @@ test_expect_success MB_REGEX 'grep exactly one char in single-char multibyte fil
 
 test_expect_success MB_REGEX 'grep two chars in single-char multibyte file' '
 	LC_ALL=en_US.UTF-8 test_expect_code 1 git grep ".." reverse-question-mark
+'
+
+test_expect_success MACOS,MB_REGEX 'grep matches valid text on both sides of invalid UTF-8' '
+	LC_ALL=en_US.UTF-8 git grep -h "befo[r]e" invalid-utf8-embedded >actual &&
+	test_cmp invalid-utf8-embedded actual &&
+	LC_ALL=en_US.UTF-8 git grep -h "worl[d]" invalid-utf8-embedded >actual &&
+	test_cmp invalid-utf8-embedded actual &&
+	LC_ALL=en_US.UTF-8 git grep -h -o "worl[d]" invalid-utf8-embedded >actual &&
+	echo world >expected &&
+	test_cmp expected actual
+'
+
+test_expect_success MACOS,MB_REGEX 'grep matches a run between two invalid sequences' '
+	LC_ALL=en_US.UTF-8 git grep -h "[b]" invalid-utf8-multi >actual &&
+	test_cmp invalid-utf8-multi actual
+'
+
+test_expect_success MB_REGEX 'grep does not anchor ^ or $ inside an invalid-byte line' '
+	test_expect_code 1 env LC_ALL=en_US.UTF-8 \
+		git grep -h "^world" invalid-utf8-embedded &&
+	test_expect_code 1 env LC_ALL=en_US.UTF-8 \
+		git grep -h "before\$" invalid-utf8-embedded
+'
+
+test_expect_success MACOS,MB_REGEX 'grep anchors ^ and $ at true line ends past invalid UTF-8' '
+	LC_ALL=en_US.UTF-8 git grep -h "^before" invalid-utf8-embedded >actual &&
+	test_cmp invalid-utf8-embedded actual &&
+	LC_ALL=en_US.UTF-8 git grep -h "world\$" invalid-utf8-embedded >actual &&
+	test_cmp invalid-utf8-embedded actual &&
+	LC_ALL=en_US.UTF-8 git grep -h "^" invalid-utf8-leading >actual &&
+	test_cmp invalid-utf8-leading actual &&
+	LC_ALL=en_US.UTF-8 git grep -h "\$" invalid-utf8-trailing >actual &&
+	test_cmp invalid-utf8-trailing actual
 '
 
 cat >expected <<EOF
@@ -1101,19 +1138,19 @@ test_expect_success 'grep -W with userdiff' '
 '
 
 test_expect_success ' includes preceding comment' '
-	grep "# Say hello" function-context-userdiff-actual
+	test_grep "# Say hello" function-context-userdiff-actual
 '
 
 test_expect_success ' includes function line' '
-	grep "=function hello" function-context-userdiff-actual
+	test_grep "=function hello" function-context-userdiff-actual
 '
 
 test_expect_success ' includes matching line' '
-	grep ":  echo" function-context-userdiff-actual
+	test_grep ":  echo" function-context-userdiff-actual
 '
 
 test_expect_success ' includes last line of the function' '
-	grep "} # hello" function-context-userdiff-actual
+	test_grep "} # hello" function-context-userdiff-actual
 '
 
 for threads in $(test_seq 0 10)
@@ -1137,16 +1174,16 @@ test_expect_success !PTHREADS,!FAIL_PREREQS \
 	git grep --threads=2 Hello hello_world 2>err &&
 	grep ^warning: err >warnings &&
 	test_line_count = 1 warnings &&
-	grep -F "no threads support, ignoring --threads" err &&
+	test_grep -F "no threads support, ignoring --threads" err &&
 	git -c grep.threads=2 grep Hello hello_world 2>err &&
 	grep ^warning: err >warnings &&
 	test_line_count = 1 warnings &&
-	grep -F "no threads support, ignoring grep.threads" err &&
+	test_grep -F "no threads support, ignoring grep.threads" err &&
 	git -c grep.threads=2 grep --threads=4 Hello hello_world 2>err &&
 	grep ^warning: err >warnings &&
 	test_line_count = 2 warnings &&
-	grep -F "no threads support, ignoring --threads" err &&
-	grep -F "no threads support, ignoring grep.threads" err &&
+	test_grep -F "no threads support, ignoring --threads" err &&
+	test_grep -F "no threads support, ignoring grep.threads" err &&
 	git -c grep.threads=0 grep --threads=0 Hello hello_world 2>err &&
 	test_line_count = 0 err
 '
@@ -1267,21 +1304,21 @@ test_expect_success 'no repository with path outside $cwd' '
 		export GIT_CEILING_DIRECTORIES &&
 		cd non/git &&
 		test_expect_code 128 git grep --no-index search .. 2>error &&
-		grep "is outside the directory tree" error
+		test_grep "is outside the directory tree" error
 	) &&
 	(
 		GIT_CEILING_DIRECTORIES="$(pwd)/non" &&
 		export GIT_CEILING_DIRECTORIES &&
 		cd non/git &&
 		test_expect_code 128 git grep --no-index search ../tig 2>error &&
-		grep "is outside the directory tree" error
+		test_grep "is outside the directory tree" error
 	) &&
 	(
 		GIT_CEILING_DIRECTORIES="$(pwd)/non" &&
 		export GIT_CEILING_DIRECTORIES &&
 		cd non/git &&
 		test_expect_code 128 git grep --no-index search ../non 2>error &&
-		grep "no such path in the working tree" error
+		test_grep "no such path in the working tree" error
 	)
 '
 

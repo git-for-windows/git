@@ -957,6 +957,17 @@ static void location_options_init(struct config_location_options *opts,
 	}
 
 	if (opts->use_global_config) {
+		/*
+		 * Since global config is sourced from more than one location,
+		 * read it using `do_git_config_sequence()` with other scopes
+		 * ignored. However, writing global config should point to a
+		 * single destination, set in `opts->source.file`.
+		 */
+		opts->options.ignore_repo = 1;
+		opts->options.ignore_cmdline = 1;
+		opts->options.ignore_worktree = 1;
+		opts->options.ignore_system = 1;
+
 		opts->source.file = opts->file_to_free = git_global_config();
 		if (!opts->source.file)
 			/*
@@ -974,7 +985,7 @@ static void location_options_init(struct config_location_options *opts,
 		opts->source.file = opts->file_to_free = repo_git_path(the_repository, "config");
 		opts->source.scope = CONFIG_SCOPE_LOCAL;
 	} else if (opts->use_worktree_config) {
-		struct worktree **worktrees = get_worktrees();
+		struct worktree **worktrees = get_worktrees(the_repository);
 		if (the_repository->repository_format_worktree_config)
 			opts->source.file = opts->file_to_free =
 				repo_git_path(the_repository, "config.worktree");
@@ -1313,7 +1324,10 @@ static int show_editor(struct config_location_options *opts)
 		else if (errno != EEXIST)
 			die_errno(_("cannot create configuration file %s"), config_file);
 	}
-	launch_editor(config_file, NULL, NULL);
+	if (launch_editor(config_file, NULL, NULL)) {
+		free(config_file);
+		return -1;
+	}
 	free(config_file);
 
 	return 0;

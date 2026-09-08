@@ -154,6 +154,7 @@ ifeq ($(uname_S),Darwin)
 	HAVE_DEV_TTY = YesPlease
 	COMPAT_OBJS += compat/precompose_utf8.o
 	BASIC_CFLAGS += -DPRECOMPOSE_UNICODE
+	DARWIN_REGEXEC = YesPlease
 	BASIC_CFLAGS += -DPROTECT_HFS_DEFAULT=1
 	HAVE_BSD_SYSCTL = YesPlease
 	FREAD_READS_DIRECTORIES = UnfortunatelyYes
@@ -477,6 +478,7 @@ ifeq ($(uname_S),Windows)
 	SANE_TOOL_PATH ?= $(msvc_bin_dir_msys):$(sdk_ver_bin_dir_msys)
 	HAVE_ALLOCA_H = YesPlease
 	NO_PREAD = YesPlease
+	NO_WRITEV = YesPlease
 	NEEDS_CRYPTO_WITH_SSL = YesPlease
 	NO_LIBGEN_H = YesPlease
 	NO_POLL = YesPlease
@@ -545,7 +547,7 @@ endif
 	EXTLIBS = user32.lib advapi32.lib shell32.lib wininet.lib ws2_32.lib invalidcontinue.obj kernel32.lib ntdll.lib
 	GITLIBS += git.res
 	PTHREAD_LIBS =
-	RC = compat/vcbuild/scripts/rc.pl
+	RC = lib/compat/vcbuild/scripts/rc.pl
 	lib =
 	BASIC_CFLAGS += $(vcpkg_inc) $(sdk_includes) $(msvc_includes)
 ifndef DEBUG
@@ -696,6 +698,7 @@ ifeq ($(uname_S),MINGW)
 	pathsep = ;
 	HAVE_ALLOCA_H = YesPlease
 	NO_PREAD = YesPlease
+	NO_WRITEV = YesPlease
 	NEEDS_CRYPTO_WITH_SSL = YesPlease
 	NO_LIBGEN_H = YesPlease
 	NO_POLL = YesPlease
