@@ -940,9 +940,9 @@ TEST_SHELL_PATH = $(SHELL_PATH)
 LIB_FILE = libgit.a
 
 ifdef DEBUG
-RUST_TARGET_DIR = target/debug
+RUST_TARGET_DIR = target/$(CARGO_BUILD_TARGET)/debug
 else
-RUST_TARGET_DIR = target/release
+RUST_TARGET_DIR = target/$(CARGO_BUILD_TARGET)/release
 endif
 
 ifeq ($(uname_S),Windows)
