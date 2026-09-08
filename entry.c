@@ -332,7 +332,8 @@ static int write_entry(struct cache_entry *ce, char *path, struct conv_attrs *ca
 		 * We can't make a real symlink; write out a regular file entry
 		 * with the symlink destination as its contents.
 		 */
-		if (!has_symlinks || to_tempfile)
+		if (!repo_has_symlinks(state->istate && state->istate->repo ?
+				       state->istate->repo : the_repository) || to_tempfile)
 			goto write_file_entry;
 
 		ret = create_symlink(state->istate, new_blob, path);

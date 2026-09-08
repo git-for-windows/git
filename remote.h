@@ -62,12 +62,14 @@ struct remote_state {
 void remote_state_clear(struct remote_state *remote_state);
 struct remote_state *remote_state_new(void);
 
-	enum follow_remote_head_settings {
-		FOLLOW_REMOTE_NEVER = -1,
-		FOLLOW_REMOTE_CREATE = 0,
-		FOLLOW_REMOTE_WARN = 1,
-		FOLLOW_REMOTE_ALWAYS = 2,
-	};
+#define BUILTIN_FOLLOW_REMOTE_HEAD_DFLT FOLLOW_REMOTE_CREATE
+enum follow_remote_head_settings {
+	FOLLOW_REMOTE_UNCONFIGURED = 0,
+	FOLLOW_REMOTE_NEVER,
+	FOLLOW_REMOTE_CREATE,
+	FOLLOW_REMOTE_WARN,
+	FOLLOW_REMOTE_ALWAYS,
+};
 
 struct remote {
 	struct hashmap_entry ent;
@@ -343,6 +345,8 @@ char *remote_ref_for_branch(struct branch *branch, int for_push);
 
 const char *repo_default_remote(struct repository *repo);
 const char *repo_remote_from_url(struct repository *repo, const char *url);
+struct remote *repo_remote_for_push_tracking(struct repository *repo,
+					     struct remote *remote);
 
 /* returns true if the given branch has merge configuration given. */
 int branch_has_merge_config(struct branch *branch);
