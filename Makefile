@@ -954,8 +954,10 @@ LIB_FILE = libgit.a
 ifndef NO_RUST
 ifdef DEBUG
 RUST_BUILD_CONFIG = debug
+RUST_TARGET_DIR = target/$(CARGO_BUILD_TARGET)/debug
 else
 RUST_BUILD_CONFIG = release
+RUST_TARGET_DIR = target/$(CARGO_BUILD_TARGET)/release
 endif
 
 ifeq ($(uname_S),Windows)
