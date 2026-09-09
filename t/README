@@ -359,6 +359,11 @@ environment set.
 GIT_TEST_TEMPLATE_DIR=<path> overrides the generated location of the
 templates used by the tests.
 
+GIT_TEST_WSL=1 forwards the test environment when the generated wrappers
+run Windows executables from WSL. It also grants a command-scope
+safe.directory exception for repositories under TEST_OUTPUT_DIRECTORY.
+See CONTRIBUTING.md for the cross-build and runner setup.
+
 GIT_TEST_FAIL_PREREQS=<boolean> fails all prerequisites. This is
 useful for discovering issues with the tests where say a later test
 implicitly depends on an optional earlier test.
