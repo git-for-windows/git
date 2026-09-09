@@ -1782,7 +1782,7 @@ libgit_sources += version_def_h
 
 rust_option = get_option('rust')
 if rust_option.allowed()
-  subdir('src')
+  subdir('rust/src')
   libgit_c_args += '-DWITH_RUST'
 
   if host_machine.system() == 'windows'
