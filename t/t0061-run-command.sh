@@ -291,4 +291,18 @@ test_expect_success MINGW 'can spawn .bat with argv[0] containing spaces' '
 	test_grep "arg with spaces" out
 '
 
+SQ="'"
+test_expect_success 'core.shell' '
+	test_config_global core.shell "$GIT_EXEC_PATH/git$X" &&
+	test_must_fail git -c alias.eq="!a.b=c" eq 2>actual &&
+	grep "${SQ}a.b=c${SQ} is not a git command" actual
+'
+
+test_expect_success MINGW 'core.shell executes scripts' '
+	test_config_global core.shell "$GIT_EXEC_PATH/git$X" &&
+	echo "#!/bin/sh" >script &&
+	test_must_fail git -c alias.s="!./script" s 2>actual &&
+	grep "${SQ}./script${SQ} is not a git command" actual
+'
+
 test_done

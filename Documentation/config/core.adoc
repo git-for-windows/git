@@ -807,3 +807,7 @@ core.WSLCompat::
 	The default value is false. When set to true, Git will set the mode
 	bits of the file in the way of wsl, so that the executable flag of
 	files can be set or read correctly.
+
+core.shell::
+	Set the absolute path to the executable to use as a POSIX shell;
+	This will also set/override the environment variable `SHELL`.

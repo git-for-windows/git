@@ -2000,6 +2000,10 @@ static char *path_lookup(const char *cmd, int exe_only)
 	if (strpbrk(cmd, "/\\"))
 		return xstrdup(cmd);
 
+	if (!strcmp(cmd, "sh") &&
+	    (prog = xstrdup_or_null(get_shell_path(NULL))))
+		return prog;
+
 	path = mingw_getenv("PATH");
 	if (!path)
 		return NULL;
@@ -2192,6 +2196,12 @@ static int is_msys2_sh(const char *cmd)
 
 		if (ret >= 0)
 			return ret;
+
+		if (get_shell_path(NULL)) {
+			/* Assume an overridden shell is not MSYS2 */
+			ret = 0;
+			return ret;
+		}
 
 		p = path_lookup(cmd, 0);
 		if (!p)
