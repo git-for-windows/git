@@ -8,6 +8,7 @@
 #include "config.h"
 #include "dir.h"
 #include "environment.h"
+#include "repository.h"
 #include "gettext.h"
 #include "repository.h"
 #include "run-command.h"
@@ -941,7 +942,7 @@ int mingw_open (const char *filename, int oflags, ...)
 	 * Only set append_atomically to default value(1) when repo is initialized
 	 * and fail to get config value
 	 */
-	if (append_atomically < 0 && the_repository && the_repository->commondir &&
+	if ((oflags & O_APPEND) && append_atomically < 0 && the_repository && the_repository->commondir &&
 		repo_config_get_bool(the_repository, "windows.appendatomically", &append_atomically))
 		append_atomically = 1;
 
@@ -1188,7 +1189,7 @@ int mingw_chdir(const char *dirname)
 	if (xutftowcs_long_path(wdirname, dirname) < 0)
 		return -1;
 
-	if (has_symlinks) {
+	if (repo_has_symlinks(the_repository)) {
 		HANDLE hnd = CreateFileW(wdirname, 0,
 				FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
 				OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
@@ -2554,10 +2555,8 @@ int mingw_kill(pid_t pid, int sig)
 			}
 			ret = terminate_process_tree(h, 128 + sig);
 		}
-		if (ret) {
+		if (ret)
 			errno = err_win_to_posix(GetLastError());
-			CloseHandle(h);
-		}
 		return ret;
 	} else if (pid > 0 && sig == 0) {
 		HANDLE h = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid);
@@ -3465,7 +3464,7 @@ int mingw_create_symlink(struct index_state *index, const char *target, const ch
 	int len;
 
 	/* fail if symlinks are disabled or API is not supported (WinXP) */
-	if (!has_symlinks) {
+	if (!repo_has_symlinks(the_repository)) {
 		errno = ENOSYS;
 		return -1;
 	}
@@ -3834,15 +3833,23 @@ static void setup_windows_environment(void)
 
 	if (!getenv("LC_ALL") && !getenv("LC_CTYPE") && !getenv("LANG"))
 		setenv("LC_CTYPE", "C.UTF-8", 1);
+}
 
+int mingw_platform_has_symlinks(void)
+{
+	static int has_symlinks = -1;
 	/*
 	 * Change 'core.symlinks' default to false, unless native symlinks are
 	 * enabled in MSys2 (via 'MSYS=winsymlinks:nativestrict'). Thus we can
 	 * run the test suite (which doesn't obey config files) with or without
 	 * symlink support.
 	 */
-	if (!(tmp = getenv("MSYS")) || !strstr(tmp, "winsymlinks:nativestrict"))
-		has_symlinks = 0;
+	if (has_symlinks < 0) {
+		const char *tmp = getenv("MSYS");
+		has_symlinks = (tmp && strstr(tmp, "winsymlinks:nativestrict")) ? 1 : 0;
+	}
+
+	return has_symlinks;
 }
 
 static void get_current_user_sid(PSID *sid, HANDLE *linked_token)
@@ -4084,7 +4091,7 @@ int is_valid_win32_path(const char *path, int allow_literal_nul)
 	const char *p = path;
 	int preceding_space_or_period = 0, i = 0, periods = 0;
 
-	if (!protect_ntfs)
+	if (!repo_protect_ntfs(the_repository))
 		return 1;
 
 	skip_dos_drive_prefix((char **)&path);

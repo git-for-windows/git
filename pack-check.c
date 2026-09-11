@@ -69,7 +69,7 @@ static int verify_packfile(struct repository *r,
 	if (!is_pack_valid(p))
 		return error("packfile %s cannot be accessed", p->pack_name);
 
-	r->hash_algo->init_fn(&ctx);
+	git_hash_init(&ctx, r->hash_algo);
 	do {
 		size_t remaining;
 		unsigned char *in = use_pack(p, w_curs, offset, &remaining);
@@ -106,7 +106,7 @@ static int verify_packfile(struct repository *r,
 	QSORT(entries, nr_objects, compare_entries);
 
 	for (i = 0; i < nr_objects; i++) {
-		struct odb_read_stream *stream = NULL;
+		struct odb_stream *stream = NULL;
 		void *data;
 		struct object_id oid;
 		enum object_type type;
@@ -171,7 +171,7 @@ static int verify_packfile(struct repository *r,
 			display_progress(progress, base_count + i);
 
 		if (stream)
-			odb_read_stream_close(stream);
+			odb_stream_close(stream);
 		free(data);
 	}
 

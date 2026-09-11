@@ -11,8 +11,8 @@ export TEST_PASSES_SANITIZE_LEAK
 . ./test-lib.sh
 
 test_expect_success 'git survey -h shows the deprecated banner' '
-	test_expect_code 129 git survey -h >usage &&
-	grep "DEPRECATED!" usage
+	test_expect_code 0 git survey -h >usage &&
+	test_grep "DEPRECATED!" usage
 '
 
 test_expect_success 'create a semi-interesting repo' '
@@ -27,7 +27,7 @@ test_expect_success 'create a semi-interesting repo' '
 
 test_expect_success 'survey prints a deprecation warning' '
 	git survey --all-refs >out 2>err &&
-	grep "is deprecated" err
+	test_grep "is deprecated" err
 '
 
 test_expect_success 'survey forwards to git repo structure' '
