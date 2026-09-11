@@ -942,7 +942,7 @@ int mingw_open (const char *filename, int oflags, ...)
 	 * Only set append_atomically to default value(1) when repo is initialized
 	 * and fail to get config value
 	 */
-	if (append_atomically < 0 && the_repository && the_repository->commondir &&
+	if ((oflags & O_APPEND) && append_atomically < 0 && the_repository && the_repository->commondir &&
 		repo_config_get_bool(the_repository, "windows.appendatomically", &append_atomically))
 		append_atomically = 1;
 
