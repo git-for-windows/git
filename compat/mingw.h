@@ -7,10 +7,9 @@ struct config_context;
 int mingw_core_config(const char *var, const char *value,
 		      const struct config_context *ctx, void *cb);
 #define platform_core_config mingw_core_config
-int mingw_block_cloning_supported(const char *source, const char *destination);
-#define block_cloning_supported mingw_block_cloning_supported
-int mingw_block_clone_file(int dst_fd, int src_fd, off_t size);
-#define block_clone_file mingw_block_clone_file
+#define copy_on_write_supported 1
+int mingw_file_copy_on_write(int dst_fd, int src_fd, off_t size);
+#define file_copy_on_write mingw_file_copy_on_write
 
 #ifndef NO_OPENSSL
 #include <openssl/ssl.h>

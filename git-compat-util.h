@@ -223,24 +223,12 @@ static inline int noop_core_config(const char *var UNUSED,
 #define platform_core_config noop_core_config
 #endif
 
-#ifndef block_cloning_supported
-static inline int git_block_cloning_supported(const char *source UNUSED,
-					      const char *destination UNUSED)
-{
-	return 0;
-}
-#define block_cloning_supported git_block_cloning_supported
+#ifndef copy_on_write_supported
+#define copy_on_write_supported 0
 #endif
 
-#ifndef block_clone_file
-static inline int git_block_clone_file(int dst_fd UNUSED,
-				       int src_fd UNUSED,
-				       off_t size UNUSED)
-{
-	errno = ENOSYS;
-	return -1;
-}
-#define block_clone_file git_block_clone_file
+#ifndef file_copy_on_write
+#define file_copy_on_write(dst_fd, src_fd, size) (errno = ENOSYS, -1)
 #endif
 
 #ifndef has_dos_drive_prefix
