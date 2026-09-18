@@ -9,6 +9,11 @@
 	fails.  If no such match can be found, it falls back to
 	creating a new branch from the current `HEAD`.
 
+`worktree.copyOnWrite`::
+	When creating a linked worktree, use copy-on-write file copies when
+	supported by the platform and file system. Setting this to `false`
+	disables the optimization. Defaults to `true`.
+
 `worktree.useRelativePaths`::
 	Link worktrees using relative paths (when "`true`") or absolute
 	paths (when "`false`"). This is particularly useful for setups
