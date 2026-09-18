@@ -351,9 +351,10 @@ static int init_copy_source(struct checkout_copy_source *source,
 	uintmax_t refreshed_at;
 
 	if (!copy_on_write_supported ||
-	    (!repo_config_get_bool(the_repository, "worktree.copyonwrite",
-				   &enabled) && !enabled) ||
 	    !worktree || !index_file || !git_dir || !time_string)
+		return 0;
+	if (!repo_config_get_bool(the_repository, "worktree.copyonwrite",
+				  &enabled) && !enabled)
 		return 0;
 
 	errno = 0;
