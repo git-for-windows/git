@@ -85,6 +85,65 @@ CMake, either by letting Visual Studio configure it automatically (simply open G
 top-level directory via `File>Open>Folder...`) or by (downloading and) running
 [CMake](https://cmake.org) manually.
 
+## Building and testing in Windows Subsystem for Linux ("WSL")
+
+Install the Linux packages `gcc-mingw-w64-x86-64` and
+`libz-mingw-w64-dev`. From the source directory in Linux Bash:
+
+```bash
+cross=x86_64-w64-mingw32
+MSYSTEM=MINGW64 make -j"$(nproc)" uname_S=MINGW \
+	CC="$cross-gcc" AR="$cross-ar" RC="$cross-windres -O coff" \
+	MINGW_CHOST="$cross" NO_CURL=1 NO_GETTEXT=1 \
+	NO_ICONV=1 NO_OPENSSL=1 NO_PERL=1 NO_PYTHON=1 \
+	NO_RUST=1 NO_TCLTK=1 USE_LIBPCRE=
+```
+
+Prefer WSL Bash for speed. Use SDK Bash for Windows-specific prerequisites,
+MSYS path handling or integrations such as `git svn` with Perl/SVN enabled.
+
+### Run tests with WSL Bash
+
+Install the Git for Windows SDK before testing.
+
+```bash
+sdk=/mnt/d/git-sdk-64
+script=t0014-alias.sh
+zlib=/usr/$cross/lib
+ssp=$(dirname "$("$cross-gcc" -print-file-name=libssp-0.dll)")
+output=$(mktemp -d)
+(
+	export MSYSTEM=MINGW64 GIT_TEST_WSL=1
+	export TEST_OUTPUT_DIRECTORY="$output"
+	export PATH="$ssp:$zlib:$sdk/mingw64/bin:$sdk/usr/bin:$PATH"
+	export Path="$PATH"
+	export WSLENV=MSYSTEM:Path/pl
+	# -V will write the detailed output to t/test-results/<test>.out
+	cd t && time bash "$script" -iVx
+)
+```
+
+Use `Path/pl`, not `PATH/pl`, to avoid duplicate Windows path entries.
+
+### Run tests with Git SDK Bash
+
+```bash
+# MSYS2 `mkdir` cannot create directories in UNC paths; use $env:Temp
+scratch=$(wslpath -u "$("$sdk/usr/bin/cygpath.exe" -m /tmp)")
+output=$(mktemp -d -p "$scratch")
+runtime="$(wslpath -m "$ssp"):$(wslpath -m "$zlib")"
+
+(
+	cd t &&
+	time "$sdk/usr/bin/env.exe" MSYSTEM=MINGW64 \
+		"PATH=$runtime:/mingw64/bin:/usr/bin" \
+		"TEST_OUTPUT_DIRECTORY=$(wslpath -m "$output")" \
+		"GIT_TEST_TEMPLATE_DIR=$(wslpath -m "$PWD/../templates/blt")" \
+		"$(wslpath -m "$sdk")/usr/bin/bash.exe" \
+		"$script" -iVx --no-bin-wrappers
+)
+```
+
 What to Change?
 ---------------
 
