@@ -395,14 +395,20 @@ worktree_copy_cleanup:
 }
 
 static int checkout_worktree(const struct add_opts *opts,
-			     struct strvec *child_env)
+			     struct strvec *child_env, const char *path)
 {
 	struct child_process cp = CHILD_PROCESS_INIT;
+	const char *source = repo_get_work_tree(the_repository);
+
 	cp.git_cmd = 1;
 	strvec_pushl(&cp.args, "reset", "--hard", "--no-recurse-submodules", NULL);
 	if (opts->quiet)
 		strvec_push(&cp.args, "--quiet");
 	strvec_pushv(&cp.env, child_env->v);
+	if (source &&
+	    block_cloning_supported(source, absolute_path(path)))
+		strvec_pushf(&cp.env, "%s=%s",
+			     GIT_WORKTREE_BLOCK_CLONE_SOURCE, source);
 	return run_command(&cp);
 }
 
@@ -589,7 +595,7 @@ static int add_worktree(const char *path, const char *refname,
 		goto done;
 
 	if (opts->checkout &&
-	    (ret = checkout_worktree(opts, &child_env)))
+	    (ret = checkout_worktree(opts, &child_env, path)))
 		goto done;
 
 	is_junk = 0;

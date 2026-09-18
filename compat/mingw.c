@@ -33,8 +33,31 @@
 #include <winternl.h>
 
 #define STATUS_DELETE_PENDING ((NTSTATUS) 0xC0000056)
+#ifndef FILE_SUPPORTS_BLOCK_REFCOUNTING
+#define FILE_SUPPORTS_BLOCK_REFCOUNTING 0x08000000
+#endif
 
 #define HCAST(type, handle) ((type)(intptr_t)handle)
+
+int mingw_block_cloning_supported(const char *source, const char *destination)
+{
+	wchar_t source_path[MAX_LONG_PATH], destination_path[MAX_LONG_PATH];
+	wchar_t source_root[MAX_PATH], destination_root[MAX_PATH];
+	DWORD flags;
+
+	if (xutftowcs_long_path(source_path, source) < 0 ||
+	    xutftowcs_long_path(destination_path, destination) < 0 ||
+	    !GetVolumePathNameW(source_path, source_root,
+				ARRAY_SIZE(source_root)) ||
+	    !GetVolumePathNameW(destination_path, destination_root,
+				ARRAY_SIZE(destination_root)) ||
+	    _wcsicmp(source_root, destination_root) ||
+	    !GetVolumeInformationW(source_root, NULL, 0, NULL, NULL, &flags,
+				   NULL, 0))
+		return 0;
+
+	return !!(flags & FILE_SUPPORTS_BLOCK_REFCOUNTING);
+}
 
 int mingw_block_clone_file(int dst_fd, int src_fd, off_t size)
 {

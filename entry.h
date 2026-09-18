@@ -13,6 +13,7 @@ struct checkout {
 	const char *super_prefix;
 	struct delayed_checkout *delayed_checkout;
 	struct checkout_metadata meta;
+	const char *block_clone_source;
 	unsigned force:1,
 		 quiet:1,
 		 not_new:1,

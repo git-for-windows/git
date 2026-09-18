@@ -62,7 +62,9 @@ static inline int is_merge(void)
 	return !access(git_path_merge_head(the_repository), F_OK);
 }
 
-static int reset_index(const char *ref, const struct object_id *oid, int reset_type, int quiet)
+static int reset_index(const char *ref, const struct object_id *oid,
+		       int reset_type, int quiet,
+		       const char *block_clone_source)
 {
 	int i, nr = 0;
 	struct tree_desc desc[2];
@@ -76,6 +78,7 @@ static int reset_index(const char *ref, const struct object_id *oid, int reset_t
 	opts.dst_index = the_repository->index;
 	opts.fn = oneway_merge;
 	opts.merge = 1;
+	opts.block_clone_source = block_clone_source;
 	init_checkout_metadata(&opts.meta, ref, oid, NULL);
 	if (!quiet)
 		opts.verbose_update = 1;
@@ -343,6 +346,8 @@ int cmd_reset(int argc,
 {
 	int reset_type = NONE, update_ref_status = 0, quiet = 0;
 	int no_refresh = 0;
+	const char *block_clone_source =
+		getenv(GIT_WORKTREE_BLOCK_CLONE_SOURCE);
 	int patch_mode = 0, pathspec_file_nul = 0, unborn;
 	const char *rev;
 	char *pathspec_from_file = NULL;
@@ -535,9 +540,11 @@ int cmd_reset(int argc,
 			if (ref && !starts_with(ref, "refs/"))
 				FREE_AND_NULL(ref);
 
-			err = reset_index(ref, &oid, reset_type, quiet);
+			err = reset_index(ref, &oid, reset_type, quiet,
+					  block_clone_source);
 			if (reset_type == KEEP && !err)
-				err = reset_index(ref, &oid, MIXED, quiet);
+				err = reset_index(ref, &oid, MIXED, quiet,
+						  block_clone_source);
 			if (err)
 				die(_("Could not reset index file to revision '%s'."), rev);
 			free(ref);

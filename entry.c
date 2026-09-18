@@ -8,6 +8,7 @@
 #include "gettext.h"
 #include "hex.h"
 #include "name-hash.h"
+#include "object-file.h"
 #include "sparse-index.h"
 #include "submodule.h"
 #include "symlinks.h"
@@ -15,6 +16,7 @@
 #include "fsmonitor.h"
 #include "entry.h"
 #include "parallel-checkout.h"
+#include "wrapper.h"
 
 static void create_directories(const char *path, int path_len,
 			       const struct checkout *state)
@@ -126,6 +128,62 @@ static int open_output_fd(char *path, const struct cache_entry *ce, int to_tempf
 	} else {
 		return create_file(path, !symlink ? ce->ce_mode : 0666);
 	}
+}
+
+static int clone_entry(const struct cache_entry *ce, char *path,
+		       const struct conv_attrs *ca,
+		       const struct checkout *state,
+		       int *fstat_done, struct stat *statbuf)
+{
+	struct strbuf source = STRBUF_INIT;
+	struct object_id oid;
+	struct stat st;
+	int src_fd = -1, dst_fd = -1, hash_fd;
+	int ret = 0;
+
+	if (!state->block_clone_source ||
+	    ca->drv || ca->ident || ca->working_tree_encoding ||
+	    ca->crlf_action != CRLF_BINARY)
+		return 0;
+
+	strbuf_addf(&source, "%s/%s", state->block_clone_source, ce->name);
+	src_fd = open_nofollow(source.buf, O_RDONLY);
+	if (src_fd < 0 || fstat(src_fd, &st) || !S_ISREG(st.st_mode))
+		goto done;
+
+	hash_fd = dup(src_fd);
+	if (hash_fd < 0 ||
+	    index_fd(state->istate, &oid, hash_fd, &st, OBJ_BLOB, NULL, 0) ||
+	    !oideq(&oid, &ce->oid))
+		goto done;
+
+	dst_fd = open_output_fd(path, ce, 0);
+	if (dst_fd < 0)
+		goto done;
+	if (block_clone_file(dst_fd, src_fd, st.st_size)) {
+		close(dst_fd);
+		dst_fd = -1;
+		unlink(path);
+		goto done;
+	}
+	if (close(dst_fd)) {
+		dst_fd = -1;
+		unlink(path);
+		goto done;
+	}
+	dst_fd = -1;
+
+	if (state->refresh_cache)
+		*fstat_done = !lstat(path, statbuf);
+	ret = 1;
+
+done:
+	if (dst_fd >= 0)
+		close(dst_fd);
+	if (src_fd >= 0)
+		close(src_fd);
+	strbuf_release(&source);
+	return ret;
 }
 
 int fstat_checkout_output(int fd, const struct checkout *state, struct stat *st)
@@ -313,7 +371,13 @@ static int write_entry(struct cache_entry *ce, char *path, struct conv_attrs *ca
 	clone_checkout_metadata(&meta, &state->meta, &ce->oid);
 
 	if (ce_mode_s_ifmt == S_IFREG) {
-		struct stream_filter *filter = get_stream_filter_ca(ca, &ce->oid);
+		struct stream_filter *filter;
+
+		if (!to_tempfile &&
+		    clone_entry(ce, path, ca, state, &fstat_done, &st))
+			goto finish;
+
+		filter = get_stream_filter_ca(ca, &ce->oid);
 		if (filter &&
 		    !streaming_write_entry(ce, path, filter,
 					   state, to_tempfile,
@@ -602,7 +666,8 @@ int checkout_entry_ca(struct cache_entry *ce, struct conv_attrs *ca,
 		ca = &ca_buf;
 	}
 
-	if (!enqueue_checkout(ce, ca, nr_checkouts))
+	if (!state->block_clone_source &&
+	    !enqueue_checkout(ce, ca, nr_checkouts))
 		return 0;
 
 	return write_entry(ce, path.buf, ca, state, 0, nr_checkouts);
