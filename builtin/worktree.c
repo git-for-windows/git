@@ -406,7 +406,8 @@ static int checkout_worktree(const struct add_opts *opts,
 	if (opts->quiet)
 		strvec_push(&cp.args, "--quiet");
 	strvec_pushv(&cp.env, child_env->v);
-	if (source && repo_read_index(the_repository) >= 0) {
+	if (copy_on_write_supported && source &&
+	    repo_read_index(the_repository) >= 0) {
 		gettimeofday(&refreshed_at, NULL);
 		if (repo_refresh_and_write_index(the_repository,
 						 REFRESH_QUIET | REFRESH_REALLY,
