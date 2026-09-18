@@ -75,7 +75,7 @@ struct unpack_trees_options {
 	enum unpack_trees_reset_type reset;
 	const char *prefix;
 	const char *super_prefix;
-	/* Borrowed for the duration of this unpack operation. */
+	/* Caller-owned source and index, valid for this unpack operation. */
 	struct checkout_copy_source *copy_source;
 	struct pathspec *pathspec;
 	merge_fn_t fn;
