@@ -6,12 +6,6 @@
 struct cache_entry;
 struct index_state;
 
-struct checkout_copy_source {
-	struct index_state *istate;
-	const char *worktree;
-	uint64_t refreshed_at;
-};
-
 struct checkout {
 	struct index_state *istate;
 	const char *base_dir;
@@ -19,7 +13,7 @@ struct checkout {
 	const char *super_prefix;
 	struct delayed_checkout *delayed_checkout;
 	struct checkout_metadata meta;
-	struct checkout_copy_source *copy_source;
+	const char *block_clone_source;
 	unsigned force:1,
 		 quiet:1,
 		 not_new:1,
