@@ -1,4 +1,5 @@
 #define DISABLE_SIGN_COMPARE_WARNINGS
+#define USE_THE_REPOSITORY_VARIABLE
 
 #include "git-compat-util.h"
 #include "run-command.h"
@@ -17,6 +18,20 @@
 #include "config.h"
 #include "packfile.h"
 #include "compat/nonblock.h"
+
+const char *get_shell_path(const char *fallback)
+{
+	static char *shell;
+	static int initialized;
+
+	if (!initialized) {
+		if (!repo_config_get_pathname(the_repository, "core.shell", &shell))
+			setenv("SHELL", shell, 1);
+		initialized = 1;
+	}
+
+	return shell ? shell : fallback;
+}
 
 void child_process_init(struct child_process *child)
 {
@@ -276,12 +291,19 @@ int sane_execvp(const char *file, char * const argv[])
 
 char *git_shell_path(void)
 {
+	const char *shell = get_shell_path(NULL);
+
+	if (shell)
+		return xstrdup(shell);
+
 #ifndef GIT_WINDOWS_NATIVE
 	return xstrdup(SHELL_PATH);
 #else
-	char *p = locate_in_PATH("sh");
-	convert_slashes(p);
-	return p;
+	{
+		char *p = locate_in_PATH("sh");
+		convert_slashes(p);
+		return p;
+	}
 #endif
 }
 
@@ -416,7 +438,7 @@ static int prepare_cmd(struct strvec *out, const struct child_process *cmd)
 	 * Add SHELL_PATH so in the event exec fails with ENOEXEC we can
 	 * attempt to interpret the command with 'sh'.
 	 */
-	strvec_push(out, SHELL_PATH);
+	strvec_push(out, get_shell_path(SHELL_PATH));
 
 	if (cmd->git_cmd) {
 		prepare_git_cmd(out, cmd->args.v);
