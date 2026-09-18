@@ -17,7 +17,6 @@ static struct test_cmd cmds[] = {
 	{ "cache-tree", cmd__cache_tree },
 	{ "chmtime", cmd__chmtime },
 	{ "config", cmd__config },
-	{ "copy-on-write", cmd__copy_on_write },
 	{ "crontab", cmd__crontab },
 	{ "csprng", cmd__csprng },
 	{ "date", cmd__date },
