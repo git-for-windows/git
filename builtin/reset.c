@@ -23,6 +23,7 @@
 #include "refs.h"
 #include "diff.h"
 #include "diffcore.h"
+#include "entry.h"
 #include "tree.h"
 #include "branch.h"
 #include "object-name.h"
@@ -62,9 +63,8 @@ static inline int is_merge(void)
 	return !access(git_path_merge_head(the_repository), F_OK);
 }
 
-static int reset_index(const char *ref, const struct object_id *oid,
-		       int reset_type, int quiet,
-		       const char *block_clone_source)
+static int reset_index(const char *ref, const struct object_id *oid, int reset_type, int quiet,
+		       struct checkout_copy_source *copy_source)
 {
 	int i, nr = 0;
 	struct tree_desc desc[2];
@@ -78,7 +78,7 @@ static int reset_index(const char *ref, const struct object_id *oid,
 	opts.dst_index = the_repository->index;
 	opts.fn = oneway_merge;
 	opts.merge = 1;
-	opts.block_clone_source = block_clone_source;
+	opts.copy_source = copy_source;
 	init_checkout_metadata(&opts.meta, ref, oid, NULL);
 	if (!quiet)
 		opts.verbose_update = 1;
@@ -339,6 +339,37 @@ static int git_reset_config(const char *var, const char *value,
 	return git_default_config(var, value, ctx, cb);
 }
 
+static int init_copy_source(struct checkout_copy_source *source,
+			    struct index_state *source_index)
+{
+	const char *worktree = getenv(GIT_WORKTREE_COPY_SOURCE);
+	const char *index_file = getenv(GIT_WORKTREE_COPY_SOURCE_INDEX);
+	const char *git_dir = getenv(GIT_WORKTREE_COPY_SOURCE_GIT_DIR);
+	const char *time_string = getenv(GIT_WORKTREE_COPY_SOURCE_TIME);
+	char *end;
+	int enabled = 1;
+	uintmax_t refreshed_at;
+
+	if (!copy_on_write_supported ||
+	    (!repo_config_get_bool(the_repository, "worktree.copyonwrite",
+				   &enabled) && !enabled) ||
+	    !worktree || !index_file || !git_dir || !time_string)
+		return 0;
+
+	errno = 0;
+	refreshed_at = strtoumax(time_string, &end, 10);
+	if (errno || *end)
+		return 0;
+	if (read_index_from(source_index, index_file, git_dir) < 0)
+		return 0;
+	ensure_full_index(source_index);
+
+	source->istate = source_index;
+	source->worktree = worktree;
+	source->refreshed_at = refreshed_at;
+	return 1;
+}
+
 int cmd_reset(int argc,
 	      const char **argv,
 	      const char *prefix,
@@ -346,8 +377,10 @@ int cmd_reset(int argc,
 {
 	int reset_type = NONE, update_ref_status = 0, quiet = 0;
 	int no_refresh = 0;
-	const char *block_clone_source =
-		getenv(GIT_WORKTREE_BLOCK_CLONE_SOURCE);
+	struct index_state copy_source_index =
+		INDEX_STATE_INIT(the_repository);
+	struct checkout_copy_source copy_source = { 0 };
+	struct checkout_copy_source *copy_source_ptr = NULL;
 	int patch_mode = 0, pathspec_file_nul = 0, unborn;
 	const char *rev;
 	char *pathspec_from_file = NULL;
@@ -500,6 +533,9 @@ int cmd_reset(int argc,
 
 	if (repo_read_index(the_repository) < 0)
 		die(_("index file corrupt"));
+	if (reset_type == HARD &&
+	    init_copy_source(&copy_source, &copy_source_index))
+		copy_source_ptr = &copy_source;
 
 	/* Soft reset does not touch the index file nor the working tree
 	 * at all, but requires them in a good order.  Other resets reset
@@ -541,10 +577,10 @@ int cmd_reset(int argc,
 				FREE_AND_NULL(ref);
 
 			err = reset_index(ref, &oid, reset_type, quiet,
-					  block_clone_source);
+					  copy_source_ptr);
 			if (reset_type == KEEP && !err)
 				err = reset_index(ref, &oid, MIXED, quiet,
-						  block_clone_source);
+						  copy_source_ptr);
 			if (err)
 				die(_("Could not reset index file to revision '%s'."), rev);
 			free(ref);
@@ -568,6 +604,7 @@ int cmd_reset(int argc,
 	discard_index(the_repository->index);
 
 cleanup:
+	release_index(&copy_source_index);
 	clear_pathspec(&pathspec);
 	free(pathspec_from_file);
 	return update_ref_status;
