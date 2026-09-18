@@ -180,19 +180,15 @@ static int source_is_uptodate(const struct checkout_copy_source *source,
 	return mtime < source->refreshed_at;
 }
 
-static int try_copy_on_write(const struct cache_entry *ce, char *path,
-			     const struct conv_attrs *ca,
+static int try_copy_on_write(const struct cache_entry *ce,
+			     const struct cache_entry *source_ce, char *path,
 			     const struct checkout *state,
 			     int *fstat_done, struct stat *statbuf)
 {
 	struct strbuf source = STRBUF_INIT;
-	struct cache_entry *source_ce = copy_source_entry(ce, ca, state);
 	struct stat st, st_after;
 	int src_fd = -1, dst_fd = -1;
 	int ret = 0;
-
-	if (!source_ce)
-		return 0;
 
 	strbuf_addf(&source, "%s/%s", state->copy_source->worktree, ce->name);
 	src_fd = open_nofollow(source.buf, O_RDONLY);
@@ -399,6 +395,7 @@ void update_ce_after_write(const struct checkout *state, struct cache_entry *ce,
 
 /* Note: ca is used (and required) iff the entry refers to a regular file. */
 static int write_entry(struct cache_entry *ce, char *path, struct conv_attrs *ca,
+		       const struct cache_entry *source_ce,
 		       const struct checkout *state, int to_tempfile,
 		       int *nr_checkouts)
 {
@@ -420,8 +417,9 @@ static int write_entry(struct cache_entry *ce, char *path, struct conv_attrs *ca
 	if (ce_mode_s_ifmt == S_IFREG) {
 		struct stream_filter *filter;
 
-		if (!to_tempfile &&
-		    try_copy_on_write(ce, path, ca, state, &fstat_done, &st))
+		if (source_ce &&
+		    try_copy_on_write(ce, source_ce, path, state,
+				      &fstat_done, &st))
 			goto finish;
 
 		filter = get_stream_filter_ca(ca, &ce->oid);
@@ -613,6 +611,7 @@ int checkout_entry_ca(struct cache_entry *ce, struct conv_attrs *ca,
 	static struct strbuf path = STRBUF_INIT;
 	struct stat st;
 	struct conv_attrs ca_buf;
+	struct cache_entry *source_ce = NULL;
 
 	if (ce->ce_flags & CE_WT_REMOVE) {
 		if (topath)
@@ -630,7 +629,8 @@ int checkout_entry_ca(struct cache_entry *ce, struct conv_attrs *ca,
 			convert_attrs(state->istate, &ca_buf, ce->name);
 			ca = &ca_buf;
 		}
-		return write_entry(ce, topath, ca, state, 1, nr_checkouts);
+		return write_entry(ce, topath, ca, NULL, state, 1,
+				   nr_checkouts);
 	}
 
 	strbuf_reset(&path);
@@ -713,11 +713,12 @@ int checkout_entry_ca(struct cache_entry *ce, struct conv_attrs *ca,
 		ca = &ca_buf;
 	}
 
-	if (!copy_source_entry(ce, ca, state) &&
-	    !enqueue_checkout(ce, ca, nr_checkouts))
+	source_ce = copy_source_entry(ce, ca, state);
+	if (!source_ce && !enqueue_checkout(ce, ca, nr_checkouts))
 		return 0;
 
-	return write_entry(ce, path.buf, ca, state, 0, nr_checkouts);
+	return write_entry(ce, path.buf, ca, source_ce, state, 0,
+			   nr_checkouts);
 }
 
 void unlink_entry(const struct cache_entry *ce, const char *super_prefix)
