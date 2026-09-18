@@ -33,44 +33,21 @@
 #include <winternl.h>
 
 #define STATUS_DELETE_PENDING ((NTSTATUS) 0xC0000056)
-#ifndef FILE_SUPPORTS_BLOCK_REFCOUNTING
-#define FILE_SUPPORTS_BLOCK_REFCOUNTING 0x08000000
-#endif
-
 #define HCAST(type, handle) ((type)(intptr_t)handle)
 
-int mingw_block_cloning_supported(const char *source, const char *destination)
-{
-	wchar_t source_path[MAX_LONG_PATH], destination_path[MAX_LONG_PATH];
-	wchar_t source_root[MAX_PATH], destination_root[MAX_PATH];
-	DWORD flags;
-
-	if (xutftowcs_long_path(source_path, source) < 0 ||
-	    xutftowcs_long_path(destination_path, destination) < 0 ||
-	    !GetVolumePathNameW(source_path, source_root,
-				ARRAY_SIZE(source_root)) ||
-	    !GetVolumePathNameW(destination_path, destination_root,
-				ARRAY_SIZE(destination_root)) ||
-	    _wcsicmp(source_root, destination_root) ||
-	    !GetVolumeInformationW(source_root, NULL, 0, NULL, NULL, &flags,
-				   NULL, 0))
-		return 0;
-
-	return !!(flags & FILE_SUPPORTS_BLOCK_REFCOUNTING);
-}
-
-int mingw_block_clone_file(int dst_fd, int src_fd, off_t size)
+int mingw_file_copy_on_write(int dst_fd, int src_fd, off_t size)
 {
 	DUPLICATE_EXTENTS_DATA data = {
 		.FileHandle = HCAST(HANDLE, _get_osfhandle(src_fd)),
 	};
 	HANDLE dst = HCAST(HANDLE, _get_osfhandle(dst_fd));
 	/*
-	 * Keep requests below ReFS's 4 GiB limit. ReFS volumes use either
-	 * 64 KiB or 4 KiB clusters, so try both alignments for the tail.
+	 * FSCTL_DUPLICATE_EXTENTS_TO_FILE accepts ranges smaller than 4 GiB,
+	 * aligned to the volume's cluster size. ReFS uses 64 KiB or 4 KiB
+	 * clusters, so this is the largest valid range for either.
 	 */
-	const LONGLONG chunk_size = 1024 * 1024 * 1024;
-	const LONGLONG cluster_sizes[] = { 64 * 1024, 4 * 1024 };
+	const LONGLONG max_range = (4LL * 1024 * 1024 * 1024) - (64 * 1024);
+	const LONGLONG tail_alignments[] = { 64 * 1024, 4 * 1024 };
 	DWORD bytes_returned;
 	size_t i;
 
@@ -80,8 +57,8 @@ int mingw_block_clone_file(int dst_fd, int src_fd, off_t size)
 	if (!size)
 		return 0;
 
-	while (data.SourceFileOffset.QuadPart + chunk_size < size) {
-		data.ByteCount.QuadPart = chunk_size;
+	while (data.SourceFileOffset.QuadPart + max_range < size) {
+		data.ByteCount.QuadPart = max_range;
 		if (!DeviceIoControl(dst, FSCTL_DUPLICATE_EXTENTS_TO_FILE,
 				     &data, sizeof(data), NULL, 0,
 				     &bytes_returned, NULL)) {
@@ -92,12 +69,12 @@ int mingw_block_clone_file(int dst_fd, int src_fd, off_t size)
 		data.TargetFileOffset = data.SourceFileOffset;
 	}
 
-	for (i = 0; i < ARRAY_SIZE(cluster_sizes); i++) {
+	for (i = 0; i < ARRAY_SIZE(tail_alignments); i++) {
 		LONGLONG remaining = size - data.SourceFileOffset.QuadPart;
 
 		data.ByteCount.QuadPart =
-			DIV_ROUND_UP(remaining, cluster_sizes[i]) *
-			cluster_sizes[i];
+			DIV_ROUND_UP(remaining, tail_alignments[i]) *
+			tail_alignments[i];
 		if (DeviceIoControl(dst, FSCTL_DUPLICATE_EXTENTS_TO_FILE,
 				    &data, sizeof(data), NULL, 0,
 				    &bytes_returned, NULL)) {
