@@ -223,6 +223,17 @@ static inline int noop_core_config(const char *var UNUSED,
 #define platform_core_config noop_core_config
 #endif
 
+#ifndef block_clone_file
+static inline int git_block_clone_file(int dst_fd UNUSED,
+				       int src_fd UNUSED,
+				       off_t size UNUSED)
+{
+	errno = ENOSYS;
+	return -1;
+}
+#define block_clone_file git_block_clone_file
+#endif
+
 #ifndef has_dos_drive_prefix
 static inline int git_has_dos_drive_prefix(const char *path UNUSED)
 {
