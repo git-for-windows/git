@@ -223,6 +223,15 @@ static inline int noop_core_config(const char *var UNUSED,
 #define platform_core_config noop_core_config
 #endif
 
+#ifndef block_cloning_supported
+static inline int git_block_cloning_supported(const char *source UNUSED,
+					      const char *destination UNUSED)
+{
+	return 0;
+}
+#define block_cloning_supported git_block_cloning_supported
+#endif
+
 #ifndef block_clone_file
 static inline int git_block_clone_file(int dst_fd UNUSED,
 				       int src_fd UNUSED,
