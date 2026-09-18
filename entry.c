@@ -130,6 +130,20 @@ static int open_output_fd(char *path, const struct cache_entry *ce, int to_tempf
 	}
 }
 
+static int is_block_clone_candidate(const struct cache_entry *ce,
+				    const struct conv_attrs *ca,
+				    const struct checkout *state)
+{
+	return state->block_clone_source && S_ISREG(ce->ce_mode) &&
+		ca && !ca->drv && !ca->ident && !ca->working_tree_encoding &&
+		ca->crlf_action == CRLF_BINARY;
+}
+
+/*
+ * Return 1 after cloning the verified source file. Return 0 without leaving
+ * the destination behind when cloning is inapplicable or fails, so the caller
+ * can use the normal checkout path.
+ */
 static int clone_entry(const struct cache_entry *ce, char *path,
 		       const struct conv_attrs *ca,
 		       const struct checkout *state,
@@ -141,9 +155,7 @@ static int clone_entry(const struct cache_entry *ce, char *path,
 	int src_fd = -1, dst_fd = -1, hash_fd;
 	int ret = 0;
 
-	if (!state->block_clone_source ||
-	    ca->drv || ca->ident || ca->working_tree_encoding ||
-	    ca->crlf_action != CRLF_BINARY)
+	if (!is_block_clone_candidate(ce, ca, state))
 		return 0;
 
 	strbuf_addf(&source, "%s/%s", state->block_clone_source, ce->name);
@@ -666,7 +678,7 @@ int checkout_entry_ca(struct cache_entry *ce, struct conv_attrs *ca,
 		ca = &ca_buf;
 	}
 
-	if (!state->block_clone_source &&
+	if (!is_block_clone_candidate(ce, ca, state) &&
 	    !enqueue_checkout(ce, ca, nr_checkouts))
 		return 0;
 
