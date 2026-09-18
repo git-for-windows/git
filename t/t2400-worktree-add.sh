@@ -10,6 +10,13 @@ TEST_CREATE_REPO_NO_TEMPLATE=1
 
 . "$TEST_DIRECTORY"/lib-rebase.sh
 
+test_lazy_prereq COPY_ON_WRITE '
+	test-tool genzeros 65536 >copy-source &&
+	test-tool copy-on-write copy-source copy-target &&
+	test_cmp copy-source copy-target &&
+	rm copy-source copy-target
+'
+
 test_expect_success 'setup' '
 	test_commit init
 '
@@ -71,30 +78,35 @@ test_expect_success '"add" worktree' '
 	)
 '
 
-test_expect_success 'block-clone source does not change checkout contents' '
-	test_create_repo clone-source &&
-	test_when_finished \
-		"git -C clone-source worktree remove --force ../clone-target" &&
-	(
-		cd clone-source &&
-		printf "unchanged\n" >unchanged &&
-		printf "committed\n" >dirty &&
-		printf "converted\n" >converted &&
-		echo "converted text eol=crlf" >.gitattributes &&
-		git add . &&
-		test_tick &&
-		git commit -m files &&
-		git worktree add --detach --no-checkout ../clone-target HEAD &&
-		printf "modified\n" >dirty &&
-		GIT_WORKTREE_BLOCK_CLONE_SOURCE="$PWD" \
-			git -C ../clone-target reset --hard
-	) &&
-	printf "unchanged\n" >expect &&
-	test_cmp expect clone-target/unchanged &&
-	printf "committed\n" >expect &&
-	test_cmp expect clone-target/dirty &&
-	printf "converted\r\n" >expect &&
-	test_cmp expect clone-target/converted
+test_expect_success COPY_ON_WRITE 'worktree add uses copy-on-write' '
+	old_head=$(git rev-parse HEAD) &&
+	test_when_finished "git reset --hard $old_head" &&
+	test_when_finished "git worktree remove --force copy-on-write" &&
+	echo "*.crlf text eol=crlf" >.gitattributes &&
+	echo clean >clean &&
+	echo clean >clean.crlf &&
+	echo clean >modified.crlf &&
+	git add .gitattributes clean clean.crlf modified.crlf &&
+	git commit -m "copy-on-write test files" &&
+	rm clean.crlf modified.crlf &&
+	git checkout -- clean.crlf modified.crlf &&
+	echo modified >init.t &&
+	echo modified >modified.crlf &&
+	GIT_TRACE2_EVENT="$PWD/trace" \
+		git worktree add --detach copy-on-write main &&
+	test_grep "\"key\":\"copy_on_write\",\"value\":\"clean\"" trace &&
+	test_grep "\"key\":\"copy_on_write\",\"value\":\"clean.crlf\"" trace &&
+	test_must_fail test_grep "\"value\":\"init.t\"" trace &&
+	test_must_fail test_grep "\"value\":\"modified.crlf\"" trace &&
+	git -C copy-on-write diff --exit-code
+'
+
+test_expect_success COPY_ON_WRITE 'worktree.copyOnWrite disables optimization' '
+	test_when_finished "git worktree remove --force no-copy-on-write" &&
+	test_config worktree.copyOnWrite false &&
+	GIT_TRACE2_EVENT="$PWD/disabled-trace" \
+		git worktree add --detach no-copy-on-write main &&
+	test_must_fail test_grep "\"key\":\"copy_on_write\"" disabled-trace
 '
 
 test_expect_success '"add" worktree with lock' '

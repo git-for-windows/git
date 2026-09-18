@@ -8,7 +8,6 @@
 #include "gettext.h"
 #include "hex.h"
 #include "name-hash.h"
-#include "object-file.h"
 #include "sparse-index.h"
 #include "submodule.h"
 #include "symlinks.h"
@@ -16,6 +15,7 @@
 #include "fsmonitor.h"
 #include "entry.h"
 #include "parallel-checkout.h"
+#include "trace2.h"
 #include "wrapper.h"
 
 static void create_directories(const char *path, int path_len,
@@ -130,49 +130,65 @@ static int open_output_fd(char *path, const struct cache_entry *ce, int to_tempf
 	}
 }
 
-static int is_block_clone_candidate(const struct cache_entry *ce,
-				    const struct conv_attrs *ca,
-				    const struct checkout *state)
+static struct cache_entry *copy_source_entry(const struct cache_entry *ce,
+					     const struct checkout *state)
 {
-	return state->block_clone_source && S_ISREG(ce->ce_mode) &&
-		ca && !ca->drv && !ca->ident && !ca->working_tree_encoding &&
-		ca->crlf_action == CRLF_BINARY;
+	struct index_state *istate;
+	struct cache_entry *source;
+	int pos;
+
+	if (!state->copy_source || !S_ISREG(ce->ce_mode))
+		return NULL;
+
+	istate = state->copy_source->istate;
+	pos = index_name_pos(istate, ce->name, ce_namelen(ce));
+	if (pos < 0)
+		return NULL;
+	source = istate->cache[pos];
+	if (!S_ISREG(source->ce_mode) || ce_skip_worktree(source) ||
+	    !oideq(&source->oid, &ce->oid))
+		return NULL;
+
+	return source;
 }
 
-/*
- * Return 1 after cloning the verified source file. Return 0 without leaving
- * the destination behind when cloning is inapplicable or fails, so the caller
- * can use the normal checkout path.
- */
-static int clone_entry(const struct cache_entry *ce, char *path,
-		       const struct conv_attrs *ca,
-		       const struct checkout *state,
-		       int *fstat_done, struct stat *statbuf)
+static int source_is_uptodate(const struct checkout_copy_source *source,
+			      const struct cache_entry *ce, struct stat *st)
 {
-	struct strbuf source = STRBUF_INIT;
-	struct object_id oid;
-	struct stat st;
-	int src_fd = -1, dst_fd = -1, hash_fd;
-	int ret = 0;
+	uint64_t mtime;
 
-	if (!is_block_clone_candidate(ce, ca, state))
+	if (match_stat_data(&ce->ce_stat_data, st))
 		return 0;
 
-	strbuf_addf(&source, "%s/%s", state->block_clone_source, ce->name);
-	src_fd = open_nofollow(source.buf, O_RDONLY);
-	if (src_fd < 0 || fstat(src_fd, &st) || !S_ISREG(st.st_mode))
-		goto done;
+	mtime = (uint64_t)st->st_mtime * 1000000000 + ST_MTIME_NSEC(*st);
+	return mtime < source->refreshed_at;
+}
 
-	hash_fd = dup(src_fd);
-	if (hash_fd < 0 ||
-	    index_fd(state->istate, &oid, hash_fd, &st, OBJ_BLOB, NULL, 0) ||
-	    !oideq(&oid, &ce->oid))
+static int try_copy_on_write(const struct cache_entry *ce, char *path,
+			     const struct checkout *state,
+			     int *fstat_done, struct stat *statbuf)
+{
+	struct strbuf source = STRBUF_INIT;
+	struct cache_entry *source_ce = copy_source_entry(ce, state);
+	struct stat st, st_after;
+	int src_fd = -1, dst_fd = -1;
+	int ret = 0;
+
+	if (!source_ce)
+		return 0;
+
+	strbuf_addf(&source, "%s/%s", state->copy_source->worktree, ce->name);
+	src_fd = open_nofollow(source.buf, O_RDONLY);
+	if (src_fd < 0 || fstat(src_fd, &st) || !S_ISREG(st.st_mode) ||
+	    !source_is_uptodate(state->copy_source, source_ce, &st))
 		goto done;
 
 	dst_fd = open_output_fd(path, ce, 0);
 	if (dst_fd < 0)
 		goto done;
-	if (block_clone_file(dst_fd, src_fd, st.st_size)) {
+	if (file_copy_on_write(dst_fd, src_fd, st.st_size) ||
+	    fstat(src_fd, &st_after) ||
+	    !source_is_uptodate(state->copy_source, source_ce, &st_after)) {
 		close(dst_fd);
 		dst_fd = -1;
 		unlink(path);
@@ -187,6 +203,8 @@ static int clone_entry(const struct cache_entry *ce, char *path,
 
 	if (state->refresh_cache)
 		*fstat_done = !lstat(path, statbuf);
+	trace2_data_string("checkout", the_repository,
+			   "copy_on_write", ce->name);
 	ret = 1;
 
 done:
@@ -386,7 +404,7 @@ static int write_entry(struct cache_entry *ce, char *path, struct conv_attrs *ca
 		struct stream_filter *filter;
 
 		if (!to_tempfile &&
-		    clone_entry(ce, path, ca, state, &fstat_done, &st))
+		    try_copy_on_write(ce, path, state, &fstat_done, &st))
 			goto finish;
 
 		filter = get_stream_filter_ca(ca, &ce->oid);
@@ -678,7 +696,7 @@ int checkout_entry_ca(struct cache_entry *ce, struct conv_attrs *ca,
 		ca = &ca_buf;
 	}
 
-	if (!is_block_clone_candidate(ce, ca, state) &&
+	if (!copy_source_entry(ce, state) &&
 	    !enqueue_checkout(ce, ca, nr_checkouts))
 		return 0;
 

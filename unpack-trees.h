@@ -10,6 +10,7 @@
 #define MAX_UNPACK_TREES 8
 
 struct cache_entry;
+struct checkout_copy_source;
 struct unpack_trees_options;
 struct pattern_list;
 
@@ -74,8 +75,7 @@ struct unpack_trees_options {
 	enum unpack_trees_reset_type reset;
 	const char *prefix;
 	const char *super_prefix;
-	/* Borrowed source worktree path, valid for this unpack operation. */
-	const char *block_clone_source;
+	struct checkout_copy_source *copy_source;
 	struct pathspec *pathspec;
 	merge_fn_t fn;
 
