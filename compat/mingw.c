@@ -74,6 +74,7 @@ int mingw_block_clone_file(int dst_fd, int src_fd, off_t size)
 	DWORD bytes_returned;
 	size_t i;
 
+	/* The destination range must exist before extents can be cloned. */
 	if (ftruncate(dst_fd, size) < 0)
 		return -1;
 	if (!size)
@@ -99,8 +100,10 @@ int mingw_block_clone_file(int dst_fd, int src_fd, off_t size)
 			cluster_sizes[i];
 		if (DeviceIoControl(dst, FSCTL_DUPLICATE_EXTENTS_TO_FILE,
 				    &data, sizeof(data), NULL, 0,
-				    &bytes_returned, NULL))
+				    &bytes_returned, NULL)) {
+			/* Discard any allocation-unit padding in the tail. */
 			return ftruncate(dst_fd, size);
+		}
 	}
 
 	errno = ENOSYS;
