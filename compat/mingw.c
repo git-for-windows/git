@@ -65,6 +65,10 @@ int mingw_block_clone_file(int dst_fd, int src_fd, off_t size)
 		.FileHandle = HCAST(HANDLE, _get_osfhandle(src_fd)),
 	};
 	HANDLE dst = HCAST(HANDLE, _get_osfhandle(dst_fd));
+	/*
+	 * Keep requests below ReFS's 4 GiB limit. ReFS volumes use either
+	 * 64 KiB or 4 KiB clusters, so try both alignments for the tail.
+	 */
 	const LONGLONG chunk_size = 1024 * 1024 * 1024;
 	const LONGLONG cluster_sizes[] = { 64 * 1024, 4 * 1024 };
 	DWORD bytes_returned;
@@ -96,7 +100,7 @@ int mingw_block_clone_file(int dst_fd, int src_fd, off_t size)
 		if (DeviceIoControl(dst, FSCTL_DUPLICATE_EXTENTS_TO_FILE,
 				    &data, sizeof(data), NULL, 0,
 				    &bytes_returned, NULL))
-			return 0;
+			return ftruncate(dst_fd, size);
 	}
 
 	errno = ENOSYS;
