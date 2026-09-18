@@ -36,6 +36,50 @@
 
 #define HCAST(type, handle) ((type)(intptr_t)handle)
 
+int mingw_block_clone_file(int dst_fd, int src_fd, off_t size)
+{
+	DUPLICATE_EXTENTS_DATA data = {
+		.FileHandle = HCAST(HANDLE, _get_osfhandle(src_fd)),
+	};
+	HANDLE dst = HCAST(HANDLE, _get_osfhandle(dst_fd));
+	const LONGLONG chunk_size = 1024 * 1024 * 1024;
+	const LONGLONG cluster_sizes[] = { 64 * 1024, 4 * 1024 };
+	DWORD bytes_returned;
+	size_t i;
+
+	if (ftruncate(dst_fd, size) < 0)
+		return -1;
+	if (!size)
+		return 0;
+
+	while (data.SourceFileOffset.QuadPart + chunk_size < size) {
+		data.ByteCount.QuadPart = chunk_size;
+		if (!DeviceIoControl(dst, FSCTL_DUPLICATE_EXTENTS_TO_FILE,
+				     &data, sizeof(data), NULL, 0,
+				     &bytes_returned, NULL)) {
+			errno = ENOSYS;
+			return -1;
+		}
+		data.SourceFileOffset.QuadPart += data.ByteCount.QuadPart;
+		data.TargetFileOffset = data.SourceFileOffset;
+	}
+
+	for (i = 0; i < ARRAY_SIZE(cluster_sizes); i++) {
+		LONGLONG remaining = size - data.SourceFileOffset.QuadPart;
+
+		data.ByteCount.QuadPart =
+			DIV_ROUND_UP(remaining, cluster_sizes[i]) *
+			cluster_sizes[i];
+		if (DeviceIoControl(dst, FSCTL_DUPLICATE_EXTENTS_TO_FILE,
+				    &data, sizeof(data), NULL, 0,
+				    &bytes_returned, NULL))
+			return 0;
+	}
+
+	errno = ENOSYS;
+	return -1;
+}
+
 void open_in_gdb(void)
 {
 	static struct child_process cp = CHILD_PROCESS_INIT;
