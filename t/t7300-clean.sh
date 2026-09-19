@@ -810,4 +810,26 @@ test_expect_success MINGW 'clean does not traverse mount points' '
 	test_path_is_file target/dont-clean-me
 '
 
+test_expect_success MINGW 'clean handles recursive symlink' '
+	rm -fr repo &&
+	mkdir repo &&
+	(
+		cd repo &&
+		git init &&
+		mkdir -p packages/some-package/node_modules &&
+		cd packages/some-package &&
+		touch package.json &&
+		git add package.json &&
+		git commit -m setup &&
+		cd node_modules &&
+		cmd //c "mklink /D /J some-package .." &&
+		cd ../../.. &&
+		test_path_is_file packages/some-package/package.json &&
+		git clean -fdx packages 2>err &&
+		test_path_is_file packages/some-package/package.json &&
+		test_path_is_missing packages/some-package/node_modules &&
+		! test_i18ngrep "warning" err
+	)
+'
+
 test_done
