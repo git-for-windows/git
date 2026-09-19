@@ -21,7 +21,7 @@
 #define BLOCKSIZE	(RECORDSIZE * 20)
 
 static char block[BLOCKSIZE];
-static unsigned long offset;
+static size_t offset;
 
 static int tar_umask = 002;
 
@@ -66,12 +66,12 @@ static void write_if_needed(void)
  * queues up writes, so that all our write(2) calls write exactly one
  * full block; pads writes to RECORDSIZE
  */
-static void do_write_blocked(const void *data, unsigned long size)
+static void do_write_blocked(const void *data, size_t size)
 {
 	const char *buf = data;
 
 	if (offset) {
-		unsigned long chunk = BLOCKSIZE - offset;
+		size_t chunk = BLOCKSIZE - offset;
 		if (size < chunk)
 			chunk = size;
 		memcpy(block + offset, buf, chunk);
@@ -93,7 +93,7 @@ static void do_write_blocked(const void *data, unsigned long size)
 
 static void finish_record(void)
 {
-	unsigned long tail;
+	size_t tail;
 	tail = offset % RECORDSIZE;
 	if (tail)  {
 		memset(block + offset, 0, RECORDSIZE - tail);
@@ -102,7 +102,7 @@ static void finish_record(void)
 	write_if_needed();
 }
 
-static void write_blocked(const void *data, unsigned long size)
+static void write_blocked(const void *data, size_t size)
 {
 	do_write_blocked(data, size);
 	finish_record();
@@ -114,7 +114,7 @@ static void write_blocked(const void *data, unsigned long size)
  */
 static void write_trailer(void)
 {
-	int tail = BLOCKSIZE - offset;
+	size_t tail = BLOCKSIZE - offset;
 	memset(block + offset, 0, tail);
 	write_block(block);
 	if (tail < 2 * RECORDSIZE) {
@@ -140,7 +140,7 @@ static int stream_blocked(struct repository *r, const struct object_id *oid)
 		readlen = odb_stream_read(st, buf, sizeof(buf));
 		if (readlen <= 0)
 			break;
-		do_write_blocked(buf, readlen);
+		do_write_blocked(buf, (size_t)readlen);
 	}
 	odb_stream_close(st);
 	if (!readlen)
@@ -218,10 +218,11 @@ static size_t get_path_prefix(const char *path, size_t pathlen, size_t maxlen)
 
 static void prepare_header(struct archiver_args *args,
 			   struct ustar_header *header,
-			   unsigned int mode, unsigned long size)
+			   unsigned int mode, size_t size)
 {
 	xsnprintf(header->mode, sizeof(header->mode), "%07o", mode & 07777);
-	xsnprintf(header->size, sizeof(header->size), "%011"PRIoMAX , S_ISREG(mode) ? (uintmax_t)size : (uintmax_t)0);
+	xsnprintf(header->size, sizeof(header->size), "%011"PRIoMAX,
+		  S_ISREG(mode) ? (uintmax_t)size : (uintmax_t)0);
 	xsnprintf(header->mtime, sizeof(header->mtime), "%011lo", (unsigned long) args->time);
 
 	xsnprintf(header->uid, sizeof(header->uid), "%07o", 0);
@@ -239,7 +240,7 @@ static void prepare_header(struct archiver_args *args,
 
 static void write_extended_header(struct archiver_args *args,
 				  const struct object_id *oid,
-				  const void *buffer, unsigned long size)
+				  const void *buffer, size_t size)
 {
 	struct ustar_header header;
 	unsigned int mode;
@@ -256,11 +257,11 @@ static int write_tar_entry(struct archiver_args *args,
 			   const struct object_id *oid,
 			   const char *path, size_t pathlen,
 			   unsigned int mode,
-			   void *buffer, unsigned long size)
+			   void *buffer, size_t size)
 {
 	struct ustar_header header;
 	struct strbuf ext_header = STRBUF_INIT;
-	unsigned long size_in_header;
+	size_t size_in_header;
 	int err = 0;
 
 	memset(&header, 0, sizeof(header));

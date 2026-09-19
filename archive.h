@@ -56,7 +56,7 @@ typedef int (*write_archive_entry_fn_t)(struct archiver_args *args,
 					const struct object_id *oid,
 					const char *path, size_t pathlen,
 					unsigned int mode,
-					void *buffer, unsigned long size);
+					void *buffer, size_t size);
 
 int write_archive_entries(struct archiver_args *args, write_archive_entry_fn_t write_entry);
 
