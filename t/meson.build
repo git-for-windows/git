@@ -605,6 +605,7 @@ integration_tests = [
   't5002-archive-attr-pattern.sh',
   't5003-archive-zip.sh',
   't5004-archive-corner-cases.sh',
+  't5005-archive-large-files.sh',
   't5100-mailinfo.sh',
   't5150-request-pull.sh',
   't5200-update-server-info.sh',

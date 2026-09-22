@@ -201,9 +201,24 @@ static uint32_t clamp32(uintmax_t n)
 	return (n < max) ? n : max;
 }
 
-static void *zlib_deflate_raw(void *data, unsigned long size,
+static uint32_t crc32_size(uint32_t crc, const void *data, size_t size)
+{
+	const Bytef *buf = data;
+
+	while (size > 0) {
+		uInt chunk = size > UINT_MAX ? UINT_MAX : (uInt)size;
+
+		crc = crc32(crc, buf, chunk);
+		buf += chunk;
+		size -= chunk;
+	}
+
+	return crc;
+}
+
+static void *zlib_deflate_raw(void *data, size_t size,
 			      int compression_level,
-			      unsigned long *compressed_size)
+			      size_t *compressed_size)
 {
 	git_zstream stream;
 	size_t maxsize;
@@ -234,9 +249,9 @@ static void *zlib_deflate_raw(void *data, unsigned long size,
 	return buffer;
 }
 
-static void write_zip_data_desc(unsigned long size,
-				unsigned long compressed_size,
-				unsigned long crc)
+static void write_zip_data_desc(size_t size,
+				size_t compressed_size,
+				uint32_t crc)
 {
 	if (size >= 0xffffffff || compressed_size >= 0xffffffff) {
 		struct zip64_data_desc trailer;
@@ -250,21 +265,21 @@ static void write_zip_data_desc(unsigned long size,
 		struct zip_data_desc trailer;
 		copy_le32(trailer.magic, 0x08074b50);
 		copy_le32(trailer.crc32, crc);
-		copy_le32(trailer.compressed_size, compressed_size);
-		copy_le32(trailer.size, size);
+		copy_le32(trailer.compressed_size, (uint32_t)compressed_size);
+		copy_le32(trailer.size, (uint32_t)size);
 		write_or_die(1, &trailer, ZIP_DATA_DESC_SIZE);
 		zip_offset += ZIP_DATA_DESC_SIZE;
 	}
 }
 
 static void set_zip_header_data_desc(struct zip_local_header *header,
-				     unsigned long size,
-				     unsigned long compressed_size,
-				     unsigned long crc)
+				     size_t size,
+				     size_t compressed_size,
+				     uint32_t crc)
 {
 	copy_le32(header->crc32, crc);
-	copy_le32(header->compressed_size, compressed_size);
-	copy_le32(header->size, size);
+	copy_le32(header->compressed_size, clamp32(compressed_size));
+	copy_le32(header->size, clamp32(size));
 }
 
 static int has_only_ascii(const char *s)
@@ -295,7 +310,7 @@ static int write_zip_entry(struct archiver_args *args,
 			   const struct object_id *oid,
 			   const char *path, size_t pathlen,
 			   unsigned int mode,
-			   void *buffer, unsigned long size)
+			   void *buffer, size_t size)
 {
 	struct zip_local_header header;
 	uintmax_t offset = zip_offset;
@@ -304,8 +319,8 @@ static int write_zip_entry(struct archiver_args *args,
 	size_t header_extra_size = ZIP_EXTRA_MTIME_SIZE;
 	int need_zip64_extra = 0;
 	unsigned long attr2;
-	unsigned long compressed_size;
-	unsigned long crc;
+	size_t compressed_size;
+	uint32_t crc;
 	enum zip_method method;
 	unsigned char *out;
 	void *deflated = NULL;
@@ -318,7 +333,7 @@ static int write_zip_entry(struct archiver_args *args,
 	size_t zip_dir_extra_size = ZIP_EXTRA_MTIME_SIZE;
 	size_t zip64_dir_extra_payload_size = 0;
 
-	crc = crc32(0, NULL, 0);
+	crc = crc32_size(0, NULL, 0);
 
 	if (!has_only_ascii(path)) {
 		if (is_utf8(path))
@@ -355,7 +370,7 @@ static int write_zip_entry(struct archiver_args *args,
 			flags |= ZIP_STREAM;
 			out = NULL;
 		} else {
-			crc = crc32(crc, buffer, size);
+			crc = crc32_size(crc, buffer, size);
 			is_binary = entry_is_binary(args->repo->index,
 						    path_without_prefix,
 						    buffer, size);
@@ -431,12 +446,13 @@ static int write_zip_entry(struct archiver_args *args,
 			readlen = odb_stream_read(stream, buf, sizeof(buf));
 			if (readlen <= 0)
 				break;
-			crc = crc32(crc, buf, readlen);
+			crc = crc32_size(crc, buf, (size_t)readlen);
 			if (is_binary == -1)
 				is_binary = entry_is_binary(args->repo->index,
 							    path_without_prefix,
-							    buf, readlen);
-			write_or_die(1, buf, readlen);
+							    buf,
+							    (size_t)readlen);
+			write_or_die(1, buf, (size_t)readlen);
 		}
 		odb_stream_close(stream);
 		if (readlen)
@@ -464,14 +480,15 @@ static int write_zip_entry(struct archiver_args *args,
 			readlen = odb_stream_read(stream, buf, sizeof(buf));
 			if (readlen <= 0)
 				break;
-			crc = crc32(crc, buf, readlen);
+			crc = crc32_size(crc, buf, (size_t)readlen);
 			if (is_binary == -1)
 				is_binary = entry_is_binary(args->repo->index,
 							    path_without_prefix,
-							    buf, readlen);
+							    buf,
+							    (size_t)readlen);
 
 			zstream.next_in = buf;
-			zstream.avail_in = readlen;
+			zstream.avail_in = (size_t)readlen;
 			result = git_deflate(&zstream, 0);
 			if (result != Z_OK)
 				die(_("deflate error (%d)"), result);

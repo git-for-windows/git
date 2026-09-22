@@ -368,7 +368,8 @@ int write_archive_entries(struct archiver_args *args,
 			err = write_entry(args, &fake_oid,
 					  path, strlen(path),
 					  canon_mode(info->stat.st_mode),
-					  info->content, info->stat.st_size);
+					  info->content,
+					  (size_t)info->stat.st_size);
 		}
 
 		if (err)
