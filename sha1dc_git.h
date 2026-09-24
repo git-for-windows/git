@@ -1,6 +1,11 @@
 /* Plumbing with collition-detecting SHA1 code */
 
-#ifdef DC_SHA1_EXTERNAL
+#ifndef SHA1DC_GIT_H
+#define SHA1DC_GIT_H
+
+#define platform_SHA_IS_SHA1DC /* used by "test-tool sha1-is-sha1dc" */
+
+#if defined(DC_SHA1_EXTERNAL)
 #include <sha1dc/sha1.h>
 #elif defined(DC_SHA1_SUBMODULE)
 #include "sha1collisiondetection/lib/sha1.h"
@@ -17,11 +22,11 @@ void git_SHA1DCInit(SHA1_CTX *);
 void git_SHA1DCFinal(unsigned char [20], SHA1_CTX *);
 void git_SHA1DCUpdate(SHA1_CTX *ctx, const void *data, size_t len);
 
-#define platform_SHA_IS_SHA1DC /* used by "test-tool sha1-is-sha1dc" */
-
 #ifndef platform_SHA_CTX
 #define platform_SHA_CTX SHA1_CTX
 #define platform_SHA1_Init git_SHA1DCInit
 #define platform_SHA1_Update git_SHA1DCUpdate
 #define platform_SHA1_Final git_SHA1DCFinal
+#endif
+
 #endif

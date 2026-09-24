@@ -572,6 +572,9 @@ include shared.mak
 # by the git project to migrate to using sha1collisiondetection as a
 # submodule.
 #
+# Define DC_SHA1_RS to use the sha1dc Rust crate instead of the default
+# C implementation. This requires Rust 1.87 or newer.
+#
 # === SHA-256 backend ===
 #
 # ==== Security ====
@@ -2159,6 +2162,23 @@ ifdef PPC_SHA1
 $(error the PPC_SHA1 flag has been removed along with the PowerPC-specific SHA-1 implementation.)
 endif
 
+ifdef DC_SHA1_RS
+ifdef NO_RUST
+$(error DC_SHA1_RS requires Rust support)
+endif
+ifneq ($(strip $(OPENSSL_SHA1)$(BLK_SHA1)$(APPLE_COMMON_CRYPTO_SHA1)),)
+$(error DC_SHA1_RS cannot be combined with another SHA-1 backend)
+endif
+ifdef DC_SHA1_EXTERNAL
+$(error Only set DC_SHA1_RS or DC_SHA1_EXTERNAL, not both)
+endif
+ifdef DC_SHA1_SUBMODULE
+ifneq ($(DC_SHA1_SUBMODULE),auto)
+$(error Only set DC_SHA1_RS or DC_SHA1_SUBMODULE, not both)
+endif
+endif
+endif
+
 ifdef OPENSSL_SHA1
 	EXTLIBS += $(LIB_4_CRYPTO)
 	BASIC_CFLAGS += -DSHA1_OPENSSL
@@ -2172,6 +2192,14 @@ ifdef APPLE_COMMON_CRYPTO_SHA1
 	BASIC_CFLAGS += -DSHA1_APPLE
 else
 	BASIC_CFLAGS += -DSHA1_DC
+ifdef DC_SHA1_RS
+	BASIC_CFLAGS += -DDC_SHA1_RS
+	CARGO_ARGS += --features sha1dc-rs
+	RUST_SOURCES += src/sha1dc_rs.rs
+ifeq ($(uname_S),MINGW)
+	EXTLIBS += -luserenv
+endif
+else
 	LIB_OBJS += sha1dc_git.o
 ifdef DC_SHA1_EXTERNAL
         ifdef DC_SHA1_SUBMODULE
@@ -2195,6 +2223,7 @@ endif
 		-DSHA1DC_INIT_SAFE_HASH_DEFAULT=0 \
 		-DSHA1DC_CUSTOM_INCLUDE_SHA1_C="\"git-compat-util.h\"" \
 		-DSHA1DC_CUSTOM_INCLUDE_UBC_CHECK_C="\"git-compat-util.h\""
+endif
 endif
 endif
 endif
