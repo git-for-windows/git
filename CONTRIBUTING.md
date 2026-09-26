@@ -367,7 +367,7 @@ To construct a patch set, use the `git format-patch` command. There are three im
   `git branch --edit-description`, you will end up with a 0/N mail with that description and
   a nice overall diffstat.
 * `--in-reply-to=[Message-ID]`: This will mark your cover letter as replying to the given
-  message (which should correspond to your previous iteration). To determine the correct Message-ID,
+  message (which should correspond to your first iteration). To determine the correct Message-ID,
   find the message you are replying to on [public-inbox.org/git](https://public-inbox.org/git) and take
   the ID from between the angle brackets.
 
@@ -413,5 +413,5 @@ To submit a nth version patch (say version 3):
 
 ```
 git send-email --to=git@vger.kernel.org --cc=<email1> --cc=<email2> \
-    --in-reply-to=<the message id of cover letter of patch v2> [dir with patches]/*.patch
+    --in-reply-to=<the message id of cover letter of patch v1> [dir with patches]/*.patch
 ```
