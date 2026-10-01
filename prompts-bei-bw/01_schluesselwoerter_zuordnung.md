@@ -122,3 +122,25 @@ Drei Zuordnungsregeln, die in Beispiel 1 den Unterschied machen:
 3. **Alltag anderer Sprecher zählt nur, wenn er den Alltag der Person strukturiert.** Die
    Kindergarten- und Schulzeiten der Pflegekinder stehen in LB 2, weil FS in dieser Zeit mit
    der Person einkaufen geht.
+
+## 5. Gesundheitsbogen B: Signalwörter je ICF-Code
+
+Grundregel: Aus dem Gespräch kommen nur Erläuterungen und Ergänzende Hinweise. Diagnosen
+und Kreuze brauchen eine medizinische Quelle. In Beispiel 1 stammen Diagnose F70.0 und die
+sechs Kreuze (b117, b122, b130, b140, b144, b164) aus der Akte; das Gespräch liefert dazu
+Erläuterungen.
+
+| Code | Signalwörter im Gespräch | Beispiel 1 (wörtlich, Sprecher) |
+|---|---|---|
+| b117 Intelligenz | versteht komplexe Texte nicht, einfache Sprache nötig | kein Fund im Protokoll (Referenz: Kreuz aus Akte) |
+| b122 Globale psychosoziale Funktionen | zugehörig, „Impulse von außen“, sich einlassen, „nicht so offen“ | „Es braucht aber bisher noch Impulse von außen.“ (FD); „da ist sie bisher aber nicht so offen“ (FF) |
+| b130 Antrieb | Motivation, „nicht so motiviert“, „aus der Reserve locken“ | „da war sie aber noch nicht so motiviert“ (FS); „Manchmal muss man sie aus der Reserve locken“ (FS) |
+| b140 Aufmerksamkeit | Konzentration, „am Stück“, Ausdauer | „Wie es ist mit der längeren Konzentration ist noch fraglich“ |
+| b144 Gedächtnis | vergisst, erinnert werden | kein Fund (Stärke „alle Lieder auswendig“ zählt nicht) |
+| b164 Höhere kognitive Funktionen | entscheiden, aussuchen, planen, Struktur | „Man kann immer aussuchen, was man machen will, das fällt die aber noch schwer.“ (FD) |
+| Kapitel 7 Bewegung | Bandscheibenvorfall, sitzen/stehen, Treppe | „2 Stunden am Stück sitzen ist schwierig, nur stehen ist auch schwierig“ (FS) → ohne Tabelle in die Ergänzenden Hinweise |
+| Kapitel 5 Stoffwechsel | Gewicht, Übergewicht | „Sie ist jetzt konsequent dabei Gewicht zu verlieren.“ (FS) → Ergänzende Hinweise |
+| Ergänzende Hinweise | OP, Reha, MRT, Ärzte, Arztwechsel, Schmerz | „Jetzt haben wir einen OP-Vorbesprechungstermin in Biberach.“ (FS) |
+
+Drei Fallen: Behandlungen (OP, Reha) sind keine Körperfunktion. Stärken sind keine
+Erläuterung. Eine im Gespräch genannte Krankheit ist keine Diagnose und begründet kein Kreuz.

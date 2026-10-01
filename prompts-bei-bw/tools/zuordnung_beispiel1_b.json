@@ -1,0 +1,54 @@
+{
+  "person": "Anna Apfelkuchen",
+  "datum_gespraech": "XX.XX.XXXX",
+  "quellen": {
+    "aerztliche_unterlagen": null,
+    "teilhabebericht": null,
+    "vorheriger_gesundheitsbogen": null
+  },
+  "diagnosen": [],
+  "koerperfunktionen": {
+    "b122": {
+      "angekreuzt": false,
+      "quelle": "Gespräch (nur Hinweis)",
+      "erlaeuterungen": [
+        "FD: Der Kontakt mit anderen ist lustig und freundlich. Es braucht aber bisher noch Impulse von außen. Wir haben den Wunsch unsererseits, dass sie noch mehr in Kontakt mit anderen kommt und sich noch mehr zugehörig fühlt.",
+        "FF: Es gibt auch Angebote von Aktion Mensch, da ist sie bisher aber nicht so offen, es geht viel um ihre Krankheit und sich auf die Menschen mit Behinderung und die Infrastruktur einzulassen."
+      ]
+    },
+    "b130": {
+      "angekreuzt": false,
+      "quelle": "Gespräch (nur Hinweis)",
+      "erlaeuterungen": [
+        "FS: Das Fahrrad hat sie seit letztes Jahr August/September, da war sie aber noch nicht so motiviert. Das hat dann erst Anfang diesen Jahres angefangen.",
+        "FS: Manchmal muss man sie aus der Reserve locken, auf den Urlaub z.B. freut sie sich, da ist sie sehr happy."
+      ]
+    },
+    "b140": {
+      "angekreuzt": false,
+      "quelle": "Gespräch (nur Hinweis)",
+      "erlaeuterungen": [
+        "Halb 9 fange ich an, um 10 hab ich Pause, dann arbeite ich nochmal 10-11:45. Wie es ist mit der längeren Konzentration ist noch fraglich, weil der Tag noch nicht so lange ist."
+      ]
+    },
+    "b164": {
+      "angekreuzt": false,
+      "quelle": "Gespräch (nur Hinweis)",
+      "erlaeuterungen": [
+        "FD: Man kann immer aussuchen, was man machen will, das fällt die aber noch schwer. Ich will dir nichts aufdrücken, du sollst aber auch die Chance zur Abwechslung nutzen."
+      ]
+    }
+  },
+  "kapitel_zusaetzlich": [],
+  "ergaenzende_hinweise": {
+    "zitate": [
+      "FS: Es ist besser als erwartet. Sie hatte einen dreifachen Bandscheibenvorfall, das hat sie bei der Arbeit auf dem Hof körperlich stark beeinflusst.",
+      "FS: Wir waren dann viel bei Ärzten und haben es auf den konventionellen Weg mit einer Reha versucht. Das hat nur mäßig Erfolge gebracht. Jetzt haben wir einen OP-Vorbesprechungstermin in Biberach. Ggf. machen wir auch nochmal ein MRT.",
+      "FS: Jetzt haben wir noch einen letzten Arztwechsel, dann haben wir alle Ärzte hier in der Region.",
+      "FS: 2 Stunden am Stück sitzen ist schwierig, nur stehen ist auch schwierig, am besten abwechselnd. Sie ist jetzt konsequent dabei Gewicht zu verlieren.",
+      "FS: Jetzt ist es wichtig die OP gut vorzubereiten und so fit wie möglich da rein zu gehen. Danach müssen wir dann halt einfach mal schauen, wie´s Weitergeht."
+    ],
+    "entwurf": "Entwurf, bitte prüfen: Frau Anna Apfelkuchen hatte einen dreifachen Bandscheibenvorfall; eine Reha brachte nur mäßigen Erfolg, eine Operation wird vorbereitet (OP-Vorbesprechung in Biberach, ggf. MRT). Längeres Sitzen und Stehen sind schwierig; sie reduziert derzeit ihr Gewicht."
+  },
+  "nicht_zugeordnet": []
+}

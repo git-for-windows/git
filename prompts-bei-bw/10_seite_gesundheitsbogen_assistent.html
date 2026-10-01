@@ -1,0 +1,585 @@
+<title>Gesundheitsbogen Übertragung</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ground:#EEF1F4; --surface:#FFFFFF; --surface-2:#F6F8FA; --line:#D5DBE1; --ink:#1A222C; --muted:#5A6672;
+  --accent:#0F6C72; --accent-ink:#FFFFFF; --accent-soft:#DDEFF0;
+  --ok:#2A7A4B; --ok-soft:#E1F2E7; --warn:#9A5B00; --warn-soft:#FBEBD0; --open:#5F6B78; --open-soft:#E6EAEE;
+  --code:#F3F5F7; --shadow:0 1px 2px rgba(20,30,40,.06);
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --ground:#0F1418; --surface:#171E25; --surface-2:#1E262E; --line:#2C3640; --ink:#E7ECF0; --muted:#9AA7B3;
+  --accent:#57B8BD; --accent-ink:#0B1416; --accent-soft:#143538;
+  --ok:#6CC894; --ok-soft:#173A27; --warn:#F0B35C; --warn-soft:#3E2C0E; --open:#A9B4BF; --open-soft:#28313A;
+  --code:#111820; --shadow:none;
+}}
+:root[data-theme="dark"]{
+  --ground:#0F1418; --surface:#171E25; --surface-2:#1E262E; --line:#2C3640; --ink:#E7ECF0; --muted:#9AA7B3;
+  --accent:#57B8BD; --accent-ink:#0B1416; --accent-soft:#143538;
+  --ok:#6CC894; --ok-soft:#173A27; --warn:#F0B35C; --warn-soft:#3E2C0E; --open:#A9B4BF; --open-soft:#28313A;
+  --code:#111820; --shadow:none;
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);font-family:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;font-size:15px;line-height:1.55;padding-inline:16px;padding-block:0 64px}
+.wrap{max-width:1040px;margin:0 auto}
+header.top{padding-block:36px 20px;border-bottom:1px solid var(--line);margin-bottom:8px}
+.eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600;margin:0 0 10px}
+h1{font-family:"Source Serif 4",Georgia,"Times New Roman",serif;font-weight:700;font-size:clamp(28px,4vw,40px);line-height:1.12;margin:0 0 12px;text-wrap:balance}
+.lede{max-width:64ch;color:var(--muted);margin:0;font-size:16px}
+nav.tabs{position:sticky;top:env(safe-area-inset-top,0px);background:var(--ground);z-index:5;display:flex;gap:6px;flex-wrap:wrap;padding-block:12px;border-bottom:1px solid var(--line);margin-bottom:28px}
+nav.tabs a{text-decoration:none;color:var(--ink);font-weight:500;font-size:14px;padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:var(--surface)}
+nav.tabs a:hover,nav.tabs a:focus-visible{border-color:var(--accent);color:var(--accent);outline:none}
+section{margin-bottom:44px;scroll-margin-top:72px}
+h2{font-family:"Source Serif 4",Georgia,serif;font-weight:600;font-size:24px;margin:0 0 6px;text-wrap:balance}
+h3{font-size:15px;font-weight:600;margin:22px 0 8px;letter-spacing:.01em}
+.sub{color:var(--muted);margin:0 0 18px;max-width:70ch}
+p{max-width:70ch}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 18px;box-shadow:var(--shadow)}
+.panel h3{margin-top:0}
+ol.steps{margin:0;padding-left:0;list-style:none;counter-reset:s;display:grid;gap:10px}
+ol.steps li{counter-increment:s;display:grid;grid-template-columns:32px 1fr;gap:12px;align-items:start;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+ol.steps li::before{content:counter(s);font-family:"IBM Plex Mono",monospace;font-weight:500;font-size:13px;width:28px;height:28px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center}
+ol.steps li strong{display:block;font-weight:600}
+.causes{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.cause{border-left:3px solid var(--warn);padding:2px 0 2px 14px}
+.cause strong{display:block;font-weight:600}
+.cause span{color:var(--muted);font-size:14px}
+.chip{display:inline-block;font-family:"IBM Plex Mono",monospace;font-size:12px;font-weight:500;padding:2px 8px;border-radius:6px;white-space:nowrap}
+.chip.ok{background:var(--ok-soft);color:var(--ok)} .chip.warn{background:var(--warn-soft);color:var(--warn)} .chip.open{background:var(--open-soft);color:var(--open)}
+.legend{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:0 0 14px;font-size:14px;color:var(--muted)}
+.promptbox{background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.promptbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--surface-2)}
+.promptbar .meta{font-size:13px;color:var(--muted)}
+button.copy{font:inherit;font-weight:600;font-size:14px;color:var(--accent-ink);background:var(--accent);border:0;border-radius:8px;padding:8px 14px;cursor:pointer}
+button.copy:hover{filter:brightness(1.05)} button.copy:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+button.copy.done{background:var(--ok)}
+pre{margin:0;font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.5;background:var(--code);color:var(--ink);padding:16px 18px;overflow:auto;max-height:70vh;white-space:pre-wrap;overflow-wrap:anywhere}
+pre.soll{max-height:none}
+.tablewrap{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px}
+table{border-collapse:collapse;width:100%;min-width:720px;font-size:13.5px}
+th,td{text-align:left;vertical-align:top;padding:9px 12px;border-bottom:1px solid var(--line)}
+th{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;background:var(--surface-2);position:sticky;top:0}
+tr:last-child td{border-bottom:0}
+td q{quotes:"„" "“"} td q::before{content:open-quote} td q::after{content:close-quote}
+td.f{font-weight:600;white-space:nowrap}
+.stats{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:18px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.stat b{display:block;font-family:"Source Serif 4",Georgia,serif;font-size:30px;line-height:1;font-weight:700;font-variant-numeric:tabular-nums;margin-bottom:4px}
+.stat span{font-size:13px;color:var(--muted)}
+details{background:var(--surface);border:1px solid var(--line);border-radius:10px;margin-top:14px}
+summary{cursor:pointer;padding:12px 16px;font-weight:600}
+summary:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+details pre{border-top:1px solid var(--line)}
+.note{background:var(--accent-soft);border-radius:10px;padding:12px 16px;color:var(--ink);font-size:14px;max-width:none}
+footer{color:var(--muted);font-size:13px;border-top:1px solid var(--line);padding-top:16px}
+@media (prefers-reduced-motion:no-preference){button.copy{transition:background .2s}}
+</style>
+
+<div class="wrap">
+<header class="top">
+  <p class="eyebrow">BEI_BW 2024 · Bogen B · Prompt 3 von 4</p>
+  <h1>Gesundheitsbogen Übertragung</h1>
+  <p class="lede">Ein Prompt für Nele, der den Gesundheitsbogen B direkt als Word-Datei ausfüllt. Die zentrale Regel: Diagnosen und Kreuze nur aus medizinischen Quellen, aus dem Gespräch nur wörtliche Erläuterungen und Hinweise.</p>
+</header>
+
+<nav class="tabs" aria-label="Abschnitte">
+  <a href="#quellen">Quellenregel</a>
+  <a href="#prompt">Prompt kopieren</a>
+  <a href="#signale">Signalwörter</a>
+  <a href="#test">Testlauf Beispiel 1</a>
+</nav>
+
+<section id="quellen">
+  <h2>Zwei Arten von Inhalten, zwei Arten von Quellen</h2>
+  <p class="sub">Der häufigste Fehler beim Gesundheitsbogen: Aus einer im Gespräch erwähnten Krankheit wird eine Diagnose oder ein Kreuz. Der Prompt trennt deshalb strikt.</p>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Inhalt</th><th>Quelle</th><th>Aus dem Gespräch?</th></tr></thead>
+    <tbody>
+      <tr><td class="f">Diagnosen (ICD-10)</td><td>Arztbrief, Gutachten, Teilhabebericht, früherer Gesundheitsbogen</td><td><span class="chip open">nie</span></td></tr>
+      <tr><td class="f">Kreuze bei ICF-Codes, Kapitelübersicht</td><td>dieselben medizinischen Quellen; aus Diagnosetext abgeleitete Kreuze werden als „abgeleitet“ markiert und im Prüfprotokoll gemeldet</td><td><span class="chip open">nie</span></td></tr>
+      <tr><td class="f">Erläuterungen je Code</td><td>wörtliche Zitate mit Kürzel, höchstens drei je Code, nur Einschränkungen</td><td><span class="chip ok">ja</span></td></tr>
+      <tr><td class="f">Ergänzende Hinweise</td><td>alle gesundheitsbezogenen Zitate plus Entwurf „bitte prüfen“</td><td><span class="chip ok">ja</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="note">Liegt keine medizinische Quelle vor, bleibt der Bogen ohne Kreuze. Die Erläuterungen stehen trotzdem beim passenden Code, und das Prüfprotokoll listet diese Codes als „fachliche Bewertung nötig“. Die Fachkraft sieht so sofort, wo sie aus der Akte ankreuzen muss.</p>
+
+  <h3>So wird der Prompt benutzt</h3>
+  <ol class="steps">
+    <li><div><strong>Dateien hochladen</strong>Leere Vorlage B als .docx, das Gesprächsprotokoll, und wenn vorhanden Arztbrief, Teilhabebericht oder den letzten Gesundheitsbogen.</div></li>
+    <li><div><strong>Prompt einfügen und abschicken</strong>Unverändert, ohne Platzhalter. Name, Datum und Quellen ermittelt die KI selbst.</div></li>
+    <li><div><strong>Datei herunterladen und prüfen</strong>Die .docx enthält gesetzte Kästchen, Diagnosen, Erläuterungen und Hinweise. Das Prüfprotokoll nennt abgeleitete Kreuze, Codes ohne Kreuz und Codes, für die die Vorlage keine Tabelle hat.</div></li>
+  </ol>
+</section>
+
+<section id="prompt">
+  <h2>Der Prompt für den Gesundheitsbogen</h2>
+  <p class="sub">Mit Quellenregel, Signalwort-Katalog je ICF-Code, festem Datenschema und dem Füllskript, das Kästchen, Diagnosenliste, Erläuterungsspalte und Hinweise in die Vorlage schreibt.</p>
+  <div class="promptbox">
+    <div class="promptbar">
+      <span class="meta">Version 1 · enthält das Füllskript · getestet an Beispiel 1</span>
+      <button class="copy" id="copyBtn" type="button" data-target="promptText">Prompt kopieren</button>
+    </div>
+    <pre id="promptText">Du bist Assistenz für die Bedarfsermittlung nach BEI_BW (Baden-Württemberg, Stand 2024) beim Sozialen Dienst eines Landratsamts. Deine Aufgabe: Du füllst die Word-Vorlage „BEI_BW B – Gesundheitsbogen“ aus den vorliegenden Unterlagen aus und gibst die fertige Word-Datei zurück. Du arbeitest ohne Rückfragen, ermittelst alle nötigen Angaben selbst und übernimmst Aussagen wortwörtlich. Du stellst keine Diagnosen und bewertest nicht.
+
+WAS DIR VORLIEGT
+Prüfe, welche Dateien oder Texte in dieser Unterhaltung vorhanden sind:
+- Die Word-Vorlage: eine .docx-Datei, deren Name „BEI_BW“, „B“ oder „Gesundheitsbogen“ enthält und in der die Überschriften „Diagnosen (ICD-10)“, „Körperfunktionen (ICF und ICF-CY)“ und „Ergänzende Hinweise“ vorkommen.
+- Das Gesprächsprotokoll: eine Datei oder ein eingefügter Text mit Aussagen, teils mit Sprecherkürzeln (z. B. FS:, FF:, FD:, SD:), teils in der Ich-Form.
+- Optional medizinische Quellen: Arztbrief, Gutachten, Befund, Teilhabebericht, ein früherer Gesundheitsbogen.
+Fehlt die Vorlage oder das Protokoll, bitte in einem Satz darum und höre auf. Sonst stelle keine Rückfragen.
+
+WAS DU SELBST ERMITTELST
+- Name der Person: der vollständige Name, den andere Sprecher in der dritten Person verwenden, oder die Anrede „Frau/Herr …“ im Protokoll oder Dateinamen. Ohne Fund: „die leistungsberechtigte Person“.
+- Datum des Gesprächs: aus Kopfzeile oder Text des Protokolls, sonst aus dem Dateinamen. Ohne Fund bleibt „XX.XX.XXXX“ stehen.
+- Welche medizinischen Quellen vorliegen und mit welchem Datum. Du erfindest keine Quelle.
+
+QUELLENREGEL (die wichtigste Regel dieses Bogens)
+Der Gesundheitsbogen hat zwei Arten von Inhalten mit verschiedenen Quellen:
+A) Diagnosen und Kreuze bei den Körperfunktionen stammen nur aus medizinischen Quellen: Arztbrief, Gutachten, Befund, Teilhabebericht, früherer Gesundheitsbogen. Nie aus dem Gespräch. Eine Krankheit, die im Gespräch genannt wird („Bandscheibenvorfall“, „Übergewicht“), ist keine Diagnose für diesen Bogen und begründet kein Kreuz.
+B) Erläuterungen und Ergänzende Hinweise stammen aus dem Gespräch, als wörtliche Zitate mit Sprecherkürzel.
+Liegt keine medizinische Quelle vor, bleiben Diagnosen leer (das Skript trägt einen Hinweis für die Akte ein) und kein Kästchen wird angekreuzt. Der Bogen enthält dann nur Erläuterungen und Ergänzende Hinweise aus dem Gespräch; die Fachkraft ergänzt den Rest aus der Akte.
+
+GRUNDREGELN
+1. Diagnosen: wörtlich wie in der medizinischen Quelle, mit ICD-10-Code, wenn dort angegeben. Keine Umformulierung, keine eigene Codierung.
+2. Kreuze bei Körperfunktionen (ICF b-Codes): ein Code wird angekreuzt, wenn eine medizinische Quelle die Beeinträchtigung ausdrücklich nennt (als b-Code, als ICF-Begriff oder als Diagnosebestandteil). Trage in „quelle“ ein, woher das Kreuz stammt. Steht die Funktion nicht wörtlich da, sondern folgt sie aus dem Diagnosetext (Beispiel: „Antriebsstörung“ → b130, „Einschränkung des intellektuellen Leistungsvermögens“ → b117, „Strukturierungsschwäche“ → b164), schreibe in „quelle“ das Wort „abgeleitet“ mit dem Diagnosebestandteil. Das Skript meldet solche Kreuze zur Prüfung.
+3. Erläuterungen: wörtliche Zitate aus dem Gespräch, höchstens drei je Code, nur beim Code mit dem engsten Bezug. Nur Hinweise auf Einschränkungen, keine Stärken. Erläuterungen sind auch bei nicht angekreuzten Codes erlaubt; das Skript listet diese Codes im Prüfprotokoll als „fachliche Bewertung nötig“.
+4. Kapitel-Übersicht: wird vom Skript aus den Kreuzen gesetzt. Enthält die Vorlage für ein Kapitel keine Code-Tabelle (häufig fehlen die Kapitel 2 bis 8) und belegt eine medizinische Quelle dort eine Beeinträchtigung (Beispiel: Arztbrief Bandscheibenvorfall → Kapitel 7), trage die Kapitelnummer in „kapitel_zusaetzlich“ ein. Aus dem Gespräch allein: nicht.
+5. Ergänzende Hinweise: alle Sätze des Gesprächs zu Krankheit, Behandlung, Ärzten, Operation, Reha, Schmerz, Gewicht, Belastbarkeit, Medikamenten, wörtlich mit Kürzel. Danach ein Entwurf von höchstens drei Sätzen in der dritten Person, beginnend mit „Entwurf, bitte prüfen:“, nur mit Inhalten aus den Quellen, ohne Diagnose, ohne Bewertung.
+6. Wortwörtlich heißt buchstabengetreu: Rechtschreibung, Zeichensetzung und Tippfehler des Originals bleiben.
+7. Vollständigkeit: Jeder gesundheitsbezogene Satz des Gesprächs steht entweder in einer Erläuterung, in den Ergänzenden Hinweisen oder in „nicht_zugeordnet“.
+
+SIGNALWÖRTER GESPRÄCH → ICF-CODE (nur für Erläuterungen; ein Kreuz braucht eine medizinische Quelle)
+Kapitel 1 Mentale Funktionen
+- b110 Bewusstsein: Ohnmacht, Anfälle, „weggetreten“.
+- b114 Orientierung: verläuft sich, kennt Datum/Ort nicht, Navi nötig.
+- b117 Intelligenz: versteht komplexe Texte nicht, braucht einfache Sprache, „schwer zu verstehen, wenn andere lange sprechen“.
+- b122 Globale psychosoziale Funktionen: zugehörig fühlen, „braucht Impulse von außen“, sich auf andere einlassen, „nicht so offen“.
+- b126 Temperament und Persönlichkeit: zurückhaltend, schüchtern, ängstlich, impulsiv.
+- b130 Psychische Energie und Antrieb: Motivation, „nicht so motiviert“, antriebslos, „aus der Reserve locken“, „muss man anstoßen“.
+- b134 Schlaf: schläft schlecht, müde, Tag-Nacht-Rhythmus.
+- b140 Aufmerksamkeit: Konzentration, „am Stück“, ablenkbar, Ausdauer bei Aufgaben.
+- b144 Gedächtnis: vergisst, „muss erinnert werden“, merkt sich nicht.
+- b147 Psychomotorik: langsam, Tempo, verlangsamt.
+- b152 Emotionale Funktionen: Stimmung, traurig, psychisch instabil, Angst, Wut, „verschlossen“.
+- b156 Wahrnehmung: Reizüberflutung, Halluzination.
+- b160 Denken: Grübeln, Gedankenkreisen, Zwang.
+- b164 Höhere kognitive Funktionen: entscheiden, planen, organisieren, Strukturierung, „aussuchen fällt schwer“, „braucht jemanden, der sagt, was zu tun ist“.
+- b167 Kognitiv-sprachliche Funktionen: lesen, schreiben, Sprache verstehen.
+- b172 Rechnen: Geld, rechnen, Zahlen.
+- b176 Komplexe Bewegungshandlungen: Abläufe, mehrschrittige Handgriffe.
+- b180 Selbst- und Zeitwahrnehmung: Zeitgefühl, Uhr, Selbsteinschätzung.
+Kapitel 2 bis 8 (nur wenn die Vorlage dafür eine Tabelle hat; sonst in die Ergänzenden Hinweise)
+- 2 Sinnesfunktionen und Schmerz: Schmerzen, Rückenschmerzen, sieht/hört schlecht, Brille, Hörgerät.
+- 3 Stimme und Sprechen: undeutlich, stottert, leise.
+- 4 Herz-Kreislauf, Blut, Immunsystem, Atmung: Atemnot, „Schwierigkeiten beim Atmen“, Blutdruck, Herz.
+- 5 Verdauung, Stoffwechsel, Hormone: Gewicht, Übergewicht, Diabetes, Ernährung, Schilddrüse.
+- 6 Urogenital und Fortpflanzung: Blase, Inkontinenz.
+- 7 Bewegung (neuromuskuloskeletal): Bandscheibenvorfall, „sitzen/stehen schwierig“, Treppe, Gelenke, Kraft, Lähmung.
+- 8 Haut: Wunden, Ekzem.
+Fallen: Behandlungen (OP, Reha, MRT, Arzttermine) sind keine Körperfunktion, sie gehören in die Ergänzenden Hinweise. Eine Stärke („kann alle Lieder auswendig“) ist keine Erläuterung. „Krankheit“ ohne Nennung ist keine Diagnose. Kinder und Krankheiten anderer Sprecher betreffen nicht die Person.
+
+ARBEITSSCHRITTE
+Schritt 1: Erstelle die Zuordnung als JSON exakt nach diesem Schema. Keine zusätzlichen Schlüssel. Codes klein geschrieben („b130“).
+{
+  "person": "…",
+  "datum_gespraech": "TT.MM.JJJJ oder XX.XX.XXXX",
+  "quellen": {"aerztliche_unterlagen": null, "teilhabebericht": null, "vorheriger_gesundheitsbogen": null},
+  "diagnosen": [],
+  "koerperfunktionen": {
+    "b130": {"angekreuzt": false, "quelle": "Gespräch (nur Hinweis)", "erlaeuterungen": ["FS: …"]}
+  },
+  "kapitel_zusaetzlich": [],
+  "ergaenzende_hinweise": {"zitate": ["FS: …"], "entwurf": "Entwurf, bitte prüfen: …"},
+  "nicht_zugeordnet": []
+}
+In „quellen“ steht je Quelle das Datum oder die Bezeichnung (z. B. „Arztbrief Dr. X vom 03.03.2026“), sonst null. In „quelle“ eines Codes steht die medizinische Quelle, „abgeleitet aus Diagnose …“ oder „Gespräch (nur Hinweis)“.
+Prüfe vor Schritt 2: Kein Code ist angekreuzt, dessen „quelle“ nur das Gespräch ist. Keine Diagnose stammt aus dem Gespräch. Jeder gesundheitsbezogene Satz des Gesprächs ist untergebracht.
+
+Schritt 2, wenn du Python-Code ausführen und Dateien zum Download bereitstellen kannst:
+a) Speichere das Skript unten unverändert als fill_bei_bw_b.py.
+b) Speichere das JSON aus Schritt 1 als zuordnung_b.json.
+c) Führe aus: python fill_bei_bw_b.py "&lt;Pfad der Vorlage&gt;" zuordnung_b.json "&lt;Nachname&gt;_BEI_BW_B_ausgefuellt.docx"
+   Fehlt python-docx, installiere es zuerst (pip install python-docx).
+d) Stelle die erzeugte .docx und die Datei *_Pruefprotokoll.txt zum Download bereit.
+e) Antworte danach nur mit diesen fünf Zeilen: Person; verwendete medizinische Quellen (oder „keine“); angekreuzte Codes mit Quelle; Codes mit Hinweisen ohne Kreuz; Hinweis, dass der Entwurf zu prüfen ist.
+Öffne die Vorlage nicht manuell und schreibe keinen eigenen Code, der die Vorlage verändert. Nur das Skript unten schreibt in die Datei.
+
+Schritt 2, wenn du keinen Code ausführen kannst:
+Gib ausschließlich das JSON aus Schritt 1 in einem Codeblock aus, gefolgt von genau diesem Satz: „Zum Eintragen in die Vorlage: python fill_bei_bw_b.py Vorlage.docx zuordnung_b.json Ausgabe.docx“.
+
+SKRIPT (unverändert speichern als fill_bei_bw_b.py)
+```python
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Fuellt die Word-Vorlage "BEI_BW B - Gesundheitsbogen" aus einer JSON-Zuordnung.
+
+Aufruf:
+    python fill_bei_bw_b.py VORLAGE.docx ZUORDNUNG.json AUSGABE.docx
+
+Schema der JSON-Datei:
+{
+  "person": "Anna Apfelkuchen",
+  "datum_gespraech": "XX.XX.XXXX",
+  "quellen": {"aerztliche_unterlagen": null, "teilhabebericht": null, "vorheriger_gesundheitsbogen": null},
+  "diagnosen": ["Entwicklungsstoerung ... (F70.0)"],
+  "koerperfunktionen": {
+    "b130": {"angekreuzt": true, "quelle": "Teilhabebericht 13.02.26", "erlaeuterungen": ["FS: ..."]}
+  },
+  "kapitel_zusaetzlich": [],
+  "ergaenzende_hinweise": {"zitate": ["FS: ..."], "entwurf": "Entwurf, bitte pruefen: ..."},
+  "nicht_zugeordnet": []
+}
+
+Das Skript setzt die Kaestchen der Kapitel-Uebersicht und der ICF-Code-Zeilen,
+traegt Diagnosen als Listeneintraege ein, schreibt Erlaeuterungen in die
+dritte Spalte der Code-Zeile und haengt die Ergaenzenden Hinweise an. Das
+Layout der Vorlage bleibt unveraendert. Benoetigt: python-docx.
+"""
+import copy
+import json
+import re
+import sys
+
+try:
+    from docx import Document
+    from docx.oxml.ns import qn
+    from docx.text.paragraph import Paragraph
+except ImportError:  # pragma: no cover
+    sys.stderr.write("Fehlt: python-docx. Installieren mit: pip install python-docx\n")
+    sys.exit(2)
+
+W14 = "http://schemas.microsoft.com/office/word/2010/wordml"
+PLACEHOLDER = "XX.XX.XXXX"
+KEINE_DIAGNOSE = "Aus den vorliegenden Unterlagen nicht ermittelbar – bitte aus der Akte ergänzen."
+
+
+def q14(tag):
+    return "{%s}%s" % (W14, tag)
+
+
+# ---------------------------------------------------------------- Hilfsfunktionen
+def ptext(p):
+    return "".join(r.text for r in p.runs)
+
+
+def is_heading(p):
+    return (p.style is not None and p.style.name.startswith("BEI_BW")) or \
+           (p._p.pPr is not None and p._p.pPr.pStyle is not None and
+            str(p._p.pPr.pStyle.get(qn("w:val"))).startswith("BEIBW"))
+
+
+def clean(items):
+    out, seen = [], set()
+    for it in items or []:
+        s = (it or "").strip()
+        if s and s not in seen:
+            out.append(s)
+            seen.add(s)
+    return out
+
+
+def set_text(p, text):
+    runs = p.runs
+    if runs:
+        runs[0].text = text
+        for r in runs[1:]:
+            r._r.getparent().remove(r._r)
+    else:
+        run = p.add_run(text)
+        _copy_mark_rpr(p, run)
+
+
+def _copy_mark_rpr(src_p, run):
+    """Uebernimmt die Zeichenformatierung der Absatzmarke, wenn der Absatz keine Runs hat."""
+    pPr = src_p._p.pPr
+    if pPr is not None and pPr.find(qn("w:rPr")) is not None and run._r.rPr is None:
+        rpr = copy.deepcopy(pPr.find(qn("w:rPr")))
+        for bad in rpr.findall(qn("w:rStyle")):
+            pass
+        run._r.insert(0, rpr)
+
+
+def clone_after(anchor, text, template=None):
+    src = template if template is not None else anchor
+    new_p = copy.deepcopy(src._p)
+    for child in list(new_p):
+        if child.tag != qn("w:pPr"):
+            new_p.remove(child)
+    anchor._p.addnext(new_p)
+    np = Paragraph(new_p, anchor._parent)
+    run = np.add_run(text)
+    if src.runs and src.runs[0]._r.rPr is not None:
+        run._r.insert(0, copy.deepcopy(src.runs[0]._r.rPr))
+    else:
+        _copy_mark_rpr(src, run)
+    return np
+
+
+def checkbox_sdts(element):
+    return [s for s in element.iter(qn("w:sdt")) if s.find(".//" + q14("checkbox")) is not None]
+
+
+def set_checkbox(sdt, checked):
+    cb = sdt.find(".//" + q14("checkbox"))
+    chk = cb.find(q14("checked"))
+    if chk is None:
+        chk = cb.makeelement(q14("checked"), {})
+        cb.insert(0, chk)
+    chk.set(q14("val"), "1" if checked else "0")
+    state = cb.find(q14("checkedState") if checked else q14("uncheckedState"))
+    code = state.get(q14("val")) if state is not None else ("2612" if checked else "2610")
+    glyph = chr(int(code, 16))
+    ts = sdt.findall(".//" + qn("w:t"))
+    if ts:
+        ts[0].text = glyph
+        for t in ts[1:]:
+            t.text = ""
+
+
+def fill_cell(cell, items):
+    """Schreibt Zeilen in eine Tabellenzelle; erster Absatz der Zelle ist die Formatvorlage."""
+    items = clean(items)
+    ps = cell.paragraphs
+    base = ps[0]
+    for p in ps[1:]:
+        p._p.getparent().remove(p._p)
+    if not items:
+        set_text(base, "")
+        return
+    set_text(base, items[0])
+    last = base
+    for it in items[1:]:
+        last = clone_after(last, it, base)
+
+
+# ---------------------------------------------------------------- Bloecke
+def fill_diagnosen(doc, data, log):
+    diags = clean(data.get("diagnosen")) or [KEINE_DIAGNOSE]
+    paras = doc.paragraphs
+    idx = next((i for i, p in enumerate(paras) if ptext(p).strip().startswith("Diagnosen, die gesundheitliche")), None)
+    if idx is None:
+        raise SystemExit("Vorlage unerwartet: Einleitungssatz des Diagnoseblocks fehlt.")
+    items = []
+    j = idx + 1
+    while j &lt; len(paras) and not is_heading(paras[j]):
+        items.append(paras[j])
+        j += 1
+    list_items = [p for p in items if p._p.pPr is not None and p._p.pPr.numPr is not None]
+    if list_items:
+        tpl = list_items[0]
+        for p in list_items[1:]:
+            p._p.getparent().remove(p._p)
+        set_text(tpl, diags[0])
+        last = tpl
+        for d in diags[1:]:
+            last = clone_after(last, d, tpl)
+    else:
+        # keine Listenabsaetze in der Vorlage: Eintraege als normale Absaetze nach der Einleitung
+        last = paras[idx]
+        for d in diags:
+            last = clone_after(last, d, paras[idx])
+    log.append("Diagnosen eingetragen: %d" % len(diags))
+
+
+def fill_uebersicht(doc, chapters, log):
+    found = set()
+    for p in doc.paragraphs:
+        sdts = checkbox_sdts(p._p)
+        if not sdts:
+            continue
+        m = re.match(r"\s*([1-8])\s", ptext(p))
+        if not m:
+            continue
+        k = int(m.group(1))
+        found.add(k)
+        set_checkbox(sdts[0], k in chapters)
+    missing = sorted(chapters - found)
+    if missing:
+        log.append("Kapitel ohne Kaestchen in der Vorlage: %s" % ", ".join(map(str, missing)))
+    log.append("Kapitel angekreuzt: %s" % (", ".join(map(str, sorted(chapters))) or "keine"))
+
+
+def fill_codes(doc, data, log):
+    kf = data.get("koerperfunktionen", {}) or {}
+    wanted = {k.strip().lower(): v for k, v in kf.items()}
+    seen = set()
+    checked_chapters = set()
+    for table in doc.tables:
+        for row in table.rows:
+            cells = row.cells
+            if len(cells) &lt; 2:
+                continue
+            m = re.match(r"\s*(b\d{3})\b", cells[1].text)
+            if not m:
+                continue
+            code = m.group(1).lower()
+            spec = wanted.get(code) or {}
+            sdts = checkbox_sdts(cells[0]._tc)
+            if sdts:
+                set_checkbox(sdts[0], bool(spec.get("angekreuzt")))
+            if len(cells) &gt;= 3 and cells[2]._tc is not cells[1]._tc:
+                fill_cell(cells[2], spec.get("erlaeuterungen"))
+            if spec.get("angekreuzt"):
+                checked_chapters.add(int(code[1]))
+            seen.add(code)
+    missing = [c for c in wanted if c not in seen]
+    if missing:
+        log.append("Codes nicht in der Vorlage vorhanden (Tabelle des Kapitels fehlt): %s" % ", ".join(missing))
+    derived = [c for c, s in wanted.items() if s.get("angekreuzt") and "abgeleitet" in str(s.get("quelle", "")).lower()]
+    if derived:
+        log.append("Kreuze aus Diagnosetext abgeleitet, nicht ausdruecklich belegt (bitte pruefen): %s" % ", ".join(derived))
+    no_tick = [c for c, s in wanted.items() if c in seen and not s.get("angekreuzt") and clean(s.get("erlaeuterungen"))]
+    if no_tick:
+        log.append("Codes mit Hinweisen aus dem Gespraech, aber ohne Kreuz (fachliche Bewertung noetig): %s" % ", ".join(no_tick))
+    return checked_chapters
+
+
+def fill_hinweise(doc, data, datum, log):
+    eh = data.get("ergaenzende_hinweise") or {}
+    if isinstance(eh, list):
+        eh = {"zitate": eh, "entwurf": ""}
+    zitate = clean(eh.get("zitate"))
+    entwurf = (eh.get("entwurf") or "").strip()
+    lines = []
+    if zitate:
+        lines.append("Aus dem Gespräch am %s:" % datum)
+        lines += zitate
+    if entwurf:
+        lines.append(entwurf)
+    if not lines:
+        return
+    paras = doc.paragraphs
+    heading = None
+    for p in paras:
+        if is_heading(p) and ptext(p).strip() == "Ergänzende Hinweise":
+            heading = p
+    if heading is None:
+        raise SystemExit("Vorlage unerwartet: Ueberschrift 'Ergaenzende Hinweise' fehlt.")
+    nxt = heading._p.getnext()
+    tpl = None
+    if nxt is not None and nxt.tag == qn("w:p"):
+        cand = Paragraph(nxt, heading._parent)
+        if not is_heading(cand):
+            tpl = cand
+    if tpl is None:
+        tpl = next((p for p in paras if ptext(p).strip().startswith("Diagnosen, die gesundheitliche")), heading)
+    last = heading
+    # vorhandene leere Absaetze direkt nach der Ueberschrift als Platz nutzen
+    slot = tpl if (tpl is not heading and not ptext(tpl).strip() and tpl._p.getprevious() is heading._p) else None
+    for i, line in enumerate(lines):
+        if i == 0 and slot is not None:
+            set_text(slot, line)
+            last = slot
+        else:
+            last = clone_after(last, line, tpl)
+    log.append("Ergaenzende Hinweise: %d Zeilen" % len(lines))
+
+
+def write_protocol(path, data, log):
+    q = data.get("quellen") or {}
+    lines = ["Pruefprotokoll Gesundheitsbogen (automatisch erzeugt)", ""]
+    lines.append("Person: %s" % data.get("person", ""))
+    lines.append("Gespraech am: %s" % (data.get("datum_gespraech") or PLACEHOLDER))
+    lines.append("Aerztliche Unterlagen: %s" % (q.get("aerztliche_unterlagen") or "nicht beigefuegt"))
+    lines.append("Teilhabebericht: %s" % (q.get("teilhabebericht") or "nicht beigefuegt"))
+    lines.append("Vorheriger Gesundheitsbogen: %s" % (q.get("vorheriger_gesundheitsbogen") or "nicht beigefuegt"))
+    lines.append("")
+    lines += log
+    lines.append("")
+    lines.append("Nicht zugeordnete gesundheitsbezogene Saetze:")
+    lines += ["- " + s for s in clean(data.get("nicht_zugeordnet"))] or ["- keine"]
+    lines.append("")
+    lines.append("Bitte pruefen: Diagnosen und Kreuze stammen nur aus medizinischen Unterlagen bzw. Teilhabebericht; aus dem Gespraech stammen nur Erlaeuterungen und Ergaenzende Hinweise.")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
+
+
+def main(argv):
+    if len(argv) != 4:
+        sys.stderr.write(__doc__)
+        return 1
+    template, mapping, output = argv[1], argv[2], argv[3]
+    with open(mapping, encoding="utf-8") as fh:
+        data = json.load(fh)
+    datum = (data.get("datum_gespraech") or "").strip() or PLACEHOLDER
+    log = []
+    doc = Document(template)
+    fill_diagnosen(doc, data, log)
+    chapters = fill_codes(doc, data, log)
+    chapters |= set(int(k) for k in (data.get("kapitel_zusaetzlich") or []) if str(k).isdigit())
+    fill_uebersicht(doc, chapters, log)
+    fill_hinweise(doc, data, datum, log)
+    doc.save(output)
+    proto = output.rsplit(".", 1)[0] + "_Pruefprotokoll.txt"
+    write_protocol(proto, data, log)
+    print("Geschrieben: %s" % output)
+    print("Pruefprotokoll: %s" % proto)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
+```
+</pre>
+  </div>
+</section>
+
+<section id="signale">
+  <h2>Signalwörter: Gespräch → ICF-Code</h2>
+  <p class="sub">Nur für die Erläuterungsspalte. Ein Kreuz braucht immer eine medizinische Quelle. Der vollständige Katalog für alle Codes des Kapitels 1 und die Kapitel 2 bis 8 steht im Prompt.</p>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Code</th><th>Signalwörter</th><th>Fund in Beispiel 1</th></tr></thead>
+    <tbody>
+      <tr><td class="f">b117 Intelligenz</td><td>versteht komplexe Texte nicht, einfache Sprache nötig</td><td>kein Fund (Referenz: Kreuz aus Akte)</td></tr>
+      <tr><td class="f">b122 Psychosozial</td><td>zugehörig, „Impulse von außen“, sich einlassen, „nicht so offen“</td><td><q>Es braucht aber bisher noch Impulse von außen.</q> (FD)</td></tr>
+      <tr><td class="f">b130 Antrieb</td><td>Motivation, „nicht so motiviert“, „aus der Reserve locken“</td><td><q>Manchmal muss man sie aus der Reserve locken</q> (FS)</td></tr>
+      <tr><td class="f">b140 Aufmerksamkeit</td><td>Konzentration, „am Stück“, Ausdauer</td><td><q>Wie es ist mit der längeren Konzentration ist noch fraglich</q></td></tr>
+      <tr><td class="f">b144 Gedächtnis</td><td>vergisst, erinnert werden</td><td>kein Fund; die Stärke „alle Lieder auswendig“ zählt nicht</td></tr>
+      <tr><td class="f">b164 Höhere kognitive Funktionen</td><td>entscheiden, aussuchen, planen, Struktur</td><td><q>Man kann immer aussuchen, was man machen will, das fällt die aber noch schwer.</q> (FD)</td></tr>
+      <tr><td class="f">Kapitel 7 Bewegung</td><td>Bandscheibenvorfall, sitzen/stehen, Treppe</td><td><q>2 Stunden am Stück sitzen ist schwierig</q> (FS), ohne Tabelle in die Hinweise</td></tr>
+      <tr><td class="f">Kapitel 5 Stoffwechsel</td><td>Gewicht, Übergewicht</td><td><q>Sie ist jetzt konsequent dabei Gewicht zu verlieren.</q> (FS), in die Hinweise</td></tr>
+      <tr><td class="f">Ergänzende Hinweise</td><td>OP, Reha, MRT, Ärzte, Arztwechsel, Schmerz</td><td><q>Jetzt haben wir einen OP-Vorbesprechungstermin in Biberach.</q> (FS)</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="grid">
+    <div class="panel"><h3>Behandlung ist keine Funktion</h3><p>OP, Reha, MRT und Arzttermine gehören in die Ergänzenden Hinweise, nicht in eine Code-Zeile.</p></div>
+    <div class="panel"><h3>Stärke ist keine Erläuterung</h3><p>Der Bogen erfasst Beeinträchtigungen. „Da kann ich alle Lieder auswendig“ bleibt draußen.</p></div>
+    <div class="panel"><h3>Krankheit ist keine Diagnose</h3><p>„Bandscheibenvorfall“ im Gespräch begründet weder einen Diagnoseeintrag noch ein Kreuz. Beides braucht eine medizinische Quelle.</p></div>
+  </div>
+</section>
+
+<section id="test">
+  <h2>Testlauf an Beispiel 1</h2>
+  <p class="sub">Zwei Zuordnungen wurden durch das Skript in die Vorlage geschrieben: eine nur aus dem Gespräch, eine mit Diagnose und Kreuzen wie im ausgefüllten Beispiel.</p>
+  <div class="stats">
+    <div class="stat"><b>4</b><span>Codes mit Erläuterungen aus dem Gespräch, ohne Kreuz, im Prüfprotokoll gemeldet</span></div>
+    <div class="stat"><b>6</b><span>Kreuze der Referenz korrekt gesetzt (b117, b122, b130, b140, b144, b164)</span></div>
+    <div class="stat"><b>2</b><span>Kapitel in der Übersicht angekreuzt (1 aus Codes, 7 zusätzlich)</span></div>
+    <div class="stat"><b>1</b><span>Code ohne Tabelle in der Vorlage, gemeldet statt verloren</span></div>
+  </div>
+  <p class="note">Eine leere Vorlage B lag nicht vor. Getestet wurde mit einer aus Beispiel 1 abgeleiteten leeren Vorlage, die nur die Tabelle für Kapitel 1 enthält. Vor dem Einsatz den Prompt einmal mit der Originalvorlage des Ministeriums laufen lassen.</p>
+  <h3>Nächster Schritt</h3>
+  <p>Prompt 4 für die GP-Vorbereitung. Vorher ist zu klären, ob dort Zitate oder eine Zusammenfassung in der dritten Person stehen sollen, denn das Beispiel ist zusammengefasst.</p>
+</section>
+
+<footer>Grundlage: BEI_BW 2024, Stand 10.09.2024 (Ministerium für Soziales, Gesundheit und Integration Baden-Württemberg). Beispieldaten sind anonymisiert.</footer>
+</div>
+
+<script>
+(function(){
+  document.querySelectorAll('button.copy').forEach(function(btn){
+    btn.addEventListener('click',function(){
+      var el=document.getElementById(btn.dataset.target), txt=el.textContent;
+      function done(ok){btn.textContent=ok?'Kopiert':'Kopieren fehlgeschlagen, bitte markieren';btn.classList.toggle('done',ok);setTimeout(function(){btn.textContent='Prompt kopieren';btn.classList.remove('done')},2200)}
+      if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(txt).then(function(){done(true)},function(){done(false)})}
+      else{try{var r=document.createRange();r.selectNodeContents(el);var s=window.getSelection();s.removeAllRanges();s.addRange(r);done(document.execCommand('copy'))}catch(e){done(false)}}
+    });
+  });
+})();
+</script>

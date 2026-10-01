@@ -19,7 +19,7 @@ Zielbögen (je ein eigener Prompt):
 | 1 | BEI_BW A – Basisbogen | [02_prompt_basisbogen.txt](02_prompt_basisbogen.txt) · [Seite für die Mitarbeitende](https://claude.ai/artifact/TpZRBTJ2EdCQZ6CVqKPU9L) ([HTML](04_seite_basisbogen_assistent.html)) | fertig, getestet an Beispiel 1 |
 | 2 | BEI_BW C – Erhebungsbogen (Bedarfsermittlung) | [05_prompt_erhebungsbogen_c.txt](05_prompt_erhebungsbogen_c.txt) · [Seite](https://claude.ai/artifact/TKWT9qCYg8JVpRSMVtfWSR) ([HTML](07_seite_erhebungsbogen_assistent.html)) | fertig, getestet an Beispiel 1 |
 | 2b | BEI_BW C, **direkt in Word** (ohne Kopieren, ohne Prompt-Anpassung) | [08_prompt_erhebungsbogen_c_direkt.txt](08_prompt_erhebungsbogen_c_direkt.txt) + [tools/fill_bei_bw_c.py](tools/fill_bei_bw_c.py) | fertig, getestet an Beispiel 1 |
-| 3 | BEI_BW B – Gesundheitsbogen | – | nächster Schritt |
+| 3 | BEI_BW B – Gesundheitsbogen, direkt in Word | [09_prompt_gesundheitsbogen_b_direkt.txt](09_prompt_gesundheitsbogen_b_direkt.txt) + [tools/fill_bei_bw_b.py](tools/fill_bei_bw_b.py) · [Seite](https://claude.ai/artifact/NpwVRQrdNmGwS2N2tWSrKe) ([HTML](10_seite_gesundheitsbogen_assistent.html)) | fertig, getestet an Beispiel 1 |
 | 4 | GP-Vorbereitung | – | danach (offene Frage, siehe unten) |
 
 ## Warum die bisherigen Versuche scheiterten
@@ -132,6 +132,30 @@ erzeugt daraus die ausgefüllte Datei; Inhalt und Absatzstruktur entsprechen dem
 der Fachkraft ausgefüllten Bogen (Ergänzungszeilen in den Tabellen, „Aus dem Gespräch
 am …“ je Lebensbereich, Aufzählung bei den Umweltfaktoren).
 
+## Bogen B: Gesundheitsbogen (direkt in Word)
+
+Der Gesundheitsbogen hat zwei Arten von Inhalten mit verschiedenen Quellen. Das ist
+die zentrale Regel des Prompts:
+
+| Inhalt | Quelle | Aus dem Gespräch? |
+|---|---|---|
+| Diagnosen (ICD-10) | Arztbrief, Gutachten, Teilhabebericht, früherer Gesundheitsbogen | nie |
+| Kreuze bei den ICF-Codes (b110 …) und Kapitelübersicht | dieselben medizinischen Quellen; aus Diagnosetext abgeleitete Kreuze werden als „abgeleitet“ markiert | nie |
+| Erläuterungen zu einzelnen Codes | wörtliche Zitate mit Kürzel, höchstens drei je Code | ja |
+| Ergänzende Hinweise | alle gesundheitsbezogenen Zitate plus Entwurf „bitte prüfen“ | ja |
+
+Liegt keine medizinische Quelle vor, bleibt der Bogen ohne Kreuze. Die Erläuterungen
+stehen trotzdem beim passenden Code, und das Prüfprotokoll listet diese Codes als
+„fachliche Bewertung nötig“. So sieht die Fachkraft sofort, wo sie aus der Akte
+ankreuzen muss. Das Skript `tools/fill_bei_bw_b.py` setzt Kästchen (Inhaltssteuerelemente),
+Diagnosenliste, Erläuterungsspalte und Hinweise; Codes, für die die Vorlage keine
+Tabelle enthält, meldet es statt sie zu verlieren.
+
+Hinweis: Eine leere Vorlage B lag nicht vor. `tools/Vorlage_BEI_BW_B_abgeleitet_aus_Beispiel1.docx`
+ist aus dem ausgefüllten Beispiel 1 abgeleitet (nur Kapitel 1 als Tabelle) und dient
+dem Test. Für den Einsatz die Originalvorlage des Ministeriums verwenden und den
+Prompt einmal damit testen.
+
 ## Testlauf
 
 [03_testlauf_beispiel1_basisbogen.md](03_testlauf_beispiel1_basisbogen.md) enthält
@@ -144,6 +168,11 @@ Behinderung, Betreuerin) vermieden.
 macht dasselbe für Bogen C: Sieben von neun Lebensbereichen sind identisch mit der
 Referenz, die übrigen zwei weichen nur durch eine zusätzliche Zuordnung und durch
 Sätze ab, die im gelieferten Protokoll fehlen. Keine Fehlzuordnung.
+
+Bogen B wurde mit zwei Zuordnungen getestet (`tools/zuordnung_beispiel1_b.json`, nur
+Gespräch, und eine Referenz mit Diagnose F70.0 und sechs Kreuzen wie im Beispiel):
+Kreuze, Kapitelübersicht, Diagnose, Erläuterungen und Hinweise landen an der richtigen
+Stelle; ein Code ohne Tabelle in der Vorlage wird im Prüfprotokoll gemeldet.
 
 ## Offene Punkte für die nächsten Prompts
 
