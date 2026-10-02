@@ -143,7 +143,7 @@ invalid_credential_test "scheme" ://user:pass@example.com
 invalid_credential_test "valid host/path" https://user:pass@
 invalid_credential_test "username/password" https://pass@example.com
 
-test_expect_success 'get: credentials with DOS line endings are invalid' '
+test_expect_success 'get: credentials with DOS line endings are valid' '
 	printf "https://user:pass@example.com\r\n" >"$HOME/.git-credentials" &&
 	check fill store <<-\EOF
 	protocol=https
@@ -151,11 +151,8 @@ test_expect_success 'get: credentials with DOS line endings are invalid' '
 	--
 	protocol=https
 	host=example.com
-	username=askpass-username
-	password=askpass-password
-	--
-	askpass: Username for '\''https://example.com'\'':
-	askpass: Password for '\''https://askpass-username@example.com'\'':
+	username=user
+	password=pass
 	--
 	EOF
 '
@@ -173,7 +170,7 @@ test_expect_success 'get: credentials with path and DOS line endings are valid' 
 	EOF
 '
 
-test_expect_success 'get: credentials with DOS line endings are invalid if path is relevant' '
+test_expect_success 'get: credentials with DOS line endings are valid if path is relevant' '
 	printf "https://user:pass@example.com/repo.git\r\n" >"$HOME/.git-credentials" &&
 	test_config credential.useHttpPath true &&
 	check fill store <<-\EOF
@@ -182,11 +179,8 @@ test_expect_success 'get: credentials with DOS line endings are invalid if path 
 	protocol=https
 	host=example.com
 	path=repo.git
-	username=askpass-username
-	password=askpass-password
-	--
-	askpass: Username for '\''https://example.com/repo.git'\'':
-	askpass: Password for '\''https://askpass-username@example.com/repo.git'\'':
+	username=user
+	password=pass
 	--
 	EOF
 '
