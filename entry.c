@@ -150,7 +150,9 @@ static struct cache_entry *copy_source_entry(const struct cache_entry *ce,
 	struct conv_attrs source_ca;
 	int pos;
 
-	if (!state->copy_source || !ca || !S_ISREG(ce->ce_mode))
+	if (!state->copy_source || !ca || !S_ISREG(ce->ce_mode) ||
+	    ca->drv || ca->ident || ca->working_tree_encoding ||
+	    ca->crlf_action != CRLF_BINARY)
 		return NULL;
 
 	istate = state->copy_source->istate;
