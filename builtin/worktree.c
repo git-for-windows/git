@@ -417,10 +417,10 @@ static int checkout_worktree(const struct add_opts *opts,
 				     GIT_WORKTREE_COPY_SOURCE, source);
 			strvec_pushf(&cp.env, "%s=%s",
 				     GIT_WORKTREE_COPY_SOURCE_INDEX,
-				     repo_get_index_file(the_repository));
+				     absolute_path(repo_get_index_file(the_repository)));
 			strvec_pushf(&cp.env, "%s=%s",
 				     GIT_WORKTREE_COPY_SOURCE_GIT_DIR,
-				     repo_get_git_dir(the_repository));
+				     absolute_path(repo_get_git_dir(the_repository)));
 			strvec_pushf(&cp.env, "%s=%"PRIuMAX,
 				     GIT_WORKTREE_COPY_SOURCE_TIME,
 				     (uintmax_t)refreshed_at.tv_sec *
