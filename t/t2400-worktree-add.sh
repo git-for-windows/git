@@ -5,6 +5,9 @@ test_description='test git worktree add'
 GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME=main
 export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
 
+GIT_TRACE2_EVENT_NESTING=10
+export GIT_TRACE2_EVENT_NESTING
+
 TEST_CREATE_REPO_NO_TEMPLATE=1
 . ./test-lib.sh
 
@@ -86,7 +89,8 @@ test_expect_success COPY_ON_WRITE 'worktree add uses copy-on-write' '
 	echo clean >clean &&
 	echo clean >clean.crlf &&
 	echo clean >modified.crlf &&
-	git add .gitattributes clean clean.crlf modified.crlf &&
+	echo clean >unconverted.crlf &&
+	git add .gitattributes clean clean.crlf modified.crlf unconverted.crlf &&
 	git commit -m "copy-on-write test files" &&
 	rm clean.crlf modified.crlf &&
 	git checkout -- clean.crlf modified.crlf &&
@@ -95,10 +99,14 @@ test_expect_success COPY_ON_WRITE 'worktree add uses copy-on-write' '
 	GIT_TRACE2_EVENT="$PWD/trace" \
 		git worktree add --detach copy-on-write main &&
 	test_grep "\"key\":\"copy_on_write\",\"value\":\"clean\"" trace &&
-	test_grep "\"key\":\"copy_on_write\",\"value\":\"clean.crlf\"" trace &&
-	test_must_fail test_grep "\"value\":\"init.t\"" trace &&
-	test_must_fail test_grep "\"value\":\"modified.crlf\"" trace &&
-	git -C copy-on-write diff --exit-code
+	test_grep ! "\"key\":\"copy_on_write\",\"value\":\"clean.crlf\"" trace &&
+	test_grep ! "\"key\":\"copy_on_write\",\"value\":\"unconverted.crlf\"" trace &&
+	test_grep ! "\"value\":\"init.t\"" trace &&
+	test_grep ! "\"value\":\"modified.crlf\"" trace &&
+	git -C copy-on-write diff --exit-code &&
+	printf "clean\r\n" >expect-crlf &&
+	test_cmp expect-crlf copy-on-write/clean.crlf &&
+	test_cmp expect-crlf copy-on-write/unconverted.crlf
 '
 
 test_expect_success COPY_ON_WRITE 'worktree.copyOnWrite disables optimization' '
@@ -106,7 +114,7 @@ test_expect_success COPY_ON_WRITE 'worktree.copyOnWrite disables optimization' '
 	test_config worktree.copyOnWrite false &&
 	GIT_TRACE2_EVENT="$PWD/disabled-trace" \
 		git worktree add --detach no-copy-on-write main &&
-	test_must_fail test_grep "\"key\":\"copy_on_write\"" disabled-trace
+	test_grep ! "\"key\":\"copy_on_write\"" disabled-trace
 '
 
 test_expect_success '"add" worktree with lock' '
