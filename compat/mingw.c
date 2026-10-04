@@ -35,6 +35,19 @@
 #define STATUS_DELETE_PENDING ((NTSTATUS) 0xC0000056)
 #define HCAST(type, handle) ((type)(intptr_t)handle)
 
+static int set_copy_on_write_file_size(HANDLE handle, off_t size)
+{
+	LARGE_INTEGER end;
+
+	end.QuadPart = size;
+	if (!SetFilePointerEx(handle, end, NULL, FILE_BEGIN) ||
+	    !SetEndOfFile(handle)) {
+		errno = err_win_to_posix(GetLastError());
+		return -1;
+	}
+	return 0;
+}
+
 int mingw_file_copy_on_write(int dst_fd, int src_fd, off_t size)
 {
 	DUPLICATE_EXTENTS_DATA data = {
@@ -51,8 +64,11 @@ int mingw_file_copy_on_write(int dst_fd, int src_fd, off_t size)
 	DWORD bytes_returned;
 	size_t i;
 
-	/* The destination range must exist before extents can be cloned. */
-	if (ftruncate(dst_fd, size) < 0)
+	/*
+	 * Prepare the destination without ftruncate(), which zero-fills
+	 * the extension through _chsize_s() before we replace its extents.
+	 */
+	if (set_copy_on_write_file_size(dst, size) < 0)
 		return -1;
 	if (!size)
 		return 0;
@@ -79,7 +95,7 @@ int mingw_file_copy_on_write(int dst_fd, int src_fd, off_t size)
 				    &data, sizeof(data), NULL, 0,
 				    &bytes_returned, NULL)) {
 			/* Discard any allocation-unit padding in the tail. */
-			return ftruncate(dst_fd, size);
+			return set_copy_on_write_file_size(dst, size);
 		}
 	}
 
