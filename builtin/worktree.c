@@ -395,7 +395,7 @@ worktree_copy_cleanup:
 }
 
 static int checkout_worktree(const struct add_opts *opts,
-			     struct strvec *child_env)
+			     struct strvec *child_env, const char *path)
 {
 	struct child_process cp = CHILD_PROCESS_INIT;
 	const char *source = repo_get_work_tree(the_repository);
@@ -406,7 +406,7 @@ static int checkout_worktree(const struct add_opts *opts,
 	if (opts->quiet)
 		strvec_push(&cp.args, "--quiet");
 	strvec_pushv(&cp.env, child_env->v);
-	if (copy_on_write_supported && source &&
+	if (file_copy_on_write_supported(path) && source &&
 	    repo_read_index(the_repository) >= 0) {
 		gettimeofday(&refreshed_at, NULL);
 		if (repo_refresh_and_write_index(the_repository,
@@ -614,7 +614,7 @@ static int add_worktree(const char *path, const char *refname,
 		goto done;
 
 	if (opts->checkout &&
-	    (ret = checkout_worktree(opts, &child_env)))
+	    (ret = checkout_worktree(opts, &child_env, path)))
 		goto done;
 
 	is_junk = 0;

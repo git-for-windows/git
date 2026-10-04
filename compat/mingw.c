@@ -48,28 +48,117 @@ static int set_copy_on_write_file_size(HANDLE handle, off_t size)
 	return 0;
 }
 
-int mingw_file_copy_on_write(int dst_fd, int src_fd, off_t size)
+/* Zero means unprobed; -1 disables cloning for this process. */
+static int copy_on_write_alignments[26];
+/* Re-resolve relative paths after mingw_chdir(). */
+static int copy_on_write_current_drive = -2;
+
+static int copy_on_write_drive(const char *path)
+{
+	int drive;
+
+	if (is_dir_sep(path[0]) && is_dir_sep(path[1]) &&
+	    (path[2] == '?' || path[2] == '.') && is_dir_sep(path[3]))
+		path += 4;
+	if (has_dos_drive_prefix(path)) {
+		drive = tolower((unsigned char)path[0]) - 'a';
+		return drive >= 0 && drive < 26 ? drive : -1;
+	}
+	/* UNC paths have no drive entry in this conservative cache. */
+	if (is_dir_sep(path[0]) && is_dir_sep(path[1]))
+		return -1;
+	return copy_on_write_current_drive;
+}
+
+static int resolve_copy_on_write_current_drive(void)
+{
+	WCHAR cwd[MAX_LONG_PATH];
+	const WCHAR *current = cwd;
+	DWORD length;
+	int drive;
+
+	length = GetCurrentDirectoryW(ARRAY_SIZE(cwd), cwd);
+	if (!length || length >= ARRAY_SIZE(cwd))
+		return copy_on_write_current_drive = -1;
+	if (length > 5 && cwd[0] == L'\\' && cwd[1] == L'\\' &&
+	    (cwd[2] == L'?' || cwd[2] == L'.') && cwd[3] == L'\\')
+		current += 4;
+	drive = current[1] == L':' ? towlower(current[0]) - L'a' : -1;
+	copy_on_write_current_drive = drive >= 0 && drive < 26 ? drive : -1;
+	return copy_on_write_current_drive;
+}
+
+static int resolve_copy_on_write_drive(const char *path)
+{
+	int drive = copy_on_write_drive(path);
+
+	return drive == -2 ? resolve_copy_on_write_current_drive() : drive;
+}
+
+static int copy_on_write_alignment(int drive)
+{
+	return drive < 0 ? -1 : copy_on_write_alignments[drive];
+}
+
+static int probe_copy_on_write_alignment(int drive)
+{
+	WCHAR root[] = L"A:\\", filesystem[16];
+	DWORD sectors, bytes, free_clusters, clusters;
+
+	root[0] += drive;
+	if (!GetVolumeInformationW(root, NULL, 0, NULL, NULL, NULL,
+				  filesystem, ARRAY_SIZE(filesystem)) ||
+	    wcscmp(filesystem, L"ReFS") ||
+	    !GetDiskFreeSpaceW(root, &sectors, &bytes, &free_clusters,
+			      &clusters) ||
+	    !sectors || !bytes || sectors > 65536 / bytes)
+		return -1;
+	/* Only the cluster size is used; free-space results are ignored. */
+	return sectors * bytes == 4096 || sectors * bytes == 65536 ?
+		sectors * bytes : -1;
+}
+
+static int prepare_copy_on_write_alignment(int drive)
+{
+	int alignment = copy_on_write_alignment(drive);
+
+	if (alignment)
+		return alignment;
+	alignment = probe_copy_on_write_alignment(drive);
+	copy_on_write_alignments[drive] = alignment;
+	trace2_data_intmax("checkout", NULL, "copy_on_write_alignment",
+			  alignment);
+	return alignment;
+}
+
+int mingw_copy_on_write_supported(const char *path)
+{
+	int drive = resolve_copy_on_write_drive(path);
+
+	return prepare_copy_on_write_alignment(drive) > 0;
+}
+
+int mingw_file_copy_on_write(int dst_fd, int src_fd, off_t size,
+			    const char *path)
 {
 	DUPLICATE_EXTENTS_DATA data = {
 		.FileHandle = HCAST(HANDLE, _get_osfhandle(src_fd)),
 	};
 	HANDLE dst = HCAST(HANDLE, _get_osfhandle(dst_fd));
-	/*
-	 * FSCTL_DUPLICATE_EXTENTS_TO_FILE accepts ranges smaller than 4 GiB,
-	 * aligned to the volume's cluster size. ReFS uses 64 KiB or 4 KiB
-	 * clusters, so this is the largest valid range for either.
-	 */
-	const LONGLONG max_range = (4LL * 1024 * 1024 * 1024) - (64 * 1024);
-	const LONGLONG tail_alignments[] = { 64 * 1024, 4 * 1024 };
+	int drive = resolve_copy_on_write_drive(path);
+	int alignment = prepare_copy_on_write_alignment(drive);
+	LONGLONG max_range;
 	DWORD bytes_returned;
-	size_t i;
+	int saved_errno;
 
-	/*
-	 * Prepare the destination without ftruncate(), which zero-fills
-	 * the extension through _chsize_s() before we replace its extents.
-	 */
-	if (set_copy_on_write_file_size(dst, size) < 0)
+	if (alignment < 0) {
+		errno = ENOSYS;
 		return -1;
+	}
+	/* Ranges must be cluster-aligned and smaller than 4 GiB. */
+	max_range = (4LL * 1024 * 1024 * 1024) - alignment;
+	if (set_copy_on_write_file_size(dst, size) < 0)
+		goto failed;
 	if (!size)
 		return 0;
 
@@ -79,27 +168,32 @@ int mingw_file_copy_on_write(int dst_fd, int src_fd, off_t size)
 				     &data, sizeof(data), NULL, 0,
 				     &bytes_returned, NULL)) {
 			errno = ENOSYS;
-			return -1;
+			goto failed;
 		}
 		data.SourceFileOffset.QuadPart += data.ByteCount.QuadPart;
 		data.TargetFileOffset = data.SourceFileOffset;
 	}
 
-	for (i = 0; i < ARRAY_SIZE(tail_alignments); i++) {
-		LONGLONG remaining = size - data.SourceFileOffset.QuadPart;
-
-		data.ByteCount.QuadPart =
-			DIV_ROUND_UP(remaining, tail_alignments[i]) *
-			tail_alignments[i];
-		if (DeviceIoControl(dst, FSCTL_DUPLICATE_EXTENTS_TO_FILE,
-				    &data, sizeof(data), NULL, 0,
-				    &bytes_returned, NULL)) {
-			/* Discard any allocation-unit padding in the tail. */
-			return set_copy_on_write_file_size(dst, size);
-		}
+	data.ByteCount.QuadPart =
+		DIV_ROUND_UP(size - data.SourceFileOffset.QuadPart, alignment) *
+		alignment;
+	if (!DeviceIoControl(dst, FSCTL_DUPLICATE_EXTENTS_TO_FILE,
+			    &data, sizeof(data), NULL, 0,
+			    &bytes_returned, NULL)) {
+		errno = ENOSYS;
+		goto failed;
 	}
+	/* Discard allocation-unit padding without zero-filling. */
+	if (set_copy_on_write_file_size(dst, size) < 0)
+		goto failed;
+	return 0;
 
-	errno = ENOSYS;
+failed:
+	/* A file-specific failure also disables later volume attempts. */
+	saved_errno = errno;
+	copy_on_write_alignments[drive] = -1;
+	trace2_data_intmax("checkout", NULL, "copy_on_write_disabled", drive);
+	errno = saved_errno;
 	return -1;
 }
 
@@ -1273,6 +1367,7 @@ int mingw_chdir(const char *dirname)
 	}
 
 	result = _wchdir(normalize_ntpath(wdirname));
+	copy_on_write_current_drive = -2;
 	current_directory_len = GetCurrentDirectoryW(0, NULL);
 	return result;
 }

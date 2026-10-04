@@ -34,6 +34,39 @@ test_expect_success COPY_ON_WRITE 'copy-on-write preserves sizes and source' '
 	done
 '
 
+test_expect_success MINGW,COPY_ON_WRITE 'clone alignment is cached' '
+	test_when_finished "rm -f cache-source cache-one cache-two" &&
+	test-tool genrandom clone-cache 102400 >cache-source &&
+	GIT_TRACE2_EVENT="$PWD/alignment-trace" \
+		test-tool copy-on-write --batch cache-source cache-one \
+		cache-source cache-two &&
+	test_cmp cache-source cache-one &&
+	test_cmp cache-source cache-two &&
+	grep "\"key\":\"copy_on_write_alignment\"" alignment-trace \
+		>alignment-events &&
+	test_line_count = 1 alignment-events &&
+	test_grep ! "\"key\":\"copy_on_write_disabled\"" alignment-trace
+'
+
+test_expect_success MINGW,COPY_ON_WRITE 'clone failure disables drive cache' '
+	test_when_finished "rm -f cache-source cache-target cache-expect" &&
+	test-tool genrandom clone-failure 65536 >cache-source &&
+	cp cache-source cache-expect &&
+	GIT_TRACE2_EVENT="$PWD/failure-trace" \
+		test-tool copy-on-write --fail-cache cache-source \
+		cache-target &&
+	test_path_is_missing cache-target &&
+	test_cmp cache-expect cache-source &&
+	test_grep "\"key\":\"copy_on_write_disabled\"" failure-trace
+'
+
+test_expect_success MINGW,COPY_ON_WRITE 'drive cache follows chdir' '
+	test_when_finished "rm -rf cache-dir-one cache-dir-two" &&
+	mkdir cache-dir-one cache-dir-two &&
+	test-tool copy-on-write --probe-cwd "$PWD/cache-dir-one" 1 \
+		"$PWD/cache-dir-two" 1
+'
+
 test_expect_success 'setup' '
 	test_commit init
 '

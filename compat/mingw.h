@@ -8,7 +8,10 @@ int mingw_core_config(const char *var, const char *value,
 		      const struct config_context *ctx, void *cb);
 #define platform_core_config mingw_core_config
 #define copy_on_write_supported 1
-int mingw_file_copy_on_write(int dst_fd, int src_fd, off_t size);
+int mingw_copy_on_write_supported(const char *path);
+#define file_copy_on_write_supported mingw_copy_on_write_supported
+int mingw_file_copy_on_write(int dst_fd, int src_fd, off_t size,
+			    const char *path);
 #define file_copy_on_write mingw_file_copy_on_write
 
 #ifndef NO_OPENSSL
