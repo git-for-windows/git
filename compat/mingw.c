@@ -37,11 +37,11 @@
 
 static int set_copy_on_write_file_size(HANDLE handle, off_t size)
 {
-	LARGE_INTEGER end;
+	FILE_END_OF_FILE_INFO end;
 
-	end.QuadPart = size;
-	if (!SetFilePointerEx(handle, end, NULL, FILE_BEGIN) ||
-	    !SetEndOfFile(handle)) {
+	end.EndOfFile.QuadPart = size;
+	if (!SetFileInformationByHandle(handle, FileEndOfFileInfo,
+					&end, sizeof(end))) {
 		errno = err_win_to_posix(GetLastError());
 		return -1;
 	}
@@ -1586,6 +1586,25 @@ int mingw_lstat(const char *file_name, struct stat *buf)
 
 int (*lstat)(const char *file_name, struct stat *buf) = mingw_lstat;
 
+static void fill_stat_from_file_info(HANDLE hnd,
+				     const BY_HANDLE_FILE_INFORMATION *fdata,
+				     struct stat *buf)
+{
+	buf->st_ino = 0;
+	buf->st_gid = 0;
+	buf->st_uid = 0;
+	buf->st_nlink = 1;
+	buf->st_mode = file_attr_to_st_mode(fdata->dwFileAttributes, 0, NULL);
+	buf->st_size = fdata->nFileSizeLow |
+		(((off_t)fdata->nFileSizeHigh)<<32);
+	buf->st_dev = buf->st_rdev = 0; /* not used by Git */
+	filetime_to_timespec(&(fdata->ftLastAccessTime), &(buf->st_atim));
+	filetime_to_timespec(&(fdata->ftLastWriteTime), &(buf->st_mtim));
+	filetime_to_timespec(&(fdata->ftCreationTime), &(buf->st_ctim));
+	if (are_wsl_compatible_mode_bits_enabled())
+	    get_wsl_mode_bits_by_handle(hnd, &buf->st_mode);
+}
+
 static int get_file_info_by_handle(HANDLE hnd, struct stat *buf)
 {
 	BY_HANDLE_FILE_INFORMATION fdata;
@@ -1594,21 +1613,47 @@ static int get_file_info_by_handle(HANDLE hnd, struct stat *buf)
 		errno = err_win_to_posix(GetLastError());
 		return -1;
 	}
-
-	buf->st_ino = 0;
-	buf->st_gid = 0;
-	buf->st_uid = 0;
-	buf->st_nlink = 1;
-	buf->st_mode = file_attr_to_st_mode(fdata.dwFileAttributes, 0, NULL);
-	buf->st_size = fdata.nFileSizeLow |
-		(((off_t)fdata.nFileSizeHigh)<<32);
-	buf->st_dev = buf->st_rdev = 0; /* not used by Git */
-	filetime_to_timespec(&(fdata.ftLastAccessTime), &(buf->st_atim));
-	filetime_to_timespec(&(fdata.ftLastWriteTime), &(buf->st_mtim));
-	filetime_to_timespec(&(fdata.ftCreationTime), &(buf->st_ctim));
-	if (are_wsl_compatible_mode_bits_enabled())
-	    get_wsl_mode_bits_by_handle(hnd, &buf->st_mode);
+	fill_stat_from_file_info(hnd, &fdata, buf);
 	return 0;
+}
+
+int mingw_open_nofollow_stat(const char *path, struct stat *st)
+{
+	wchar_t wpath[MAX_LONG_PATH];
+	BY_HANDLE_FILE_INFORMATION info;
+	HANDLE handle;
+	int fd;
+
+	if (!is_valid_win32_path(path, 0)) {
+		errno = ENOENT;
+		return -1;
+	}
+	if (xutftowcs_long_path(wpath, path) < 0)
+		return -1;
+	/* Inspect the opened object so replacement of the path cannot fool us. */
+	handle = CreateFileW(wpath, GENERIC_READ,
+			     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+			     NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT,
+			     NULL);
+	if (handle == INVALID_HANDLE_VALUE) {
+		errno = err_win_to_posix(GetLastError());
+		return -1;
+	}
+	if (!GetFileInformationByHandle(handle, &info)) {
+		errno = err_win_to_posix(GetLastError());
+		goto failed;
+	}
+	if (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+		errno = ELOOP;
+		goto failed;
+	}
+	fill_stat_from_file_info(handle, &info, st);
+	fd = _open_osfhandle((intptr_t)handle, O_RDONLY | O_BINARY);
+	if (fd >= 0)
+		return fd;
+failed:
+	CloseHandle(handle);
+	return -1;
 }
 
 int mingw_stat(const char *file_name, struct stat *buf)

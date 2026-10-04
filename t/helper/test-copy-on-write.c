@@ -33,6 +33,16 @@ static int copy_one(const char *source, const char *target, int fail_cache)
 int cmd__copy_on_write(int argc, const char **argv)
 {
 	int i;
+	struct stat st;
+	int fd;
+
+	if (argc == 3 && !strcmp(argv[1], "--open-nofollow-stat")) {
+		fd = open_nofollow_stat(argv[2], &st);
+		if (fd < 0)
+			return 1;
+		close(fd);
+		return !S_ISREG(st.st_mode);
+	}
 
 	if (argc >= 4 && !(argc % 2) && !strcmp(argv[1], "--probe-path")) {
 		for (i = 2; i < argc; i += 2)

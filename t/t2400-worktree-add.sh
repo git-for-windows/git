@@ -34,6 +34,14 @@ test_expect_success COPY_ON_WRITE 'copy-on-write preserves sizes and source' '
 	done
 '
 
+test_expect_success MINGW,SYMLINKS,COPY_ON_WRITE 'source open rejects symlinks' '
+	test_when_finished "rm -f clone-regular clone-link" &&
+	echo content >clone-regular &&
+	ln -s clone-regular clone-link &&
+	test-tool copy-on-write --open-nofollow-stat clone-regular &&
+	test_must_fail test-tool copy-on-write --open-nofollow-stat clone-link
+'
+
 test_expect_success MINGW,COPY_ON_WRITE 'clone alignment is cached' '
 	test_when_finished "rm -f cache-source cache-one cache-two" &&
 	test-tool genrandom clone-cache 102400 >cache-source &&
