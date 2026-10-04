@@ -183,9 +183,6 @@ int mingw_file_copy_on_write(int dst_fd, int src_fd, off_t size,
 		errno = ENOSYS;
 		goto failed;
 	}
-	/* Discard allocation-unit padding without zero-filling. */
-	if (set_copy_on_write_file_size(dst, size) < 0)
-		goto failed;
 	return 0;
 
 failed:
