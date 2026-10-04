@@ -34,6 +34,13 @@ int cmd__copy_on_write(int argc, const char **argv)
 {
 	int i;
 
+	if (argc >= 4 && !(argc % 2) && !strcmp(argv[1], "--probe-path")) {
+		for (i = 2; i < argc; i += 2)
+			if (!!file_copy_on_write_supported(argv[i]) !=
+			    !!atoi(argv[i + 1]))
+				return 1;
+		return 0;
+	}
 	if (argc >= 4 && !(argc % 2) && !strcmp(argv[1], "--probe-cwd")) {
 		for (i = 2; i < argc; i += 2) {
 			if (chdir(argv[i]) ||

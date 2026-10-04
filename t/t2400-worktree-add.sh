@@ -48,6 +48,18 @@ test_expect_success MINGW,COPY_ON_WRITE 'clone alignment is cached' '
 	test_grep ! "\"key\":\"copy_on_write_disabled\"" alignment-trace
 '
 
+test_expect_success MINGW,COPY_ON_WRITE 'drive-letter cache accepts both cases' '
+	drive=$(cygpath -m "$PWD" | cut -c1) &&
+	upper=$(printf %s "$drive" | tr "[:lower:]" "[:upper:]") &&
+	lower=$(printf %s "$drive" | tr "[:upper:]" "[:lower:]") &&
+	GIT_TRACE2_EVENT="$PWD/case-trace" \
+		test-tool copy-on-write --probe-path \
+		"$upper:/clone-probe" 1 "$lower:/clone-probe" 1 &&
+	grep "\"key\":\"copy_on_write_alignment\"" case-trace \
+		>case-events &&
+	test_line_count = 1 case-events
+'
+
 test_expect_success MINGW,COPY_ON_WRITE 'clone failure disables drive cache' '
 	test_when_finished "rm -f cache-source cache-target cache-expect" &&
 	test-tool genrandom clone-failure 65536 >cache-source &&

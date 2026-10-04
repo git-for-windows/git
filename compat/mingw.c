@@ -49,7 +49,7 @@ static int set_copy_on_write_file_size(HANDLE handle, off_t size)
 }
 
 /* Zero means unprobed; -1 disables cloning for this process. */
-static int copy_on_write_alignments[26];
+static int copy_on_write_alignments[256];
 /* Re-resolve relative paths after mingw_chdir(). */
 static int copy_on_write_current_drive = -2;
 
@@ -95,9 +95,10 @@ static int resolve_copy_on_write_drive(const char *path)
 	return drive == -2 ? resolve_copy_on_write_current_drive() : drive;
 }
 
-static int copy_on_write_alignment(int drive)
+static void set_copy_on_write_alignment(int drive, int alignment)
 {
-	return drive < 0 ? -1 : copy_on_write_alignments[drive];
+	copy_on_write_alignments['A' + drive] = alignment;
+	copy_on_write_alignments['a' + drive] = alignment;
 }
 
 static int probe_copy_on_write_alignment(int drive)
@@ -118,14 +119,22 @@ static int probe_copy_on_write_alignment(int drive)
 		sectors * bytes : -1;
 }
 
-static int prepare_copy_on_write_alignment(int drive)
+static int prepare_copy_on_write_alignment(const char *path)
 {
-	int alignment = copy_on_write_alignment(drive);
+	int drive, alignment;
 
+	/* A cached drive-letter path needs no parsing or case conversion. */
+	if (path[0] && path[1] == ':' &&
+	    (alignment = copy_on_write_alignments[(unsigned char)path[0]]))
+		return alignment;
+	drive = resolve_copy_on_write_drive(path);
+	if (drive < 0)
+		return -1;
+	alignment = copy_on_write_alignments['A' + drive];
 	if (alignment)
 		return alignment;
 	alignment = probe_copy_on_write_alignment(drive);
-	copy_on_write_alignments[drive] = alignment;
+	set_copy_on_write_alignment(drive, alignment);
 	trace2_data_intmax("checkout", NULL, "copy_on_write_alignment",
 			  alignment);
 	return alignment;
@@ -133,9 +142,7 @@ static int prepare_copy_on_write_alignment(int drive)
 
 int mingw_copy_on_write_supported(const char *path)
 {
-	int drive = resolve_copy_on_write_drive(path);
-
-	return prepare_copy_on_write_alignment(drive) > 0;
+	return prepare_copy_on_write_alignment(path) > 0;
 }
 
 int mingw_file_copy_on_write(int dst_fd, int src_fd, off_t size,
@@ -145,8 +152,7 @@ int mingw_file_copy_on_write(int dst_fd, int src_fd, off_t size,
 		.FileHandle = HCAST(HANDLE, _get_osfhandle(src_fd)),
 	};
 	HANDLE dst = HCAST(HANDLE, _get_osfhandle(dst_fd));
-	int drive = resolve_copy_on_write_drive(path);
-	int alignment = prepare_copy_on_write_alignment(drive);
+	int drive, alignment = prepare_copy_on_write_alignment(path);
 	LONGLONG max_range;
 	DWORD bytes_returned;
 	int saved_errno;
@@ -188,8 +194,12 @@ int mingw_file_copy_on_write(int dst_fd, int src_fd, off_t size,
 failed:
 	/* A file-specific failure also disables later volume attempts. */
 	saved_errno = errno;
-	copy_on_write_alignments[drive] = -1;
-	trace2_data_intmax("checkout", NULL, "copy_on_write_disabled", drive);
+	drive = resolve_copy_on_write_drive(path);
+	if (drive >= 0) {
+		set_copy_on_write_alignment(drive, -1);
+		trace2_data_intmax("checkout", NULL,
+				      "copy_on_write_disabled", drive);
+	}
 	errno = saved_errno;
 	return -1;
 }
