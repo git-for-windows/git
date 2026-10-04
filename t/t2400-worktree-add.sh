@@ -20,6 +20,20 @@ test_lazy_prereq COPY_ON_WRITE '
 	rm copy-source copy-target
 '
 
+test_expect_success COPY_ON_WRITE 'copy-on-write preserves sizes and source' '
+	test_when_finished "rm -f size-source size-target size-expect" &&
+	for size in 0 1 4095 4096 4097 65535 65536 65537 1048577
+	do
+		test-tool genrandom clone-size $size >size-source &&
+		cp size-source size-expect &&
+		test-tool copy-on-write size-source size-target &&
+		test_cmp size-source size-target &&
+		echo changed >>size-target &&
+		test_cmp size-expect size-source &&
+		rm size-target || return 1
+	done
+'
+
 test_expect_success 'setup' '
 	test_commit init
 '
