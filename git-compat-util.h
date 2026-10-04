@@ -227,8 +227,12 @@ static inline int noop_core_config(const char *var UNUSED,
 #define copy_on_write_supported 0
 #endif
 
+#ifndef file_copy_on_write_supported
+#define file_copy_on_write_supported(path) copy_on_write_supported
+#endif
+
 #ifndef file_copy_on_write
-#define file_copy_on_write(dst_fd, src_fd, size) (errno = ENOSYS, -1)
+#define file_copy_on_write(dst_fd, src_fd, size, path) (errno = ENOSYS, -1)
 #endif
 
 #ifndef has_dos_drive_prefix

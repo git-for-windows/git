@@ -192,6 +192,9 @@ static int try_copy_on_write(const struct cache_entry *ce,
 	int src_fd = -1, dst_fd = -1;
 	int ret = 0;
 
+	if (!file_copy_on_write_supported(path))
+		return 0;
+
 	strbuf_addf(&source, "%s/%s", state->copy_source->worktree, ce->name);
 	src_fd = open_nofollow(source.buf, O_RDONLY);
 	if (src_fd < 0 || fstat(src_fd, &st) || !S_ISREG(st.st_mode) ||
@@ -201,7 +204,7 @@ static int try_copy_on_write(const struct cache_entry *ce,
 	dst_fd = open_output_fd(path, ce, 0);
 	if (dst_fd < 0)
 		goto done;
-	if (file_copy_on_write(dst_fd, src_fd, st.st_size) ||
+	if (file_copy_on_write(dst_fd, src_fd, st.st_size, path) ||
 	    fstat(src_fd, &st_after) ||
 	    !source_is_uptodate(state->copy_source, source_ce, &st_after)) {
 		close(dst_fd);
