@@ -138,6 +138,7 @@ int warn_on_fopen_errors(const char *path);
  * simultaneously create paths.
  */
 int open_nofollow(const char *path, int flags);
+int open_nofollow_stat(const char *path, struct stat *st);
 
 void sleep_millisec(int millisec);
 

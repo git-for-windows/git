@@ -860,6 +860,24 @@ int open_nofollow(const char *path, int flags)
 #endif
 }
 
+int open_nofollow_stat(const char *path, struct stat *st)
+{
+#ifdef GIT_WINDOWS_NATIVE
+	return mingw_open_nofollow_stat(path, st);
+#else
+	int fd = open_nofollow(path, O_RDONLY);
+
+	if (fd >= 0 && fstat(fd, st)) {
+		int saved_errno = errno;
+
+		close(fd);
+		errno = saved_errno;
+		return -1;
+	}
+	return fd;
+#endif
+}
+
 int csprng_bytes(void *buf, size_t len, MAYBE_UNUSED unsigned flags)
 {
 #if defined(HAVE_ARC4RANDOM) || defined(HAVE_ARC4RANDOM_LIBBSD)

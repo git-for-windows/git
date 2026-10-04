@@ -13,6 +13,7 @@ int mingw_copy_on_write_supported(const char *path);
 int mingw_file_copy_on_write(int dst_fd, int src_fd, off_t size,
 			    const char *path);
 #define file_copy_on_write mingw_file_copy_on_write
+int mingw_open_nofollow_stat(const char *path, struct stat *st);
 
 #ifndef NO_OPENSSL
 #include <openssl/ssl.h>

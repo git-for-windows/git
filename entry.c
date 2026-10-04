@@ -196,8 +196,8 @@ static int try_copy_on_write(const struct cache_entry *ce,
 		return 0;
 
 	strbuf_addf(&source, "%s/%s", state->copy_source->worktree, ce->name);
-	src_fd = open_nofollow(source.buf, O_RDONLY);
-	if (src_fd < 0 || fstat(src_fd, &st) || !S_ISREG(st.st_mode) ||
+	src_fd = open_nofollow_stat(source.buf, &st);
+	if (src_fd < 0 || !S_ISREG(st.st_mode) ||
 	    !source_is_uptodate(state->copy_source, source_ce, &st))
 		goto done;
 
