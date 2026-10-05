@@ -42,6 +42,19 @@ test_expect_success MINGW,SYMLINKS,COPY_ON_WRITE 'source open rejects symlinks' 
 	test_must_fail test-tool copy-on-write --open-nofollow-stat clone-link
 '
 
+test_expect_success MINGW 'exclusive nofollow creation rejects existing files' '
+	test_when_finished "rm -f exclusive-target" &&
+	test-tool copy-on-write --create-nofollow exclusive-target &&
+	test_must_fail test-tool copy-on-write --create-nofollow exclusive-target
+'
+
+test_expect_success MINGW,SYMLINKS 'exclusive creation rejects dangling symlinks' '
+	test_when_finished "rm -f exclusive-link exclusive-missing" &&
+	ln -s exclusive-missing exclusive-link &&
+	test_must_fail test-tool copy-on-write --create-nofollow exclusive-link &&
+	test_path_is_missing exclusive-missing
+'
+
 test_expect_success MINGW,COPY_ON_WRITE 'clone alignment is cached' '
 	test_when_finished "rm -f cache-source cache-one cache-two" &&
 	test-tool genrandom clone-cache 102400 >cache-source &&
