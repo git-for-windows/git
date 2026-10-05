@@ -409,24 +409,20 @@ static int checkout_worktree(const struct add_opts *opts,
 	if (file_copy_on_write_supported(path) && source &&
 	    repo_read_index(the_repository) >= 0) {
 		gettimeofday(&refreshed_at, NULL);
-		if (repo_refresh_and_write_index(the_repository,
-						 REFRESH_QUIET | REFRESH_REALLY,
-						 SKIP_IF_UNCHANGED, 1,
-						 NULL, NULL, NULL) >= 0) {
-			strvec_pushf(&cp.env, "%s=%s",
-				     GIT_WORKTREE_COPY_SOURCE, source);
-			strvec_pushf(&cp.env, "%s=%s",
-				     GIT_WORKTREE_COPY_SOURCE_INDEX,
-				     absolute_path(repo_get_index_file(the_repository)));
-			strvec_pushf(&cp.env, "%s=%s",
-				     GIT_WORKTREE_COPY_SOURCE_GIT_DIR,
-				     absolute_path(repo_get_git_dir(the_repository)));
-			strvec_pushf(&cp.env, "%s=%"PRIuMAX,
-				     GIT_WORKTREE_COPY_SOURCE_TIME,
-				     (uintmax_t)refreshed_at.tv_sec *
-				     1000000000 +
-				     refreshed_at.tv_usec * 1000);
-		}
+
+		strvec_pushf(&cp.env, "%s=%s",
+			     GIT_WORKTREE_COPY_SOURCE, source);
+		strvec_pushf(&cp.env, "%s=%s",
+			     GIT_WORKTREE_COPY_SOURCE_INDEX,
+			     absolute_path(repo_get_index_file(the_repository)));
+		strvec_pushf(&cp.env, "%s=%s",
+			     GIT_WORKTREE_COPY_SOURCE_GIT_DIR,
+			     absolute_path(repo_get_git_dir(the_repository)));
+		strvec_pushf(&cp.env, "%s=%"PRIuMAX,
+			     GIT_WORKTREE_COPY_SOURCE_TIME,
+			     (uintmax_t)refreshed_at.tv_sec *
+			     1000000000 +
+			     refreshed_at.tv_usec * 1000);
 	}
 	return run_command(&cp);
 }
