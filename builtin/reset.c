@@ -368,6 +368,21 @@ static int init_copy_source(struct checkout_copy_source *source,
 	source->istate = source_index;
 	source->worktree = worktree;
 	source->refreshed_at = refreshed_at;
+	/* The linked worktree is created before reset, so it contains .git. */
+	{
+		DIR *dir = opendir(repo_get_work_tree(the_repository));
+		struct dirent *de;
+
+		if (dir) {
+			source->fresh_worktree = 1;
+			while ((de = readdir_skip_dot_and_dotdot(dir)) != NULL)
+				if (strcmp(de->d_name, ".git")) {
+					source->fresh_worktree = 0;
+					break;
+				}
+			closedir(dir);
+		}
+	}
 	return 1;
 }
 

@@ -36,6 +36,15 @@ int cmd__copy_on_write(int argc, const char **argv)
 	struct stat st;
 	int fd;
 
+#ifdef GIT_WINDOWS_NATIVE
+	if (argc == 3 && !strcmp(argv[1], "--create-nofollow")) {
+		fd = mingw_create_file_nofollow(argv[2], 0666);
+		if (fd < 0)
+			return 1;
+		return !!close(fd);
+	}
+#endif
+
 	if (argc == 3 && !strcmp(argv[1], "--open-nofollow-stat")) {
 		fd = open_nofollow_stat(argv[2], &st);
 		if (fd < 0)

@@ -98,9 +98,13 @@ static void remove_subtree(struct strbuf *path)
 		die_errno("cannot rmdir '%s'", path->buf);
 }
 
-static int create_file(const char *path, unsigned int mode)
+static int create_file(const char *path, unsigned int mode, int fresh_worktree)
 {
 	mode = (mode & 0100) ? 0777 : 0666;
+#ifdef GIT_WINDOWS_NATIVE
+	if (fresh_worktree)
+		return mingw_create_file_nofollow(path, mode);
+#endif
 	return open(path, O_WRONLY | O_CREAT | O_EXCL, mode);
 }
 
@@ -118,7 +122,8 @@ void *read_blob_entry(const struct cache_entry *ce, size_t *size)
 	return NULL;
 }
 
-static int open_output_fd(char *path, const struct cache_entry *ce, int to_tempfile)
+static int open_output_fd(char *path, const struct cache_entry *ce,
+			  const struct checkout *state, int to_tempfile)
 {
 	int symlink = (ce->ce_mode & S_IFMT) != S_IFREG;
 	if (to_tempfile) {
@@ -126,7 +131,8 @@ static int open_output_fd(char *path, const struct cache_entry *ce, int to_tempf
 			  symlink ? ".merge_link_XXXXXX" : ".merge_file_XXXXXX");
 		return mkstemp(path);
 	} else {
-		return create_file(path, !symlink ? ce->ce_mode : 0666);
+		return create_file(path, !symlink ? ce->ce_mode : 0666,
+				   state->fresh_worktree && !symlink);
 	}
 }
 
@@ -201,9 +207,14 @@ static int try_copy_on_write(const struct cache_entry *ce,
 	    !source_is_uptodate(state->copy_source, source_ce, &st))
 		goto done;
 
-	dst_fd = open_output_fd(path, ce, 0);
-	if (dst_fd < 0)
+	dst_fd = open_output_fd(path, ce, state, 0);
+	if (dst_fd < 0) {
+		if (state->fresh_worktree) {
+			ret = -1;
+			goto done;
+		}
 		goto done;
+	}
 	if (file_copy_on_write(dst_fd, src_fd, st.st_size, path) ||
 	    fstat(src_fd, &st_after) ||
 	    !source_is_uptodate(state->copy_source, source_ce, &st_after)) {
@@ -252,7 +263,7 @@ static int streaming_write_entry(const struct cache_entry *ce, char *path,
 	int result = 0;
 	int fd;
 
-	fd = open_output_fd(path, ce, to_tempfile);
+	fd = open_output_fd(path, ce, state, to_tempfile);
 	if (fd < 0)
 		return -1;
 
@@ -422,10 +433,14 @@ static int write_entry(struct cache_entry *ce, char *path, struct conv_attrs *ca
 	if (ce_mode_s_ifmt == S_IFREG) {
 		struct stream_filter *filter;
 
-		if (source_ce &&
-		    try_copy_on_write(ce, source_ce, path, state,
-				      &fstat_done, &st))
-			goto finish;
+		if (source_ce) {
+			int cloned = try_copy_on_write(ce, source_ce, path, state,
+						     &fstat_done, &st);
+			if (cloned < 0)
+				return -2; /* retry after checking a collision */
+			if (cloned)
+				goto finish;
+		}
 
 		filter = get_stream_filter_ca(ca, &ce->oid);
 		if (filter &&
@@ -505,9 +520,11 @@ static int write_entry(struct cache_entry *ce, char *path, struct conv_attrs *ca
 		 */
 
 	write_file_entry:
-		fd = open_output_fd(path, ce, to_tempfile);
+			fd = open_output_fd(path, ce, state, to_tempfile);
 		if (fd < 0) {
 			free(new_blob);
+				if (state->fresh_worktree)
+					return -2;
 			return error_errno("unable to create file %s", path);
 		}
 
@@ -617,6 +634,9 @@ int checkout_entry_ca(struct cache_entry *ce, struct conv_attrs *ca,
 	struct stat st;
 	struct conv_attrs ca_buf;
 	struct cache_entry *source_ce = NULL;
+	struct checkout slow_state;
+	const struct checkout *write_state = state;
+	int fast_path = 0, ret;
 
 	if (ce->ce_flags & CE_WT_REMOVE) {
 		if (topath)
@@ -642,7 +662,18 @@ int checkout_entry_ca(struct cache_entry *ce, struct conv_attrs *ca,
 	strbuf_add(&path, state->base_dir, state->base_dir_len);
 	strbuf_add(&path, ce->name, ce_namelen(ce));
 
-	if (!check_path(path.buf, path.len, &st, state->base_dir_len)) {
+	if (state->fresh_worktree && S_ISREG(ce->ce_mode)) {
+		if (!ca) {
+			convert_attrs(state->istate, &ca_buf, ce->name);
+			ca = &ca_buf;
+		}
+		source_ce = copy_source_entry(ce, ca, state);
+		fast_path = !!source_ce;
+	}
+
+slow_path:
+	if (!fast_path &&
+	    !check_path(path.buf, path.len, &st, state->base_dir_len)) {
 		const struct submodule *sub;
 		unsigned changed = ie_match_stat(state->istate, ce, &st,
 						 CE_MATCH_IGNORE_VALID | CE_MATCH_IGNORE_SKIP_WORKTREE);
@@ -708,7 +739,7 @@ int checkout_entry_ca(struct cache_entry *ce, struct conv_attrs *ca,
 			remove_subtree(&path);
 		} else if (unlink(path.buf))
 			return error_errno("unable to unlink old '%s'", path.buf);
-	} else if (state->not_new)
+	} else if (!fast_path && state->not_new)
 		return 0;
 
 	create_directories(path.buf, path.len, state);
@@ -718,12 +749,22 @@ int checkout_entry_ca(struct cache_entry *ce, struct conv_attrs *ca,
 		ca = &ca_buf;
 	}
 
-	source_ce = copy_source_entry(ce, ca, state);
+	if (!source_ce)
+		source_ce = copy_source_entry(ce, ca, state);
 	if (!source_ce && !enqueue_checkout(ce, ca, nr_checkouts))
 		return 0;
 
-	return write_entry(ce, path.buf, ca, source_ce, state, 0,
-			   nr_checkouts);
+	ret = write_entry(ce, path.buf, ca, source_ce, write_state, 0,
+			  nr_checkouts);
+	if (ret == -2 && fast_path) {
+		/* Resolve any failed create with the original path checks. */
+		fast_path = 0;
+		slow_state = *state;
+		slow_state.fresh_worktree = 0;
+		write_state = &slow_state;
+		goto slow_path;
+	}
+	return ret;
 }
 
 void unlink_entry(const struct cache_entry *ce, const char *super_prefix)

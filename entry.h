@@ -10,6 +10,7 @@ struct checkout_copy_source {
 	struct index_state *istate;
 	const char *worktree;
 	uint64_t refreshed_at;
+	int fresh_worktree;
 };
 
 struct checkout {
@@ -24,7 +25,8 @@ struct checkout {
 		 quiet:1,
 		 not_new:1,
 		 clone:1,
-		 refresh_cache:1;
+		 refresh_cache:1,
+		 fresh_worktree:1;
 };
 #define CHECKOUT_INIT { .base_dir = "" }
 

@@ -1656,6 +1656,42 @@ failed:
 	return -1;
 }
 
+int mingw_create_file_nofollow(const char *path, unsigned int mode)
+{
+	wchar_t wpath[MAX_LONG_PATH];
+	HANDLE handle;
+	int fd;
+
+	if (!is_valid_win32_path(path, 0)) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (xutftowcs_long_path(wpath, path) < 0)
+		return -1;
+	/* CREATE_NEW must reject even a dangling reparse point. */
+	handle = CreateFileW(wpath, GENERIC_WRITE,
+			     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+			     NULL, CREATE_NEW,
+			     FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+			     NULL);
+	if (handle == INVALID_HANDLE_VALUE) {
+		errno = err_win_to_posix(GetLastError());
+		return -1;
+	}
+	fd = _open_osfhandle((intptr_t)handle, O_WRONLY | O_BINARY);
+	if (fd < 0) {
+		CloseHandle(handle);
+		return -1;
+	}
+	if (are_wsl_compatible_mode_bits_enabled()) {
+		_mode_t wsl_mode = S_IFREG | (mode & 0777);
+		set_wsl_mode_bits_by_handle((HANDLE)_get_osfhandle(fd), wsl_mode);
+	}
+	if (needs_hiding(path) && set_hidden_flag(wpath, 1))
+		warning("could not mark '%s' as hidden.", path);
+	return fd;
+}
+
 int mingw_stat(const char *file_name, struct stat *buf)
 {
 	wchar_t wfile_name[MAX_LONG_PATH];
