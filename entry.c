@@ -2,6 +2,7 @@
 
 #include "git-compat-util.h"
 #include "odb.h"
+#include "object-file.h"
 #include "odb/streaming.h"
 #include "dir.h"
 #include "environment.h"
@@ -147,6 +148,8 @@ static int conversion_attrs_equal(const struct conv_attrs *a,
 		 !strcmp(a->working_tree_encoding, b->working_tree_encoding));
 }
 
+#define COPY_ON_WRITE_MIN_BYTES (160 * 1024)
+
 static struct cache_entry *copy_source_entry(const struct cache_entry *ce,
 					     const struct conv_attrs *ca,
 					     const struct checkout *state)
@@ -158,7 +161,7 @@ static struct cache_entry *copy_source_entry(const struct cache_entry *ce,
 
 	if (!state->copy_source || !ca || !S_ISREG(ce->ce_mode) ||
 	    ca->drv || ca->ident || ca->working_tree_encoding ||
-	    ca->crlf_action != CRLF_BINARY)
+	    (ca->crlf_action != CRLF_BINARY && auto_crlf != AUTO_CRLF_FALSE))
 		return NULL;
 
 	istate = state->copy_source->istate;
@@ -167,6 +170,7 @@ static struct cache_entry *copy_source_entry(const struct cache_entry *ce,
 		return NULL;
 	source = istate->cache[pos];
 	if (!S_ISREG(source->ce_mode) || ce_skip_worktree(source) ||
+	    source->ce_stat_data.sd_size <= COPY_ON_WRITE_MIN_BYTES ||
 	    !oideq(&source->oid, &ce->oid))
 		return NULL;
 	convert_attrs(istate, &source_ca, ce->name);
@@ -188,8 +192,79 @@ static int source_is_uptodate(const struct checkout_copy_source *source,
 	return mtime < source->refreshed_at;
 }
 
+/* Verify only clone candidates instead of refreshing the entire source index.
+ * Matching non-racy stat data is the index's clean-file guarantee; racy files
+ * require an object hash. EOL conversion must also reproduce the exact bytes. */
+static int clone_source_matches(int fd, off_t source_size,
+				const struct cache_entry *ce,
+				const struct conv_attrs *ca,
+				const struct checkout *state)
+{
+	struct strbuf raw = STRBUF_INIT, normalized = STRBUF_INIT;
+	struct strbuf checkout = STRBUF_INIT;
+	struct object_id oid;
+	struct object_info oi = OBJECT_INFO_INIT;
+	enum object_type type;
+	size_t blob_size, len;
+	const char *data;
+	int racy = is_racy_timestamp(state->copy_source->istate, ce);
+	int have_size = 0, matches = 0;
+
+	if (ca->crlf_action == CRLF_BINARY && !racy)
+		return 1;
+	if (!racy) {
+		oi.typep = &type;
+		oi.sizep = &blob_size;
+		have_size = !odb_read_object_info_extended(the_repository->objects,
+			&ce->oid, &oi, OBJECT_INFO_LOOKUP_REPLACE |
+			OBJECT_INFO_SKIP_FETCH_OBJECT) && type == OBJ_BLOB;
+		/* LF checkout does not expand data, and clean EOL normalization
+		 * only shrinks it. Equal sizes therefore prove identity. */
+		if (have_size && (ca->crlf_action == CRLF_TEXT_INPUT ||
+		    ca->crlf_action == CRLF_AUTO_INPUT ||
+		    (ca->crlf_action == CRLF_AUTO && core_eol == EOL_LF)))
+			return blob_size == source_size;
+	}
+	if (strbuf_read(&raw, fd, source_size) < 0)
+		goto done;
+	data = raw.buf;
+	len = raw.len;
+	if (racy || !have_size) {
+		hash_object_file(the_repository->hash_algo, data, len, OBJ_BLOB, &oid);
+		if (oideq(&oid, &ce->oid))
+			goto checkout;
+	}
+	if (ca->crlf_action != CRLF_BINARY &&
+	    (!have_size || len != blob_size || racy) &&
+	    convert_to_git(state->copy_source->istate, ce->name,
+			   raw.buf, raw.len, &normalized, CONV_EOL_RENORMALIZE)) {
+		data = normalized.buf;
+		len = normalized.len;
+	} else if (racy || !have_size) {
+		goto done;
+	}
+	if (racy || !have_size) {
+		hash_object_file(the_repository->hash_algo, data, len, OBJ_BLOB, &oid);
+		if (!oideq(&oid, &ce->oid))
+			goto done;
+	} else if (len != blob_size) {
+		goto done;
+	}
+checkout:
+	if (convert_to_working_tree_ca(ca, ce->name, data, len, &checkout, NULL)) {
+		data = checkout.buf;
+		len = checkout.len;
+	}
+	matches = len == raw.len && !memcmp(data, raw.buf, len);
+done:
+	strbuf_release(&checkout);
+	strbuf_release(&normalized);
+	strbuf_release(&raw);
+	return matches;
+}
 static int try_copy_on_write(const struct cache_entry *ce,
 			     const struct cache_entry *source_ce, char *path,
+			     const struct conv_attrs *ca,
 			     const struct checkout *state,
 			     int *fstat_done, struct stat *statbuf)
 {
@@ -204,7 +279,9 @@ static int try_copy_on_write(const struct cache_entry *ce,
 	strbuf_addf(&source, "%s/%s", state->copy_source->worktree, ce->name);
 	src_fd = open_nofollow_stat(source.buf, &st);
 	if (src_fd < 0 || !S_ISREG(st.st_mode) ||
-	    !source_is_uptodate(state->copy_source, source_ce, &st))
+	    st.st_size <= COPY_ON_WRITE_MIN_BYTES ||
+	    !source_is_uptodate(state->copy_source, source_ce, &st) ||
+	    !clone_source_matches(src_fd, st.st_size, source_ce, ca, state))
 		goto done;
 
 	dst_fd = open_output_fd(path, ce, state, 0);
@@ -434,7 +511,7 @@ static int write_entry(struct cache_entry *ce, char *path, struct conv_attrs *ca
 		struct stream_filter *filter;
 
 		if (source_ce) {
-			int cloned = try_copy_on_write(ce, source_ce, path, state,
+			int cloned = try_copy_on_write(ce, source_ce, path, ca, state,
 						     &fstat_done, &st);
 			if (cloned < 0)
 				return -2; /* retry after checking a collision */
@@ -636,7 +713,7 @@ int checkout_entry_ca(struct cache_entry *ce, struct conv_attrs *ca,
 	struct cache_entry *source_ce = NULL;
 	struct checkout slow_state;
 	const struct checkout *write_state = state;
-	int fast_path = 0, ret;
+	int fast_path = 0, source_checked = 0, ret;
 
 	if (ce->ce_flags & CE_WT_REMOVE) {
 		if (topath)
@@ -668,7 +745,9 @@ int checkout_entry_ca(struct cache_entry *ce, struct conv_attrs *ca,
 			ca = &ca_buf;
 		}
 		source_ce = copy_source_entry(ce, ca, state);
-		fast_path = !!source_ce;
+		source_checked = 1;
+		fast_path = source_ce || (!ca->drv && state->force &&
+			!state->not_new && parallel_checkout_status() != PC_RUNNING);
 	}
 
 slow_path:
@@ -749,7 +828,7 @@ slow_path:
 		ca = &ca_buf;
 	}
 
-	if (!source_ce)
+	if (!source_checked)
 		source_ce = copy_source_entry(ce, ca, state);
 	if (!source_ce && !enqueue_checkout(ce, ca, nr_checkouts))
 		return 0;
