@@ -280,6 +280,8 @@ char *git_shell_path(void)
 	return xstrdup(SHELL_PATH);
 #else
 	char *p = locate_in_PATH("sh");
+	if (!p)
+		die(_("cannot find 'sh' in PATH"));
 	convert_slashes(p);
 	return p;
 #endif
