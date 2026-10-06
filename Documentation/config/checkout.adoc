@@ -24,11 +24,11 @@ commands or functionality in the future.
 
 `checkout.workers`::
 	The number of parallel workers to use when updating the working tree.
-	The default is one, i.e. sequential execution. If set to a value less
-	than one, Git will use as many workers as the number of logical cores
-	available. This setting and `checkout.thresholdForParallelism` affect
-	all commands that perform checkout. E.g. checkout, clone, reset,
-	sparse-checkout, etc.
+	The default is one, i.e. sequential execution, except on Windows,
+	where it is four. If set to a value less than one, Git will use as
+	many workers as the number of logical cores available. This setting
+	and `checkout.thresholdForParallelism` affect all commands that
+	perform checkout. E.g. checkout, clone, reset, sparse-checkout, etc.
 +
 On Windows the number of workers is capped at 62, because the `poll()`
 emulation cannot wait on more worker pipes than that. A higher configured
@@ -46,4 +46,4 @@ well the parallel version performs.
 	of subprocess spawning and inter-process communication might outweigh
 	the parallelization gains. This setting allows you to define the minimum
 	number of files for which parallel checkout should be attempted. The
-	default is 100.
+	default is 100 (500 on Windows).

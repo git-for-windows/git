@@ -38,8 +38,16 @@ enum pc_status parallel_checkout_status(void)
 	return parallel_checkout.status;
 }
 
-static const int DEFAULT_THRESHOLD_FOR_PARALLELISM = 100;
-static const int DEFAULT_NUM_WORKERS = 1;
+#ifndef PARALLEL_CHECKOUT_DEFAULT_THRESHOLD
+#define PARALLEL_CHECKOUT_DEFAULT_THRESHOLD 100
+#endif
+
+#ifndef PARALLEL_CHECKOUT_DEFAULT_WORKERS
+#define PARALLEL_CHECKOUT_DEFAULT_WORKERS 1
+#endif
+
+static const int DEFAULT_THRESHOLD_FOR_PARALLELISM = PARALLEL_CHECKOUT_DEFAULT_THRESHOLD;
+static const int DEFAULT_NUM_WORKERS = PARALLEL_CHECKOUT_DEFAULT_WORKERS;
 
 void get_parallel_checkout_configs(int *num_workers, int *threshold)
 {

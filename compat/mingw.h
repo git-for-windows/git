@@ -87,6 +87,15 @@ int is_valid_win32_path(const char *path, int allow_literal_nul);
  */
 #define MAX_LONG_PATH 4096
 
+/*
+ * Replacing a file in the worktree (unlink, create, write, close) costs
+ * a few hundred microseconds on Windows, and parallel checkout overlaps
+ * that cost well. Starting a worker costs tens of milliseconds, though,
+ * so only use workers for checkouts that touch at least 500 files.
+ */
+#define PARALLEL_CHECKOUT_DEFAULT_WORKERS 4
+#define PARALLEL_CHECKOUT_DEFAULT_THRESHOLD 500
+
 /**
  * Handles paths that would exceed the MAX_PATH limit of Windows Unicode APIs.
  *
