@@ -437,6 +437,7 @@ static int check_updates(struct unpack_trees_options *o,
 	state.quiet = 1;
 	state.refresh_cache = 1;
 	state.istate = index;
+	state.copy_source = o->copy_source;
 	clone_checkout_metadata(&state.meta, &o->meta, NULL);
 
 	if (!o->update || o->dry_run) {
