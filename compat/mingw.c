@@ -33,8 +33,176 @@
 #include <winternl.h>
 
 #define STATUS_DELETE_PENDING ((NTSTATUS) 0xC0000056)
-
 #define HCAST(type, handle) ((type)(intptr_t)handle)
+
+static int set_copy_on_write_file_size(HANDLE handle, off_t size)
+{
+	FILE_END_OF_FILE_INFO end;
+
+	end.EndOfFile.QuadPart = size;
+	if (!SetFileInformationByHandle(handle, FileEndOfFileInfo,
+					&end, sizeof(end))) {
+		errno = err_win_to_posix(GetLastError());
+		return -1;
+	}
+	return 0;
+}
+
+/* Zero means unprobed; -1 disables cloning for this process. */
+static int copy_on_write_alignments[256];
+/* Re-resolve relative paths after mingw_chdir(). */
+static int copy_on_write_current_drive = -2;
+
+static int copy_on_write_drive(const char *path)
+{
+	int drive;
+
+	if (is_dir_sep(path[0]) && is_dir_sep(path[1]) &&
+	    (path[2] == '?' || path[2] == '.') && is_dir_sep(path[3]))
+		path += 4;
+	if (has_dos_drive_prefix(path)) {
+		drive = tolower((unsigned char)path[0]) - 'a';
+		return drive >= 0 && drive < 26 ? drive : -1;
+	}
+	/* UNC paths have no drive entry in this conservative cache. */
+	if (is_dir_sep(path[0]) && is_dir_sep(path[1]))
+		return -1;
+	return copy_on_write_current_drive;
+}
+
+static int resolve_copy_on_write_current_drive(void)
+{
+	WCHAR cwd[MAX_LONG_PATH];
+	const WCHAR *current = cwd;
+	DWORD length;
+	int drive;
+
+	length = GetCurrentDirectoryW(ARRAY_SIZE(cwd), cwd);
+	if (!length || length >= ARRAY_SIZE(cwd))
+		return copy_on_write_current_drive = -1;
+	if (length > 5 && cwd[0] == L'\\' && cwd[1] == L'\\' &&
+	    (cwd[2] == L'?' || cwd[2] == L'.') && cwd[3] == L'\\')
+		current += 4;
+	drive = current[1] == L':' ? towlower(current[0]) - L'a' : -1;
+	copy_on_write_current_drive = drive >= 0 && drive < 26 ? drive : -1;
+	return copy_on_write_current_drive;
+}
+
+static int resolve_copy_on_write_drive(const char *path)
+{
+	int drive = copy_on_write_drive(path);
+
+	return drive == -2 ? resolve_copy_on_write_current_drive() : drive;
+}
+
+static void set_copy_on_write_alignment(int drive, int alignment)
+{
+	copy_on_write_alignments['A' + drive] = alignment;
+	copy_on_write_alignments['a' + drive] = alignment;
+}
+
+static int probe_copy_on_write_alignment(int drive)
+{
+	WCHAR root[] = L"A:\\", filesystem[16];
+	DWORD sectors, bytes, free_clusters, clusters;
+
+	root[0] += drive;
+	if (!GetVolumeInformationW(root, NULL, 0, NULL, NULL, NULL,
+				  filesystem, ARRAY_SIZE(filesystem)) ||
+	    wcscmp(filesystem, L"ReFS") ||
+	    !GetDiskFreeSpaceW(root, &sectors, &bytes, &free_clusters,
+			      &clusters) ||
+	    !sectors || !bytes || sectors > 65536 / bytes)
+		return -1;
+	/* Only the cluster size is used; free-space results are ignored. */
+	return sectors * bytes == 4096 || sectors * bytes == 65536 ?
+		sectors * bytes : -1;
+}
+
+static int prepare_copy_on_write_alignment(const char *path)
+{
+	int drive, alignment;
+
+	/* A cached drive-letter path needs no parsing or case conversion. */
+	if (path[0] && path[1] == ':' &&
+	    (alignment = copy_on_write_alignments[(unsigned char)path[0]]))
+		return alignment;
+	drive = resolve_copy_on_write_drive(path);
+	if (drive < 0)
+		return -1;
+	alignment = copy_on_write_alignments['A' + drive];
+	if (alignment)
+		return alignment;
+	alignment = probe_copy_on_write_alignment(drive);
+	set_copy_on_write_alignment(drive, alignment);
+	trace2_data_intmax("checkout", NULL, "copy_on_write_alignment",
+			  alignment);
+	return alignment;
+}
+
+int mingw_copy_on_write_supported(const char *path)
+{
+	return prepare_copy_on_write_alignment(path) > 0;
+}
+
+int mingw_file_copy_on_write(int dst_fd, int src_fd, off_t size,
+			    const char *path)
+{
+	DUPLICATE_EXTENTS_DATA data = {
+		.FileHandle = HCAST(HANDLE, _get_osfhandle(src_fd)),
+	};
+	HANDLE dst = HCAST(HANDLE, _get_osfhandle(dst_fd));
+	int drive, alignment = prepare_copy_on_write_alignment(path);
+	LONGLONG max_range;
+	DWORD bytes_returned;
+	int saved_errno;
+
+	if (alignment < 0) {
+		errno = ENOSYS;
+		return -1;
+	}
+	/* Ranges must be cluster-aligned and smaller than 4 GiB. */
+	max_range = (4LL * 1024 * 1024 * 1024) - alignment;
+	if (set_copy_on_write_file_size(dst, size) < 0)
+		goto failed;
+	if (!size)
+		return 0;
+
+	while (data.SourceFileOffset.QuadPart + max_range < size) {
+		data.ByteCount.QuadPart = max_range;
+		if (!DeviceIoControl(dst, FSCTL_DUPLICATE_EXTENTS_TO_FILE,
+				     &data, sizeof(data), NULL, 0,
+				     &bytes_returned, NULL)) {
+			errno = ENOSYS;
+			goto failed;
+		}
+		data.SourceFileOffset.QuadPart += data.ByteCount.QuadPart;
+		data.TargetFileOffset = data.SourceFileOffset;
+	}
+
+	data.ByteCount.QuadPart =
+		DIV_ROUND_UP(size - data.SourceFileOffset.QuadPart, alignment) *
+		alignment;
+	if (!DeviceIoControl(dst, FSCTL_DUPLICATE_EXTENTS_TO_FILE,
+			    &data, sizeof(data), NULL, 0,
+			    &bytes_returned, NULL)) {
+		errno = ENOSYS;
+		goto failed;
+	}
+	return 0;
+
+failed:
+	/* A file-specific failure also disables later volume attempts. */
+	saved_errno = errno;
+	drive = resolve_copy_on_write_drive(path);
+	if (drive >= 0) {
+		set_copy_on_write_alignment(drive, -1);
+		trace2_data_intmax("checkout", NULL,
+				      "copy_on_write_disabled", drive);
+	}
+	errno = saved_errno;
+	return -1;
+}
 
 void open_in_gdb(void)
 {
@@ -1210,6 +1378,7 @@ int mingw_chdir(const char *dirname)
 	}
 
 	result = _wchdir(normalize_ntpath(wdirname));
+	copy_on_write_current_drive = -2;
 	current_directory_len = GetCurrentDirectoryW(0, NULL);
 	return result;
 }
@@ -1421,6 +1590,25 @@ int mingw_lstat(const char *file_name, struct stat *buf)
 
 int (*lstat)(const char *file_name, struct stat *buf) = mingw_lstat;
 
+static void fill_stat_from_file_info(HANDLE hnd,
+				     const BY_HANDLE_FILE_INFORMATION *fdata,
+				     struct stat *buf)
+{
+	buf->st_ino = 0;
+	buf->st_gid = 0;
+	buf->st_uid = 0;
+	buf->st_nlink = 1;
+	buf->st_mode = file_attr_to_st_mode(fdata->dwFileAttributes, 0, NULL);
+	buf->st_size = fdata->nFileSizeLow |
+		(((off_t)fdata->nFileSizeHigh)<<32);
+	buf->st_dev = buf->st_rdev = 0; /* not used by Git */
+	filetime_to_timespec(&(fdata->ftLastAccessTime), &(buf->st_atim));
+	filetime_to_timespec(&(fdata->ftLastWriteTime), &(buf->st_mtim));
+	filetime_to_timespec(&(fdata->ftCreationTime), &(buf->st_ctim));
+	if (are_wsl_compatible_mode_bits_enabled())
+	    get_wsl_mode_bits_by_handle(hnd, &buf->st_mode);
+}
+
 static int get_file_info_by_handle(HANDLE hnd, struct stat *buf)
 {
 	BY_HANDLE_FILE_INFORMATION fdata;
@@ -1429,21 +1617,83 @@ static int get_file_info_by_handle(HANDLE hnd, struct stat *buf)
 		errno = err_win_to_posix(GetLastError());
 		return -1;
 	}
-
-	buf->st_ino = 0;
-	buf->st_gid = 0;
-	buf->st_uid = 0;
-	buf->st_nlink = 1;
-	buf->st_mode = file_attr_to_st_mode(fdata.dwFileAttributes, 0, NULL);
-	buf->st_size = fdata.nFileSizeLow |
-		(((off_t)fdata.nFileSizeHigh)<<32);
-	buf->st_dev = buf->st_rdev = 0; /* not used by Git */
-	filetime_to_timespec(&(fdata.ftLastAccessTime), &(buf->st_atim));
-	filetime_to_timespec(&(fdata.ftLastWriteTime), &(buf->st_mtim));
-	filetime_to_timespec(&(fdata.ftCreationTime), &(buf->st_ctim));
-	if (are_wsl_compatible_mode_bits_enabled())
-	    get_wsl_mode_bits_by_handle(hnd, &buf->st_mode);
+	fill_stat_from_file_info(hnd, &fdata, buf);
 	return 0;
+}
+
+int mingw_open_nofollow_stat(const char *path, struct stat *st)
+{
+	wchar_t wpath[MAX_LONG_PATH];
+	BY_HANDLE_FILE_INFORMATION info;
+	HANDLE handle;
+	int fd;
+
+	if (!is_valid_win32_path(path, 0)) {
+		errno = ENOENT;
+		return -1;
+	}
+	if (xutftowcs_long_path(wpath, path) < 0)
+		return -1;
+	/* Inspect the opened object so replacement of the path cannot fool us. */
+	handle = CreateFileW(wpath, GENERIC_READ,
+			     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+			     NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT,
+			     NULL);
+	if (handle == INVALID_HANDLE_VALUE) {
+		errno = err_win_to_posix(GetLastError());
+		return -1;
+	}
+	if (!GetFileInformationByHandle(handle, &info)) {
+		errno = err_win_to_posix(GetLastError());
+		goto failed;
+	}
+	if (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+		errno = ELOOP;
+		goto failed;
+	}
+	fill_stat_from_file_info(handle, &info, st);
+	fd = _open_osfhandle((intptr_t)handle, O_RDONLY | O_BINARY);
+	if (fd >= 0)
+		return fd;
+failed:
+	CloseHandle(handle);
+	return -1;
+}
+
+int mingw_create_file_nofollow(const char *path, unsigned int mode)
+{
+	wchar_t wpath[MAX_LONG_PATH];
+	HANDLE handle;
+	int fd;
+
+	if (!is_valid_win32_path(path, 0)) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (xutftowcs_long_path(wpath, path) < 0)
+		return -1;
+	/* CREATE_NEW must reject even a dangling reparse point. */
+	handle = CreateFileW(wpath, GENERIC_WRITE,
+			     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+			     NULL, CREATE_NEW,
+			     FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+			     NULL);
+	if (handle == INVALID_HANDLE_VALUE) {
+		errno = err_win_to_posix(GetLastError());
+		return -1;
+	}
+	fd = _open_osfhandle((intptr_t)handle, O_WRONLY | O_BINARY);
+	if (fd < 0) {
+		CloseHandle(handle);
+		return -1;
+	}
+	if (are_wsl_compatible_mode_bits_enabled()) {
+		_mode_t wsl_mode = S_IFREG | (mode & 0777);
+		set_wsl_mode_bits_by_handle((HANDLE)_get_osfhandle(fd), wsl_mode);
+	}
+	if (needs_hiding(path) && set_hidden_flag(wpath, 1))
+		warning("could not mark '%s' as hidden.", path);
+	return fd;
 }
 
 int mingw_stat(const char *file_name, struct stat *buf)

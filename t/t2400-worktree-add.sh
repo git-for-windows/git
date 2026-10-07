@@ -5,10 +5,100 @@ test_description='test git worktree add'
 GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME=main
 export GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME
 
+GIT_TRACE2_EVENT_NESTING=10
+export GIT_TRACE2_EVENT_NESTING
+
 TEST_CREATE_REPO_NO_TEMPLATE=1
 . ./test-lib.sh
 
 . "$TEST_DIRECTORY"/lib-rebase.sh
+
+test_lazy_prereq COPY_ON_WRITE '
+	test-tool genzeros 65536 >copy-source &&
+	test-tool copy-on-write copy-source copy-target &&
+	test_cmp copy-source copy-target &&
+	rm copy-source copy-target
+'
+
+test_expect_success COPY_ON_WRITE 'copy-on-write preserves sizes and source' '
+	test_when_finished "rm -f size-source size-target size-expect" &&
+	for size in 0 1 4095 4096 4097 65535 65536 65537 1048577
+	do
+		test-tool genrandom clone-size $size >size-source &&
+		cp size-source size-expect &&
+		test-tool copy-on-write size-source size-target &&
+		test_cmp size-source size-target &&
+		echo changed >>size-target &&
+		test_cmp size-expect size-source &&
+		rm size-target || return 1
+	done
+'
+
+test_expect_success MINGW,SYMLINKS,COPY_ON_WRITE 'source open rejects symlinks' '
+	test_when_finished "rm -f clone-regular clone-link" &&
+	echo content >clone-regular &&
+	ln -s clone-regular clone-link &&
+	test-tool copy-on-write --open-nofollow-stat clone-regular &&
+	test_must_fail test-tool copy-on-write --open-nofollow-stat clone-link
+'
+
+test_expect_success MINGW 'exclusive nofollow creation rejects existing files' '
+	test_when_finished "rm -f exclusive-target" &&
+	test-tool copy-on-write --create-nofollow exclusive-target &&
+	test_must_fail test-tool copy-on-write --create-nofollow exclusive-target
+'
+
+test_expect_success MINGW,SYMLINKS 'exclusive creation rejects dangling symlinks' '
+	test_when_finished "rm -f exclusive-link exclusive-missing" &&
+	ln -s exclusive-missing exclusive-link &&
+	test_must_fail test-tool copy-on-write --create-nofollow exclusive-link &&
+	test_path_is_missing exclusive-missing
+'
+
+test_expect_success MINGW,COPY_ON_WRITE 'clone alignment is cached' '
+	test_when_finished "rm -f cache-source cache-one cache-two" &&
+	test-tool genrandom clone-cache 102400 >cache-source &&
+	GIT_TRACE2_EVENT="$PWD/alignment-trace" \
+		test-tool copy-on-write --batch cache-source cache-one \
+		cache-source cache-two &&
+	test_cmp cache-source cache-one &&
+	test_cmp cache-source cache-two &&
+	grep "\"key\":\"copy_on_write_alignment\"" alignment-trace \
+		>alignment-events &&
+	test_line_count = 1 alignment-events &&
+	test_grep ! "\"key\":\"copy_on_write_disabled\"" alignment-trace
+'
+
+test_expect_success MINGW,COPY_ON_WRITE 'drive-letter cache accepts both cases' '
+	drive=$(cygpath -m "$PWD" | cut -c1) &&
+	upper=$(printf %s "$drive" | tr "[:lower:]" "[:upper:]") &&
+	lower=$(printf %s "$drive" | tr "[:upper:]" "[:lower:]") &&
+	GIT_TRACE2_EVENT="$PWD/case-trace" \
+		test-tool copy-on-write --probe-path \
+		"$upper:/clone-probe" 1 "$lower:/clone-probe" 1 &&
+	grep "\"key\":\"copy_on_write_alignment\"" case-trace \
+		>case-events &&
+	test_line_count = 1 case-events
+'
+
+test_expect_success MINGW,COPY_ON_WRITE 'clone failure disables drive cache' '
+	test_when_finished "rm -f cache-source cache-target cache-expect" &&
+	test-tool genrandom clone-failure 65536 >cache-source &&
+	cp cache-source cache-expect &&
+	GIT_TRACE2_EVENT="$PWD/failure-trace" \
+		test-tool copy-on-write --fail-cache cache-source \
+		cache-target &&
+	test_path_is_missing cache-target &&
+	test_cmp cache-expect cache-source &&
+	test_grep "\"key\":\"copy_on_write_disabled\"" failure-trace
+'
+
+test_expect_success MINGW,COPY_ON_WRITE 'drive cache follows chdir' '
+	test_when_finished "rm -rf cache-dir-one cache-dir-two" &&
+	mkdir cache-dir-one cache-dir-two &&
+	test-tool copy-on-write --probe-cwd "$PWD/cache-dir-one" 1 \
+		"$PWD/cache-dir-two" 1
+'
 
 test_expect_success 'setup' '
 	test_commit init
@@ -69,6 +159,198 @@ test_expect_success '"add" worktree' '
 		test_cmp ../expect actual &&
 		git fsck
 	)
+'
+
+test_expect_success COPY_ON_WRITE 'worktree add uses copy-on-write' '
+	old_head=$(git rev-parse HEAD) &&
+	test_when_finished "git reset --hard $old_head" &&
+	test_when_finished "git worktree remove --force copy-on-write" &&
+	echo "*.crlf text eol=crlf" >.gitattributes &&
+	test-tool genrandom clone-above-threshold 163841 >clean &&
+	test-tool genrandom clone-at-threshold 163840 >boundary &&
+	echo clean >clean.crlf &&
+	echo clean >modified.crlf &&
+	echo clean >unconverted.crlf &&
+	git add .gitattributes clean boundary clean.crlf modified.crlf unconverted.crlf &&
+	git commit -m "copy-on-write test files" &&
+	rm clean.crlf modified.crlf &&
+	git checkout -- clean.crlf modified.crlf &&
+	echo modified >init.t &&
+	echo modified >modified.crlf &&
+	GIT_TRACE2_EVENT="$PWD/trace" \
+		git worktree add --detach copy-on-write main &&
+	test_grep "\"key\":\"copy_on_write\",\"value\":\"clean\"" trace &&
+	test_grep ! "\"key\":\"copy_on_write\",\"value\":\"boundary\"" trace &&
+	test_grep ! "\"key\":\"copy_on_write\",\"value\":\"clean.crlf\"" trace &&
+	test_grep ! "\"key\":\"copy_on_write\",\"value\":\"unconverted.crlf\"" trace &&
+	test_grep ! "\"value\":\"init.t\"" trace &&
+	test_grep ! "\"value\":\"modified.crlf\"" trace &&
+	git -C copy-on-write diff --exit-code &&
+	printf "clean\r\n" >expect-crlf &&
+	test_cmp expect-crlf copy-on-write/clean.crlf &&
+	test_cmp expect-crlf copy-on-write/unconverted.crlf
+'
+
+test_expect_success COPY_ON_WRITE 'autocrlf=false clones only the exact checkout representation' '
+	test_create_repo eol-source &&
+	(
+		cd eol-source &&
+		git config core.autocrlf false &&
+		git config core.eol lf &&
+		echo "* text=auto" >.gitattributes &&
+		awk "BEGIN { for (i = 0; i < 20000; i++) print \"line endings\" }" >text &&
+		git add .gitattributes text &&
+		git commit -m "large automatic text" &&
+		cp text ../expected-lf &&
+		awk "{ printf \"%s\\r\\n\", \$0 }" ../expected-lf >../expected-crlf &&
+		for eol in lf crlf
+		do
+			git config core.eol "$eol" &&
+			cp ../expected-$eol text &&
+			git add text &&
+			git diff --cached --exit-code &&
+			rm -f ../eol-trace &&
+			GIT_TRACE2_EVENT="$PWD/../eol-trace" \
+				git worktree add --detach ../eol-clone HEAD &&
+			test_grep "\"key\":\"copy_on_write\",\"value\":\"text\"" ../eol-trace &&
+			test_cmp_bin ../expected-$eol ../eol-clone/text &&
+			git -C ../eol-clone diff --exit-code &&
+			git worktree remove --force ../eol-clone || return 1
+		done &&
+		for eol in lf crlf
+		do
+			git config core.eol "$eol" &&
+			if test "$eol" = lf; then other=crlf; else other=lf; fi &&
+			cp ../expected-$other text &&
+			git add text &&
+			git diff --cached --exit-code &&
+			rm -f ../eol-trace &&
+			GIT_TRACE2_EVENT="$PWD/../eol-trace" \
+				git worktree add --detach ../eol-clone HEAD &&
+			test_grep ! "\"key\":\"copy_on_write\",\"value\":\"text\"" ../eol-trace &&
+			test_cmp_bin ../expected-$eol ../eol-clone/text &&
+			git -C ../eol-clone diff --exit-code &&
+			git worktree remove --force ../eol-clone || return 1
+		done
+	)
+'
+test_expect_success COPY_ON_WRITE 'racy clone candidates are checked by content' '
+	test_create_repo racy-source &&
+	(
+		cd racy-source &&
+		git config core.autocrlf false &&
+		git config core.trustctime false &&
+		git config core.checkstat minimal &&
+		echo "* -text" >.gitattributes &&
+		test-tool genrandom racy-original 163841 >binary &&
+		test-tool chmtime =-10 binary &&
+		mtime=$(test-tool chmtime --get binary) &&
+		cp binary ../expected-binary &&
+		git add .gitattributes binary &&
+		git commit -m "racy binary candidate" &&
+		test-tool chmtime "=$((mtime - 1))" .git/index &&
+		GIT_TRACE2_EVENT="$PWD/../racy-clean-trace" \
+			git worktree add --detach ../racy-clone HEAD &&
+		test_grep "\"key\":\"copy_on_write\",\"value\":\"binary\"" ../racy-clean-trace &&
+		test_cmp_bin ../expected-binary ../racy-clone/binary &&
+		git worktree remove --force ../racy-clone &&
+		test-tool genrandom racy-modified 163841 >binary &&
+		test-tool chmtime "=$mtime" binary &&
+		GIT_TRACE2_EVENT="$PWD/../racy-dirty-trace" \
+			git worktree add --detach ../racy-clone HEAD &&
+		test_grep ! "\"key\":\"copy_on_write\",\"value\":\"binary\"" ../racy-dirty-trace &&
+		test_cmp_bin ../expected-binary ../racy-clone/binary &&
+		git -C ../racy-clone diff --exit-code &&
+		git worktree remove --force ../racy-clone
+	)
+'
+test_expect_success COPY_ON_WRITE 'explicit CRLF overrides core.eol=lf with autocrlf=false' '
+	test_create_repo explicit-eol-source &&
+	(
+		cd explicit-eol-source &&
+		git config core.autocrlf false &&
+		git config core.eol lf &&
+		echo "* text eol=crlf" >.gitattributes &&
+		awk "BEGIN { for (i = 0; i < 20000; i++) print \"line endings\" }" >text &&
+		cp text ../explicit-lf &&
+		awk "{ printf \"%s\\r\\n\", \$0 }" text >../explicit-crlf &&
+		git add .gitattributes text &&
+		git commit -m "explicit CRLF text" &&
+		for eol in lf crlf
+		do
+			cp ../explicit-$eol text &&
+			git add text &&
+			git diff --cached --exit-code &&
+			rm -f ../explicit-trace &&
+			GIT_TRACE2_EVENT="$PWD/../explicit-trace" \
+				git worktree add --detach ../explicit-clone HEAD &&
+			if test "$eol" = crlf
+			then
+				test_grep "\"key\":\"copy_on_write\",\"value\":\"text\"" ../explicit-trace
+			else
+				test_grep ! "\"key\":\"copy_on_write\",\"value\":\"text\"" ../explicit-trace
+			fi &&
+			test_cmp_bin ../explicit-crlf ../explicit-clone/text &&
+			git -C ../explicit-clone diff --exit-code &&
+			git worktree remove --force ../explicit-clone || return 1
+		done
+	)
+'
+
+test_expect_success COPY_ON_WRITE 'automatic text preserves legacy CRLF blobs' '
+	test_create_repo legacy-eol-source &&
+	(
+		cd legacy-eol-source &&
+		git config core.autocrlf false &&
+		echo "* text=auto" >.gitattributes &&
+		awk "BEGIN { for (i = 0; i < 20000; i++) printf \"line endings\\r\\n\" }" >text &&
+		test-tool chmtime =-10 text &&
+		git add .gitattributes &&
+		oid=$(git hash-object -w --no-filters text) &&
+		git update-index --add --cacheinfo "100644,$oid,text" &&
+		git commit -m "legacy CRLF blob" &&
+		git update-index --refresh &&
+		for eol in lf crlf
+		do
+			git config core.eol "$eol" &&
+			rm -f ../legacy-trace &&
+			GIT_TRACE2_EVENT="$PWD/../legacy-trace" \
+				git worktree add --detach ../legacy-clone HEAD &&
+			test_grep "\"key\":\"copy_on_write\",\"value\":\"text\"" ../legacy-trace &&
+			test_cmp_bin text ../legacy-clone/text &&
+			git -C ../legacy-clone diff --exit-code &&
+			git worktree remove --force ../legacy-clone || return 1
+		done
+	)
+'
+test_expect_success MINGW 'fresh worktree resolves a collision after a filtered file' '
+	test_create_repo collision-source &&
+	(
+		cd collision-source &&
+		git config core.autocrlf false &&
+		git config core.ignorecase false &&
+		git config core.fscache true &&
+		git config filter.case.smudge cat &&
+		echo "folder/Case.filtered filter=case" >.gitattributes &&
+		git add .gitattributes &&
+		first=$(printf "first\n" | git hash-object -w --stdin) &&
+		second=$(printf "second\n" | git hash-object -w --stdin) &&
+		git update-index --add --cacheinfo "100644,$first,folder/0-first" &&
+		git update-index --add --cacheinfo "100644,$first,folder/Case.filtered" &&
+		git update-index --add --cacheinfo "100644,$second,folder/case.filtered" &&
+		git commit -m "case collision after filter" &&
+		git worktree add --detach ../collision-target HEAD &&
+		printf "second\n" >../expected-collision &&
+		test_cmp_bin ../expected-collision ../collision-target/folder/case.filtered &&
+		git worktree remove --force ../collision-target
+	)
+'
+test_expect_success COPY_ON_WRITE 'worktree.copyOnWrite disables optimization' '
+	test_when_finished "git worktree remove --force no-copy-on-write" &&
+	test_config worktree.copyOnWrite false &&
+	GIT_TRACE2_EVENT="$PWD/disabled-trace" \
+		git worktree add --detach no-copy-on-write main &&
+	test_grep ! "\"key\":\"copy_on_write\"" disabled-trace
 '
 
 test_expect_success '"add" worktree with lock' '

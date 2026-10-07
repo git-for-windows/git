@@ -395,14 +395,35 @@ worktree_copy_cleanup:
 }
 
 static int checkout_worktree(const struct add_opts *opts,
-			     struct strvec *child_env)
+			     struct strvec *child_env, const char *path)
 {
 	struct child_process cp = CHILD_PROCESS_INIT;
+	const char *source = repo_get_work_tree(the_repository);
+	struct timeval refreshed_at;
+
 	cp.git_cmd = 1;
 	strvec_pushl(&cp.args, "reset", "--hard", "--no-recurse-submodules", NULL);
 	if (opts->quiet)
 		strvec_push(&cp.args, "--quiet");
 	strvec_pushv(&cp.env, child_env->v);
+	if (file_copy_on_write_supported(path) && source &&
+	    repo_read_index(the_repository) >= 0) {
+		gettimeofday(&refreshed_at, NULL);
+
+		strvec_pushf(&cp.env, "%s=%s",
+			     GIT_WORKTREE_COPY_SOURCE, source);
+		strvec_pushf(&cp.env, "%s=%s",
+			     GIT_WORKTREE_COPY_SOURCE_INDEX,
+			     absolute_path(repo_get_index_file(the_repository)));
+		strvec_pushf(&cp.env, "%s=%s",
+			     GIT_WORKTREE_COPY_SOURCE_GIT_DIR,
+			     absolute_path(repo_get_git_dir(the_repository)));
+		strvec_pushf(&cp.env, "%s=%"PRIuMAX,
+			     GIT_WORKTREE_COPY_SOURCE_TIME,
+			     (uintmax_t)refreshed_at.tv_sec *
+			     1000000000 +
+			     refreshed_at.tv_usec * 1000);
+	}
 	return run_command(&cp);
 }
 
@@ -589,7 +610,7 @@ static int add_worktree(const char *path, const char *refname,
 		goto done;
 
 	if (opts->checkout &&
-	    (ret = checkout_worktree(opts, &child_env)))
+	    (ret = checkout_worktree(opts, &child_env, path)))
 		goto done;
 
 	is_junk = 0;

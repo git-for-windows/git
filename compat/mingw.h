@@ -7,6 +7,14 @@ struct config_context;
 int mingw_core_config(const char *var, const char *value,
 		      const struct config_context *ctx, void *cb);
 #define platform_core_config mingw_core_config
+#define copy_on_write_supported 1
+int mingw_copy_on_write_supported(const char *path);
+#define file_copy_on_write_supported mingw_copy_on_write_supported
+int mingw_file_copy_on_write(int dst_fd, int src_fd, off_t size,
+			    const char *path);
+#define file_copy_on_write mingw_file_copy_on_write
+int mingw_open_nofollow_stat(const char *path, struct stat *st);
+int mingw_create_file_nofollow(const char *path, unsigned int mode);
 
 #ifndef NO_OPENSSL
 #include <openssl/ssl.h>
