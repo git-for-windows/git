@@ -651,6 +651,14 @@ test_expect_success MINGW,SYMLINKS 'difftool honors core.symlinks on Windows' '
 		--tool=test-tool --trust-exit-code branch HEAD
 '
 
+test_expect_success MINGW 'difftool defaults to copies on Windows' '
+	test_unconfig core.symlinks &&
+	test_config difftool.test-tool.cmd \
+		"test -f \"\$REMOTE/file\" && test ! -L \"\$REMOTE/file\"" &&
+	MSYS= git difftool --dir-diff --tool=test-tool --trust-exit-code \
+		branch HEAD
+'
+
 write_script modify-right-file <<\EOF
 echo "modified content" >"$2/file"
 EOF

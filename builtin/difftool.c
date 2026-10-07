@@ -733,7 +733,7 @@ int cmd_difftool(int argc,
 	int use_gui_tool = -1, dir_diff = 0, prompt = -1, tool_help = 0, no_index = 0;
 	static char *difftool_cmd = NULL, *extcmd = NULL;
 	struct difftool_options dt_options = {
-		.has_symlinks = 1,
+		.has_symlinks = platform_has_symlinks(),
 		.symlinks = 1,
 		.trust_exit_code = 0
 	};
