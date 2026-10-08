@@ -356,4 +356,49 @@ test_expect_success MINGW 'checkout caps workers at the poll limit' '
 	verify_checkout many-workers
 '
 
+# On Windows, parallel checkout is on by default (four workers), but only
+# for checkouts of at least 500 files; elsewhere it is off by default.
+test_expect_success 'default workers and threshold' '
+	test_when_finished "rm -rf default-workers" &&
+	git init default-workers &&
+	(
+		cd default-workers &&
+		mkdir dir &&
+		for i in $(test_seq 1 500)
+		do
+			echo "content $i" >dir/file$i || return 1
+		done &&
+		git add -A &&
+		git commit -q -m base &&
+		git tag base &&
+
+		git checkout -q -b few &&
+		for i in $(test_seq 1 499)
+		do
+			echo "changed $i" >dir/file$i || return 1
+		done &&
+		git commit -q -a -m few &&
+
+		git checkout -q -b many base &&
+		for i in $(test_seq 1 500)
+		do
+			echo "changed $i" >dir/file$i || return 1
+		done &&
+		git commit -q -a -m many &&
+		git checkout -q base
+	) &&
+
+	if test_have_prereq MINGW
+	then
+		expected_workers=4
+	else
+		expected_workers=0
+	fi &&
+	test_checkout_workers 0 git -C default-workers checkout few &&
+	verify_checkout default-workers &&
+	git -C default-workers checkout -q base &&
+	test_checkout_workers $expected_workers git -C default-workers checkout many &&
+	verify_checkout default-workers
+'
+
 test_done
