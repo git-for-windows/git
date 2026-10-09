@@ -284,6 +284,21 @@ void open_in_gdb(void);
  */
 int err_win_to_posix(DWORD winerr);
 
+/*
+ * Get a process's creation time and check that it started no earlier than the
+ * supplied time. If requested, also return the process's creation time.
+ */
+int mingw_process_started_after(HANDLE process, const FILETIME *time,
+				FILETIME *creation_time);
+
+/*
+ * Check whether a process still identifies the supplied process as its parent
+ * and was created no earlier than that parent.
+ */
+int mingw_process_is_child_of(HANDLE process, DWORD parent_pid,
+				      const FILETIME *parent_creation_time,
+				      FILETIME *creation_time);
+
 int mingw_platform_has_symlinks(void);
 #define platform_has_symlinks() mingw_platform_has_symlinks()
 

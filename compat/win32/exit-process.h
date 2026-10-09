@@ -21,16 +21,61 @@
  * no chance of cleaning up after themselves (closing file handles, removing
  * .lock files, terminating spawned processes (if any), etc).
  */
+struct process_info {
+	DWORD pid;
+	FILETIME creation_time;
+	HANDLE handle;
+};
+
+static int add_process(struct process_info *processes, int len, int parent,
+		       const PROCESSENTRY32 *entry)
+{
+	HANDLE process;
+	FILETIME creation_time;
+
+	if (processes[parent].pid != entry->th32ParentProcessID)
+		return 0;
+
+	process = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_TERMINATE,
+			      FALSE, entry->th32ProcessID);
+	if (!process)
+		return 0;
+
+	if (!mingw_process_is_child_of(process, processes[parent].pid,
+					       &processes[parent].creation_time,
+					       &creation_time)) {
+		CloseHandle(process);
+		return 0;
+	}
+
+	processes[len].pid = entry->th32ProcessID;
+	processes[len].creation_time = creation_time;
+	processes[len].handle = process;
+	return 1;
+}
+
 static int terminate_process_tree(HANDLE main_process, int exit_status)
 {
-	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+	HANDLE snapshot;
 	PROCESSENTRY32 entry;
-	DWORD pids[16384];
-	int max_len = sizeof(pids) / sizeof(*pids), i, len, ret = 0;
-	pid_t pid = GetProcessId(main_process);
+	int max_len = 16384, i, len, ret = 0;
+	struct process_info *processes = xcalloc(max_len, sizeof(*processes));
 
-	pids[0] = (DWORD)pid;
+	/*
+	 * A process's PID can be reused after it exits. Do not mistake an older
+	 * orphan whose former parent happens to have the same PID for a child.
+	 *
+	 * Keep a handle for every accepted child. This both gives us the handle for
+	 * termination and keeps the process object alive so its PID cannot be
+	 * reused while walking the rest of the tree.
+	 */
+	if (!mingw_process_started_after(main_process, NULL,
+					 &processes[0].creation_time))
+		goto terminate_main_process;
+	processes[0].pid = GetProcessId(main_process);
+	processes[0].handle = main_process;
 	len = 1;
+	snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 
 	/*
 	 * Even if Process32First()/Process32Next() seem to traverse the
@@ -41,41 +86,48 @@ static int terminate_process_tree(HANDLE main_process, int exit_status)
 	 * Therefore, run through them at least twice and stop when no more
 	 * process IDs were added to the list.
 	 */
-	for (;;) {
-		int orig_len = len;
+	if (snapshot != INVALID_HANDLE_VALUE) {
+		for (;;) {
+			int orig_len = len;
 
-		memset(&entry, 0, sizeof(entry));
-		entry.dwSize = sizeof(entry);
+			memset(&entry, 0, sizeof(entry));
+			entry.dwSize = sizeof(entry);
 
-		if (!Process32First(snapshot, &entry))
-			break;
+			if (!Process32First(snapshot, &entry))
+				break;
 
-		do {
-			for (i = len - 1; i >= 0; i--) {
-				if (pids[i] == entry.th32ProcessID)
+			do {
+				for (i = len - 1; i >= 0; i--) {
+					if (processes[i].pid == entry.th32ProcessID)
+						break;
+					if (processes[i].pid != entry.th32ParentProcessID)
+						continue;
+					if (add_process(processes, len, i, &entry))
+						len++;
 					break;
-				if (pids[i] == entry.th32ParentProcessID)
-					pids[len++] = entry.th32ProcessID;
-			}
-		} while (len < max_len && Process32Next(snapshot, &entry));
+				}
+			} while (len < max_len && Process32Next(snapshot, &entry));
 
-		if (orig_len == len || len >= max_len)
-			break;
-	}
-
-	for (i = len - 1; i > 0; i--) {
-		HANDLE process = OpenProcess(PROCESS_TERMINATE, FALSE, pids[i]);
-
-		if (process) {
-			if (!TerminateProcess(process, exit_status))
-				ret = -1;
-			CloseHandle(process);
+			if (orig_len == len || len >= max_len)
+				break;
 		}
+		CloseHandle(snapshot);
 	}
+
+	for (i = len - 1; i >= 0; i--) {
+		if (!TerminateProcess(processes[i].handle, exit_status))
+			ret = -1;
+		CloseHandle(processes[i].handle);
+	}
+	free(processes);
+
+	return ret;
+
+terminate_main_process:
 	if (!TerminateProcess(main_process, exit_status))
 		ret = -1;
 	CloseHandle(main_process);
-
+	free(processes);
 	return ret;
 }
 
