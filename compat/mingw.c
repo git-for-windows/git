@@ -48,6 +48,49 @@ void open_in_gdb(void)
 	sleep(1);
 }
 
+typedef NTSTATUS (NTAPI *nt_query_information_process_fn)(
+	HANDLE, PROCESSINFOCLASS, PVOID, ULONG, PULONG);
+
+int mingw_process_started_after(HANDLE process, const FILETIME *time,
+				FILETIME *creation_time)
+{
+	FILETIME exit_time, kernel_time, user_time, actual_creation_time;
+
+	if (!creation_time)
+		creation_time = &actual_creation_time;
+
+	return GetProcessTimes(process, creation_time, &exit_time,
+			       &kernel_time, &user_time) &&
+		(!time || CompareFileTime(creation_time, time) >= 0);
+}
+
+static int process_has_parent(HANDLE process, DWORD parent_pid)
+{
+	static struct proc_addr proc_addr_NtQueryInformationProcess =
+		{ "ntdll.dll", "NtQueryInformationProcess", NULL, 0 };
+	nt_query_information_process_fn NtQueryInformationProcess;
+	PROCESS_BASIC_INFORMATION process_info;
+
+	NtQueryInformationProcess =
+		(nt_query_information_process_fn)get_proc_addr(
+			&proc_addr_NtQueryInformationProcess);
+	return NtQueryInformationProcess &&
+		NT_SUCCESS(NtQueryInformationProcess(process, ProcessBasicInformation,
+						     &process_info,
+						     sizeof(process_info), NULL)) &&
+		(DWORD)(uintptr_t)process_info.InheritedFromUniqueProcessId ==
+		parent_pid;
+}
+
+int mingw_process_is_child_of(HANDLE process, DWORD parent_pid,
+				      const FILETIME *parent_creation_time,
+				      FILETIME *creation_time)
+{
+	return process_has_parent(process, parent_pid) &&
+		mingw_process_started_after(process, parent_creation_time,
+					  creation_time);
+}
+
 int err_win_to_posix(DWORD winerr)
 {
 	int error = ENOSYS;
@@ -2552,12 +2595,19 @@ int mingw_kill(pid_t pid, int sig)
 		if (h)
 			ret = exit_process(h, 128 + sig);
 		else {
-			h = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
-			if (!h) {
-				errno = err_win_to_posix(GetLastError());
-				return -1;
+			h = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_TERMINATE,
+					FALSE, pid);
+			if (h)
+				ret = terminate_process_tree(h, 128 + sig);
+			else {
+				h = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
+				if (!h) {
+					errno = err_win_to_posix(GetLastError());
+					return -1;
+				}
+				ret = TerminateProcess(h, 128 + sig) ? 0 : -1;
+				CloseHandle(h);
 			}
-			ret = terminate_process_tree(h, 128 + sig);
 		}
 		if (ret)
 			errno = err_win_to_posix(GetLastError());
