@@ -2,6 +2,7 @@
 
 #include "git-compat-util.h"
 #include "odb.h"
+#include "object-file.h"
 #include "odb/streaming.h"
 #include "dir.h"
 #include "environment.h"
@@ -15,6 +16,8 @@
 #include "fsmonitor.h"
 #include "entry.h"
 #include "parallel-checkout.h"
+#include "trace2.h"
+#include "wrapper.h"
 
 static void create_directories(const char *path, int path_len,
 			       const struct checkout *state)
@@ -96,9 +99,13 @@ static void remove_subtree(struct strbuf *path)
 		die_errno("cannot rmdir '%s'", path->buf);
 }
 
-static int create_file(const char *path, unsigned int mode)
+static int create_file(const char *path, unsigned int mode, int fresh_worktree)
 {
 	mode = (mode & 0100) ? 0777 : 0666;
+#ifdef GIT_WINDOWS_NATIVE
+	if (fresh_worktree)
+		return mingw_create_file_nofollow(path, mode);
+#endif
 	return open(path, O_WRONLY | O_CREAT | O_EXCL, mode);
 }
 
@@ -116,7 +123,8 @@ void *read_blob_entry(const struct cache_entry *ce, size_t *size)
 	return NULL;
 }
 
-static int open_output_fd(char *path, const struct cache_entry *ce, int to_tempfile)
+static int open_output_fd(char *path, const struct cache_entry *ce,
+			  const struct checkout *state, int to_tempfile)
 {
 	int symlink = (ce->ce_mode & S_IFMT) != S_IFREG;
 	if (to_tempfile) {
@@ -124,8 +132,194 @@ static int open_output_fd(char *path, const struct cache_entry *ce, int to_tempf
 			  symlink ? ".merge_link_XXXXXX" : ".merge_file_XXXXXX");
 		return mkstemp(path);
 	} else {
-		return create_file(path, !symlink ? ce->ce_mode : 0666);
+		return create_file(path, !symlink ? ce->ce_mode : 0666,
+				   state->fresh_worktree && !symlink);
 	}
+}
+
+static int conversion_attrs_equal(const struct conv_attrs *a,
+				  const struct conv_attrs *b)
+{
+	return a->drv == b->drv &&
+		a->crlf_action == b->crlf_action &&
+		a->ident == b->ident &&
+		(!a->working_tree_encoding == !b->working_tree_encoding) &&
+		(!a->working_tree_encoding ||
+		 !strcmp(a->working_tree_encoding, b->working_tree_encoding));
+}
+
+#define COPY_ON_WRITE_MIN_BYTES (160 * 1024)
+
+static struct cache_entry *copy_source_entry(const struct cache_entry *ce,
+					     const struct conv_attrs *ca,
+					     const struct checkout *state)
+{
+	struct index_state *istate;
+	struct cache_entry *source;
+	struct conv_attrs source_ca;
+	int pos;
+
+	if (!state->copy_source || !ca || !S_ISREG(ce->ce_mode) ||
+	    ca->drv || ca->ident || ca->working_tree_encoding ||
+	    (ca->crlf_action != CRLF_BINARY && auto_crlf != AUTO_CRLF_FALSE))
+		return NULL;
+
+	istate = state->copy_source->istate;
+	pos = index_name_pos(istate, ce->name, ce_namelen(ce));
+	if (pos < 0)
+		return NULL;
+	source = istate->cache[pos];
+	if (!S_ISREG(source->ce_mode) || ce_skip_worktree(source) ||
+	    source->ce_stat_data.sd_size <= COPY_ON_WRITE_MIN_BYTES ||
+	    !oideq(&source->oid, &ce->oid))
+		return NULL;
+	convert_attrs(istate, &source_ca, ce->name);
+	if (!conversion_attrs_equal(ca, &source_ca))
+		return NULL;
+
+	return source;
+}
+
+static int source_is_uptodate(const struct checkout_copy_source *source,
+			      const struct cache_entry *ce, struct stat *st)
+{
+	uint64_t mtime;
+
+	if (match_stat_data(&ce->ce_stat_data, st))
+		return 0;
+
+	mtime = (uint64_t)st->st_mtime * 1000000000 + ST_MTIME_NSEC(*st);
+	return mtime < source->refreshed_at;
+}
+
+/* Verify only clone candidates instead of refreshing the entire source index.
+ * Matching non-racy stat data is the index's clean-file guarantee; racy files
+ * require an object hash. EOL conversion must also reproduce the exact bytes. */
+static int clone_source_matches(int fd, off_t source_size,
+				const struct cache_entry *ce,
+				const struct conv_attrs *ca,
+				const struct checkout *state)
+{
+	struct strbuf raw = STRBUF_INIT, normalized = STRBUF_INIT;
+	struct strbuf checkout = STRBUF_INIT;
+	struct object_id oid;
+	struct object_info oi = OBJECT_INFO_INIT;
+	enum object_type type;
+	size_t blob_size, len;
+	const char *data;
+	int racy = is_racy_timestamp(state->copy_source->istate, ce);
+	int have_size = 0, matches = 0;
+
+	if (ca->crlf_action == CRLF_BINARY && !racy)
+		return 1;
+	if (!racy) {
+		oi.typep = &type;
+		oi.sizep = &blob_size;
+		have_size = !odb_read_object_info_extended(the_repository->objects,
+			&ce->oid, &oi, OBJECT_INFO_LOOKUP_REPLACE |
+			OBJECT_INFO_SKIP_FETCH_OBJECT) && type == OBJ_BLOB;
+		/* LF checkout does not expand data, and clean EOL normalization
+		 * only shrinks it. Equal sizes therefore prove identity. */
+		if (have_size && (ca->crlf_action == CRLF_TEXT_INPUT ||
+		    ca->crlf_action == CRLF_AUTO_INPUT ||
+		    (ca->crlf_action == CRLF_AUTO && core_eol == EOL_LF)))
+			return blob_size == source_size;
+	}
+	if (strbuf_read(&raw, fd, source_size) < 0)
+		goto done;
+	data = raw.buf;
+	len = raw.len;
+	if (racy || !have_size) {
+		hash_object_file(the_repository->hash_algo, data, len, OBJ_BLOB, &oid);
+		if (oideq(&oid, &ce->oid))
+			goto checkout;
+	}
+	if (ca->crlf_action != CRLF_BINARY &&
+	    (!have_size || len != blob_size || racy) &&
+	    convert_to_git(state->copy_source->istate, ce->name,
+			   raw.buf, raw.len, &normalized, CONV_EOL_RENORMALIZE)) {
+		data = normalized.buf;
+		len = normalized.len;
+	} else if (racy || !have_size) {
+		goto done;
+	}
+	if (racy || !have_size) {
+		hash_object_file(the_repository->hash_algo, data, len, OBJ_BLOB, &oid);
+		if (!oideq(&oid, &ce->oid))
+			goto done;
+	} else if (len != blob_size) {
+		goto done;
+	}
+checkout:
+	if (convert_to_working_tree_ca(ca, ce->name, data, len, &checkout, NULL)) {
+		data = checkout.buf;
+		len = checkout.len;
+	}
+	matches = len == raw.len && !memcmp(data, raw.buf, len);
+done:
+	strbuf_release(&checkout);
+	strbuf_release(&normalized);
+	strbuf_release(&raw);
+	return matches;
+}
+static int try_copy_on_write(const struct cache_entry *ce,
+			     const struct cache_entry *source_ce, char *path,
+			     const struct conv_attrs *ca,
+			     const struct checkout *state,
+			     int *fstat_done, struct stat *statbuf)
+{
+	struct strbuf source = STRBUF_INIT;
+	struct stat st, st_after;
+	int src_fd = -1, dst_fd = -1;
+	int ret = 0;
+
+	if (!file_copy_on_write_supported(path))
+		return 0;
+
+	strbuf_addf(&source, "%s/%s", state->copy_source->worktree, ce->name);
+	src_fd = open_nofollow_stat(source.buf, &st);
+	if (src_fd < 0 || !S_ISREG(st.st_mode) ||
+	    st.st_size <= COPY_ON_WRITE_MIN_BYTES ||
+	    !source_is_uptodate(state->copy_source, source_ce, &st) ||
+	    !clone_source_matches(src_fd, st.st_size, source_ce, ca, state))
+		goto done;
+
+	dst_fd = open_output_fd(path, ce, state, 0);
+	if (dst_fd < 0) {
+		if (state->fresh_worktree) {
+			ret = -1;
+			goto done;
+		}
+		goto done;
+	}
+	if (file_copy_on_write(dst_fd, src_fd, st.st_size, path) ||
+	    fstat(src_fd, &st_after) ||
+	    !source_is_uptodate(state->copy_source, source_ce, &st_after)) {
+		close(dst_fd);
+		dst_fd = -1;
+		unlink(path);
+		goto done;
+	}
+	if (close(dst_fd)) {
+		dst_fd = -1;
+		unlink(path);
+		goto done;
+	}
+	dst_fd = -1;
+
+	if (state->refresh_cache)
+		*fstat_done = !lstat(path, statbuf);
+	trace2_data_string("checkout", the_repository,
+			   "copy_on_write", ce->name);
+	ret = 1;
+
+done:
+	if (dst_fd >= 0)
+		close(dst_fd);
+	if (src_fd >= 0)
+		close(src_fd);
+	strbuf_release(&source);
+	return ret;
 }
 
 int fstat_checkout_output(int fd, const struct checkout *state, struct stat *st)
@@ -146,7 +340,7 @@ static int streaming_write_entry(const struct cache_entry *ce, char *path,
 	int result = 0;
 	int fd;
 
-	fd = open_output_fd(path, ce, to_tempfile);
+	fd = open_output_fd(path, ce, state, to_tempfile);
 	if (fd < 0)
 		return -1;
 
@@ -294,6 +488,7 @@ void update_ce_after_write(const struct checkout *state, struct cache_entry *ce,
 
 /* Note: ca is used (and required) iff the entry refers to a regular file. */
 static int write_entry(struct cache_entry *ce, char *path, struct conv_attrs *ca,
+		       const struct cache_entry *source_ce,
 		       const struct checkout *state, int to_tempfile,
 		       int *nr_checkouts)
 {
@@ -313,7 +508,18 @@ static int write_entry(struct cache_entry *ce, char *path, struct conv_attrs *ca
 	clone_checkout_metadata(&meta, &state->meta, &ce->oid);
 
 	if (ce_mode_s_ifmt == S_IFREG) {
-		struct stream_filter *filter = get_stream_filter_ca(ca, &ce->oid);
+		struct stream_filter *filter;
+
+		if (source_ce) {
+			int cloned = try_copy_on_write(ce, source_ce, path, ca, state,
+						     &fstat_done, &st);
+			if (cloned < 0)
+				return -2; /* retry after checking a collision */
+			if (cloned)
+				goto finish;
+		}
+
+		filter = get_stream_filter_ca(ca, &ce->oid);
 		if (filter &&
 		    !streaming_write_entry(ce, path, filter,
 					   state, to_tempfile,
@@ -391,9 +597,11 @@ static int write_entry(struct cache_entry *ce, char *path, struct conv_attrs *ca
 		 */
 
 	write_file_entry:
-		fd = open_output_fd(path, ce, to_tempfile);
+			fd = open_output_fd(path, ce, state, to_tempfile);
 		if (fd < 0) {
 			free(new_blob);
+				if (state->fresh_worktree)
+					return -2;
 			return error_errno("unable to create file %s", path);
 		}
 
@@ -502,6 +710,10 @@ int checkout_entry_ca(struct cache_entry *ce, struct conv_attrs *ca,
 	static struct strbuf path = STRBUF_INIT;
 	struct stat st;
 	struct conv_attrs ca_buf;
+	struct cache_entry *source_ce = NULL;
+	struct checkout slow_state;
+	const struct checkout *write_state = state;
+	int fast_path = 0, source_checked = 0, ret;
 
 	if (ce->ce_flags & CE_WT_REMOVE) {
 		if (topath)
@@ -519,14 +731,28 @@ int checkout_entry_ca(struct cache_entry *ce, struct conv_attrs *ca,
 			convert_attrs(state->istate, &ca_buf, ce->name);
 			ca = &ca_buf;
 		}
-		return write_entry(ce, topath, ca, state, 1, nr_checkouts);
+		return write_entry(ce, topath, ca, NULL, state, 1,
+				   nr_checkouts);
 	}
 
 	strbuf_reset(&path);
 	strbuf_add(&path, state->base_dir, state->base_dir_len);
 	strbuf_add(&path, ce->name, ce_namelen(ce));
 
-	if (!check_path(path.buf, path.len, &st, state->base_dir_len)) {
+	if (state->fresh_worktree && S_ISREG(ce->ce_mode)) {
+		if (!ca) {
+			convert_attrs(state->istate, &ca_buf, ce->name);
+			ca = &ca_buf;
+		}
+		source_ce = copy_source_entry(ce, ca, state);
+		source_checked = 1;
+		fast_path = source_ce || (!ca->drv && state->force &&
+			!state->not_new && parallel_checkout_status() != PC_RUNNING);
+	}
+
+slow_path:
+	if (!fast_path &&
+	    !check_path(path.buf, path.len, &st, state->base_dir_len)) {
 		const struct submodule *sub;
 		unsigned changed = ie_match_stat(state->istate, ce, &st,
 						 CE_MATCH_IGNORE_VALID | CE_MATCH_IGNORE_SKIP_WORKTREE);
@@ -592,7 +818,7 @@ int checkout_entry_ca(struct cache_entry *ce, struct conv_attrs *ca,
 			remove_subtree(&path);
 		} else if (unlink(path.buf))
 			return error_errno("unable to unlink old '%s'", path.buf);
-	} else if (state->not_new)
+	} else if (!fast_path && state->not_new)
 		return 0;
 
 	create_directories(path.buf, path.len, state);
@@ -602,10 +828,22 @@ int checkout_entry_ca(struct cache_entry *ce, struct conv_attrs *ca,
 		ca = &ca_buf;
 	}
 
-	if (!enqueue_checkout(ce, ca, nr_checkouts))
+	if (!source_checked)
+		source_ce = copy_source_entry(ce, ca, state);
+	if (!source_ce && !enqueue_checkout(ce, ca, nr_checkouts))
 		return 0;
 
-	return write_entry(ce, path.buf, ca, state, 0, nr_checkouts);
+	ret = write_entry(ce, path.buf, ca, source_ce, write_state, 0,
+			  nr_checkouts);
+	if (ret == -2 && fast_path) {
+		/* Resolve any failed create with the original path checks. */
+		fast_path = 0;
+		slow_state = *state;
+		slow_state.fresh_worktree = 0;
+		write_state = &slow_state;
+		goto slow_path;
+	}
+	return ret;
 }
 
 void unlink_entry(const struct cache_entry *ce, const char *super_prefix)
