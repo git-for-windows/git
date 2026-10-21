@@ -1516,10 +1516,23 @@ static inline void time_t_to_filetime(time_t t, FILETIME *ft)
 	ft->dwHighDateTime = winTime >> 32;
 }
 
+static HANDLE utime_open(const wchar_t *wfilename, DWORD attrs)
+{
+	return CreateFileW(wfilename,
+			   FILE_WRITE_ATTRIBUTES,
+			   FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+			   NULL,
+			   OPEN_EXISTING,
+			   (attrs != INVALID_FILE_ATTRIBUTES &&
+				(attrs & FILE_ATTRIBUTE_DIRECTORY)) ?
+				FILE_FLAG_BACKUP_SEMANTICS : 0,
+			   NULL);
+}
+
 int mingw_utime (const char *file_name, const struct utimbuf *times)
 {
 	FILETIME mft, aft;
-	int rc;
+	int rc, cleared_readonly = 0;
 	DWORD attrs;
 	wchar_t wfilename[MAX_LONG_PATH];
 	HANDLE osfilehandle;
@@ -1527,23 +1540,24 @@ int mingw_utime (const char *file_name, const struct utimbuf *times)
 	if (xutftowcs_long_path(wfilename, file_name) < 0)
 		return -1;
 
-	/* must have write permission */
+	/*
+	 * Opening for FILE_WRITE_ATTRIBUTES is allowed on read-only files,
+	 * so the read-only attribute only needs to be cleared if the file
+	 * system refuses that (it used to be needed when this opened the
+	 * file for writing). Loose objects are read-only and are freshened
+	 * this way, so the common case saves two opens per call.
+	 */
 	attrs = GetFileAttributesW(wfilename);
-	if (attrs != INVALID_FILE_ATTRIBUTES &&
+	osfilehandle = utime_open(wfilename, attrs);
+	if (osfilehandle == INVALID_HANDLE_VALUE &&
+	    GetLastError() == ERROR_ACCESS_DENIED &&
+	    attrs != INVALID_FILE_ATTRIBUTES &&
 	    (attrs & FILE_ATTRIBUTE_READONLY)) {
-		/* ignore errors here; open() will report them */
+		/* ignore errors here; the open below will report them */
 		SetFileAttributesW(wfilename, attrs & ~FILE_ATTRIBUTE_READONLY);
+		cleared_readonly = 1;
+		osfilehandle = utime_open(wfilename, attrs);
 	}
-
-	osfilehandle = CreateFileW(wfilename,
-				   FILE_WRITE_ATTRIBUTES,
-				   FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-				   NULL,
-				   OPEN_EXISTING,
-				   (attrs != INVALID_FILE_ATTRIBUTES &&
-					(attrs & FILE_ATTRIBUTE_DIRECTORY)) ?
-					FILE_FLAG_BACKUP_SEMANTICS : 0,
-				   NULL);
 	if (osfilehandle == INVALID_HANDLE_VALUE) {
 		errno = err_win_to_posix(GetLastError());
 		rc = -1;
@@ -1568,8 +1582,7 @@ int mingw_utime (const char *file_name, const struct utimbuf *times)
 		CloseHandle(osfilehandle);
 
 revert_attrs:
-	if (attrs != INVALID_FILE_ATTRIBUTES &&
-	    (attrs & FILE_ATTRIBUTE_READONLY)) {
+	if (cleared_readonly) {
 		/* ignore errors again */
 		SetFileAttributesW(wfilename, attrs);
 	}
