@@ -1341,7 +1341,7 @@ static int read_reparse_point(const WCHAR *wpath, BOOL fail_on_unknown_tag,
 	}
 
 	if ((*plen =
-	     xwcstoutf(tmpbuf, normalize_ntpath(wbuf), MAX_PATH)) <  0)
+	     xwcstoutf(tmpbuf, normalize_ntpath(wbuf), MAX_LONG_PATH)) <  0)
 		return -1;
 	return 0;
 }
