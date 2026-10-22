@@ -108,4 +108,46 @@ test_expect_success SYMLINKS_WINDOWS 'leave drive-less, short paths intact' '
 	test_grep "<SYMLINKD\\?> *PF *\\[\\\\Program Files\\]" actual
 '
 
+test_expect_success SYMLINKS_WINDOWS 'set up long symlink targets' '
+	ascii_target=$(printf "%0128d" 0) &&
+	ascii_target=$ascii_target/$ascii_target &&
+	utf8_char=$(printf "\344\270\255") &&
+	utf8_target=$(test_seq 1 85 | sed "s/.*/$utf8_char/" | tr -d "\n") &&
+	utf8_target=$utf8_target/a
+'
+
+for encoding in ascii utf8
+do
+	for suffix in aa aaa aaaa
+	do
+		# Both prefixes are 257 UTF-8 bytes: test 259, 260 and 261.
+		bytes=$((257 + ${#suffix}))
+		test_expect_success SYMLINKS_WINDOWS \
+			"read $encoding symlink target of $bytes bytes" '
+			test_config core.symlinks true &&
+			test_config core.longpaths false &&
+			test_config core.fscache false &&
+			test_when_finished "rm -f long-link" &&
+			test_when_finished \
+				"git update-index --force-remove long-link" &&
+			case $encoding in
+			ascii) target=$ascii_target$suffix ;;
+			utf8) target=$utf8_target$suffix ;;
+			esac &&
+			oid=$(printf "%s" "$target" |
+				git hash-object -w --stdin) &&
+			git update-index --add \
+				--cacheinfo 120000,$oid,long-link &&
+			win_target=$(printf "%s" "$target" | tr / "\\\\") &&
+			cmd //c "mklink long-link $win_target" &&
+			printf "%s\n" "$target" >expect &&
+			test-tool path-utils readlink long-link >actual &&
+			test_cmp expect actual &&
+			git diff --exit-code -- long-link >actual 2>err &&
+			test_must_be_empty actual &&
+			test_must_be_empty err
+		'
+	done
+done
+
 test_done
