@@ -3056,8 +3056,8 @@ repeat:
 					 FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
 					 NULL);
 		if (old_handle == INVALID_HANDLE_VALUE) {
-			errno = err_win_to_posix(GetLastError());
-			return -1;
+			gle = GetLastError();
+			goto handle_rename_error;
 		}
 
 		rename_info.Flags = FILE_RENAME_FLAG_REPLACE_IF_EXISTS |
@@ -3098,6 +3098,7 @@ repeat:
 		gle = GetLastError();
 	}
 
+handle_rename_error:
 	if (gle == ERROR_ACCESS_DENIED) {
 		if (is_inside_windows_container()) {
 			/* Fall back to copy to destination & remove source */
