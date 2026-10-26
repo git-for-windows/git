@@ -33,8 +33,59 @@
 #include <winternl.h>
 
 #define STATUS_DELETE_PENDING ((NTSTATUS) 0xC0000056)
-
 #define HCAST(type, handle) ((type)(intptr_t)handle)
+
+int mingw_file_copy_on_write(int dst_fd, int src_fd, off_t size)
+{
+	DUPLICATE_EXTENTS_DATA data = {
+		.FileHandle = HCAST(HANDLE, _get_osfhandle(src_fd)),
+	};
+	HANDLE dst = HCAST(HANDLE, _get_osfhandle(dst_fd));
+	/*
+	 * FSCTL_DUPLICATE_EXTENTS_TO_FILE accepts ranges smaller than 4 GiB,
+	 * aligned to the volume's cluster size. ReFS uses 64 KiB or 4 KiB
+	 * clusters, so this is the largest valid range for either.
+	 */
+	const LONGLONG max_range = (4LL * 1024 * 1024 * 1024) - (64 * 1024);
+	const LONGLONG tail_alignments[] = { 64 * 1024, 4 * 1024 };
+	DWORD bytes_returned;
+	size_t i;
+
+	/* The destination range must exist before extents can be cloned. */
+	if (ftruncate(dst_fd, size) < 0)
+		return -1;
+	if (!size)
+		return 0;
+
+	while (data.SourceFileOffset.QuadPart + max_range < size) {
+		data.ByteCount.QuadPart = max_range;
+		if (!DeviceIoControl(dst, FSCTL_DUPLICATE_EXTENTS_TO_FILE,
+				     &data, sizeof(data), NULL, 0,
+				     &bytes_returned, NULL)) {
+			errno = ENOSYS;
+			return -1;
+		}
+		data.SourceFileOffset.QuadPart += data.ByteCount.QuadPart;
+		data.TargetFileOffset = data.SourceFileOffset;
+	}
+
+	for (i = 0; i < ARRAY_SIZE(tail_alignments); i++) {
+		LONGLONG remaining = size - data.SourceFileOffset.QuadPart;
+
+		data.ByteCount.QuadPart =
+			DIV_ROUND_UP(remaining, tail_alignments[i]) *
+			tail_alignments[i];
+		if (DeviceIoControl(dst, FSCTL_DUPLICATE_EXTENTS_TO_FILE,
+				    &data, sizeof(data), NULL, 0,
+				    &bytes_returned, NULL)) {
+			/* Discard any allocation-unit padding in the tail. */
+			return ftruncate(dst_fd, size);
+		}
+	}
+
+	errno = ENOSYS;
+	return -1;
+}
 
 void open_in_gdb(void)
 {
