@@ -241,8 +241,9 @@ static struct fsentry *fseentry_create_entry(struct fscache *cache,
 			     &(fse->u.s.st_atim));
 	filetime_to_timespec((FILETIME *)&(fdata->LastWriteTime),
 			     &(fse->u.s.st_mtim));
-	filetime_to_timespec((FILETIME *)&(fdata->CreationTime),
-			     &(fse->u.s.st_ctim));
+	filetimes_to_ctim(&(fdata->ChangeTime), &(fdata->CreationTime),
+			  &(fdata->LastWriteTime), fdata->FileAttributes,
+			  &(fse->u.s.st_ctim));
 	if (fdata->EaSize > 0 &&
 	    sizeof(buf) >= (size_t)(list ? list->len+1 : 0) + fse->len+1 &&
 	    are_wsl_compatible_mode_bits_enabled()) {

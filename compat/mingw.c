@@ -1429,8 +1429,9 @@ int mingw_lstat(const char *file_name, struct stat *buf)
 				     &(buf->st_atim));
 		filetime_to_timespec((FILETIME *)&(fdata.LastWriteTime),
 				     &(buf->st_mtim));
-		filetime_to_timespec((FILETIME *)&(fdata.CreationTime),
-				     &(buf->st_ctim));
+		filetimes_to_ctim(&(fdata.ChangeTime), &(fdata.CreationTime),
+				  &(fdata.LastWriteTime), fdata.FileAttributes,
+				  &(buf->st_ctim));
 		if (S_ISREG(buf->st_mode) &&
 		    are_wsl_compatible_mode_bits_enabled()) {
 			copy_wsl_mode_bits_from_disk(wfilename, -1,
@@ -1491,8 +1492,9 @@ static int get_file_info_by_handle(HANDLE hnd, struct stat *buf)
 			     &(buf->st_atim));
 	filetime_to_timespec((FILETIME *)&(basic.LastWriteTime),
 			     &(buf->st_mtim));
-	filetime_to_timespec((FILETIME *)&(basic.CreationTime),
-			     &(buf->st_ctim));
+	filetimes_to_ctim(&(basic.ChangeTime), &(basic.CreationTime),
+			  &(basic.LastWriteTime), basic.FileAttributes,
+			  &(buf->st_ctim));
 	if (are_wsl_compatible_mode_bits_enabled())
 	    get_wsl_mode_bits_by_handle(hnd, &buf->st_mode);
 	return 0;
@@ -4437,7 +4439,7 @@ static void adjust_symlink_flags(void)
 /*
  * Windows may hide that a file is a cloud file placeholder (OneDrive and
  * others) from lstat() but not from the FSCache. Expose placeholders, so
- * that both see the same attributes.
+ * that filetimes_to_ctim() gets the same attributes from both.
  */
 static void expose_placeholders(void)
 {
