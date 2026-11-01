@@ -29,4 +29,20 @@ do
 	'
 done
 
+test_expect_success 'notice a rewrite that keeps size and mtime' '
+	echo frotz >rewritten &&
+	test-tool chmtime =1700000000 rewritten &&
+	git update-index --add rewritten &&
+
+	# ctime may only be compared to the second
+	sleep 1 &&
+	echo xyzzy >rewritten &&
+	test-tool chmtime =1700000000 rewritten &&
+	echo "AM rewritten" >expect &&
+	git -c core.fscache=false status --porcelain rewritten >actual &&
+	test_cmp expect actual &&
+	git -c core.fscache=true status --porcelain rewritten >actual &&
+	test_cmp expect actual
+'
+
 test_done

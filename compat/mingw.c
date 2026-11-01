@@ -1346,9 +1346,52 @@ static int read_reparse_point(const WCHAR *wpath, BOOL fail_on_unknown_tag,
 	return 0;
 }
 
+#ifdef _MSC_VER
+/* missing from the Windows SDK's winternl.h */
+typedef struct _FILE_NETWORK_OPEN_INFORMATION {
+	LARGE_INTEGER CreationTime;
+	LARGE_INTEGER LastAccessTime;
+	LARGE_INTEGER LastWriteTime;
+	LARGE_INTEGER ChangeTime;
+	LARGE_INTEGER AllocationSize;
+	LARGE_INTEGER EndOfFile;
+	ULONG FileAttributes;
+} FILE_NETWORK_OPEN_INFORMATION;
+#endif
+
+NTSYSAPI NTSTATUS NTAPI NtQueryFullAttributesFile(
+	POBJECT_ATTRIBUTES attributes, FILE_NETWORK_OPEN_INFORMATION *info);
+NTSYSAPI NTSTATUS NTAPI RtlDosPathNameToNtPathName_U_WithStatus(
+	PCWSTR dos_path, PUNICODE_STRING nt_path, PWSTR *file_part,
+	PVOID reserved);
+
+/* Like GetFileAttributesExW(), but also returns ChangeTime */
+static BOOL get_file_attributes(const wchar_t *wpath,
+				FILE_NETWORK_OPEN_INFORMATION *info)
+{
+	UNICODE_STRING name;
+	OBJECT_ATTRIBUTES attributes;
+	NTSTATUS status;
+
+	if (!NT_SUCCESS(RtlDosPathNameToNtPathName_U_WithStatus(wpath, &name,
+								 NULL, NULL))) {
+		/* as GetFileAttributesExW() does */
+		SetLastError(ERROR_PATH_NOT_FOUND);
+		return FALSE;
+	}
+	InitializeObjectAttributes(&attributes, &name, OBJ_CASE_INSENSITIVE,
+				   NULL, NULL);
+	status = NtQueryFullAttributesFile(&attributes, info);
+	RtlFreeUnicodeString(&name);
+	if (NT_SUCCESS(status))
+		return TRUE;
+	SetLastError(RtlNtStatusToDosError(status));
+	return FALSE;
+}
+
 int mingw_lstat(const char *file_name, struct stat *buf)
 {
-	WIN32_FILE_ATTRIBUTE_DATA fdata;
+	FILE_NETWORK_OPEN_INFORMATION fdata;
 	DWORD reparse_tag = 0;
 	int link_len = 0;
 	wchar_t wfilename[MAX_LONG_PATH];
@@ -1364,9 +1407,9 @@ int mingw_lstat(const char *file_name, struct stat *buf)
 		return -1;
 	}
 
-	if (GetFileAttributesExW(wfilename, GetFileExInfoStandard, &fdata)) {
+	if (get_file_attributes(wfilename, &fdata)) {
 		/* for reparse points, get the link tag and length */
-		if (fdata.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+		if (fdata.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) {
 			char tmpbuf[MAX_LONG_PATH];
 
 			if (read_reparse_point(wfilename, FALSE, tmpbuf,
@@ -1377,14 +1420,18 @@ int mingw_lstat(const char *file_name, struct stat *buf)
 		buf->st_gid = 0;
 		buf->st_uid = 0;
 		buf->st_nlink = 1;
-		buf->st_mode = file_attr_to_st_mode(fdata.dwFileAttributes,
+		buf->st_mode = file_attr_to_st_mode(fdata.FileAttributes,
 				reparse_tag, file_name);
 		buf->st_size = S_ISLNK(buf->st_mode) ? link_len :
-			fdata.nFileSizeLow | (((off_t) fdata.nFileSizeHigh) << 32);
+			fdata.EndOfFile.QuadPart;
 		buf->st_dev = buf->st_rdev = 0; /* not used by Git */
-		filetime_to_timespec(&(fdata.ftLastAccessTime), &(buf->st_atim));
-		filetime_to_timespec(&(fdata.ftLastWriteTime), &(buf->st_mtim));
-		filetime_to_timespec(&(fdata.ftCreationTime), &(buf->st_ctim));
+		filetime_to_timespec((FILETIME *)&(fdata.LastAccessTime),
+				     &(buf->st_atim));
+		filetime_to_timespec((FILETIME *)&(fdata.LastWriteTime),
+				     &(buf->st_mtim));
+		filetimes_to_ctim(&(fdata.ChangeTime), &(fdata.CreationTime),
+				  &(fdata.LastWriteTime), fdata.FileAttributes,
+				  &(buf->st_ctim));
 		if (S_ISREG(buf->st_mode) &&
 		    are_wsl_compatible_mode_bits_enabled()) {
 			copy_wsl_mode_bits_from_disk(wfilename, -1,
@@ -1423,9 +1470,13 @@ int (*lstat)(const char *file_name, struct stat *buf) = mingw_lstat;
 
 static int get_file_info_by_handle(HANDLE hnd, struct stat *buf)
 {
-	BY_HANDLE_FILE_INFORMATION fdata;
+	FILE_BASIC_INFO basic;
+	FILE_STANDARD_INFO standard;
 
-	if (!GetFileInformationByHandle(hnd, &fdata)) {
+	if (!GetFileInformationByHandleEx(hnd, FileBasicInfo, &basic,
+					  sizeof(basic)) ||
+	    !GetFileInformationByHandleEx(hnd, FileStandardInfo, &standard,
+					  sizeof(standard))) {
 		errno = err_win_to_posix(GetLastError());
 		return -1;
 	}
@@ -1434,13 +1485,16 @@ static int get_file_info_by_handle(HANDLE hnd, struct stat *buf)
 	buf->st_gid = 0;
 	buf->st_uid = 0;
 	buf->st_nlink = 1;
-	buf->st_mode = file_attr_to_st_mode(fdata.dwFileAttributes, 0, NULL);
-	buf->st_size = fdata.nFileSizeLow |
-		(((off_t)fdata.nFileSizeHigh)<<32);
+	buf->st_mode = file_attr_to_st_mode(basic.FileAttributes, 0, NULL);
+	buf->st_size = standard.EndOfFile.QuadPart;
 	buf->st_dev = buf->st_rdev = 0; /* not used by Git */
-	filetime_to_timespec(&(fdata.ftLastAccessTime), &(buf->st_atim));
-	filetime_to_timespec(&(fdata.ftLastWriteTime), &(buf->st_mtim));
-	filetime_to_timespec(&(fdata.ftCreationTime), &(buf->st_ctim));
+	filetime_to_timespec((FILETIME *)&(basic.LastAccessTime),
+			     &(buf->st_atim));
+	filetime_to_timespec((FILETIME *)&(basic.LastWriteTime),
+			     &(buf->st_mtim));
+	filetimes_to_ctim(&(basic.ChangeTime), &(basic.CreationTime),
+			  &(basic.LastWriteTime), basic.FileAttributes,
+			  &(buf->st_ctim));
 	if (are_wsl_compatible_mode_bits_enabled())
 	    get_wsl_mode_bits_by_handle(hnd, &buf->st_mode);
 	return 0;
@@ -4382,6 +4436,21 @@ static void adjust_symlink_flags(void)
 	}
 }
 
+/*
+ * Windows may hide that a file is a cloud file placeholder (OneDrive and
+ * others) from lstat() but not from the FSCache. Expose placeholders, so
+ * that filetimes_to_ctim() gets the same attributes from both.
+ */
+static void expose_placeholders(void)
+{
+	DECLARE_PROC_ADDR(ntdll.dll, CHAR, NTAPI,
+			  RtlSetProcessPlaceholderCompatibilityMode, CHAR);
+
+	/* 2: PHCM_EXPOSE_PLACEHOLDERS */
+	if (INIT_PROC_ADDR(RtlSetProcessPlaceholderCompatibilityMode))
+		RtlSetProcessPlaceholderCompatibilityMode(2);
+}
+
 static BOOL WINAPI handle_ctrl_c(DWORD ctrl_type)
 {
 	if (ctrl_type != CTRL_C_EVENT)
@@ -4428,6 +4497,7 @@ int wmain(int argc, const wchar_t **wargv)
 
 	maybe_redirect_std_handles();
 	adjust_symlink_flags();
+	expose_placeholders();
 	fsync_object_files = 1;
 
 	/* determine size of argv and environ conversion buffer */
