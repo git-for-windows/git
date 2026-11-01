@@ -4434,6 +4434,21 @@ static void adjust_symlink_flags(void)
 	}
 }
 
+/*
+ * Windows may hide that a file is a cloud file placeholder (OneDrive and
+ * others) from lstat() but not from the FSCache. Expose placeholders, so
+ * that both see the same attributes.
+ */
+static void expose_placeholders(void)
+{
+	DECLARE_PROC_ADDR(ntdll.dll, CHAR, NTAPI,
+			  RtlSetProcessPlaceholderCompatibilityMode, CHAR);
+
+	/* 2: PHCM_EXPOSE_PLACEHOLDERS */
+	if (INIT_PROC_ADDR(RtlSetProcessPlaceholderCompatibilityMode))
+		RtlSetProcessPlaceholderCompatibilityMode(2);
+}
+
 static BOOL WINAPI handle_ctrl_c(DWORD ctrl_type)
 {
 	if (ctrl_type != CTRL_C_EVENT)
@@ -4480,6 +4495,7 @@ int wmain(int argc, const wchar_t **wargv)
 
 	maybe_redirect_std_handles();
 	adjust_symlink_flags();
+	expose_placeholders();
 	fsync_object_files = 1;
 
 	/* determine size of argv and environ conversion buffer */
