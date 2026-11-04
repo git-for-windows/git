@@ -3465,6 +3465,11 @@ static int remove_dir_recurse(struct strbuf *path, int flag, int *kept_up)
 	}
 
 	if (is_mount_point(path)) {
+#ifdef CAN_UNLINK_MOUNT_POINTS
+		/* Remove the junction itself, as `git clean` does. */
+		if (!only_empty && !keep_toplevel && !unlink(path->buf))
+			return 0;
+#endif
 		/* Do not descend and nuke a mount point or junction. */
 		if (kept_up)
 			*kept_up = 1;
