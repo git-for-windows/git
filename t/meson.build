@@ -1155,6 +1155,7 @@ benchmarks = [
   'perf/p0071-sort.sh',
   'perf/p0090-cache-tree.sh',
   'perf/p0100-globbing.sh',
+  'perf/p0213-trace2-ancestry.sh',
   'perf/p1006-cat-file.sh',
   'perf/p1400-update-ref.sh',
   'perf/p1450-fsck.sh',
