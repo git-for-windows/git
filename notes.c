@@ -850,7 +850,7 @@ int combine_notes_concatenate(struct object_id *cur_oid,
 
 	/* create a new blob object from buf */
 	ret = odb_write_object(the_repository->objects, buf,
-			       cast_size_t_to_ulong(buf_len), OBJ_BLOB, cur_oid);
+			       buf_len, OBJ_BLOB, cur_oid);
 	free(buf);
 	return ret;
 }
