@@ -70,3 +70,76 @@ void test_mingw__errno_translation(void)
     cl_skip();
 #endif
 }
+
+void test_mingw__process_creation_time(void)
+{
+#if defined(GIT_WINDOWS_NATIVE)
+	FILETIME creation_time, observed_creation_time, now;
+
+	cl_assert(mingw_process_started_after(GetCurrentProcess(), NULL,
+					     &creation_time));
+	cl_assert(mingw_process_started_after(GetCurrentProcess(),
+					     &creation_time,
+					     &observed_creation_time));
+	cl_assert_equal_i(CompareFileTime(&creation_time,
+					     &observed_creation_time), 0);
+
+	GetSystemTimeAsFileTime(&now);
+	cl_assert(!mingw_process_started_after(GetCurrentProcess(),
+					     &now, NULL));
+#else
+	cl_skip();
+#endif
+}
+
+#if defined(GIT_WINDOWS_NATIVE)
+static PROCESS_INFORMATION child_process;
+static int child_process_running;
+
+static void cleanup_child_process(void *unused)
+{
+	(void)unused;
+	if (child_process_running) {
+		TerminateProcess(child_process.hProcess, 0);
+		WaitForSingleObject(child_process.hProcess, INFINITE);
+		CloseHandle(child_process.hThread);
+		CloseHandle(child_process.hProcess);
+		child_process_running = 0;
+	}
+}
+#endif
+
+void test_mingw__process_child_identity(void)
+{
+#if defined(GIT_WINDOWS_NATIVE)
+	STARTUPINFOA startup_info = { .cb = sizeof(startup_info) };
+	FILETIME parent_creation_time, time_after_child, child_creation_time;
+	char command[] = "ping.exe -n 5 127.0.0.1";
+
+	cl_assert(CreateProcessA(NULL, command, NULL, NULL, FALSE,
+				       CREATE_NO_WINDOW, NULL, NULL, &startup_info,
+				       &child_process));
+	child_process_running = 1;
+	cl_set_cleanup(cleanup_child_process, NULL);
+	Sleep(100);
+	GetSystemTimeAsFileTime(&time_after_child);
+
+	/* A child cannot predate the process that is claimed as its parent. */
+	cl_assert(!mingw_process_is_child_of(child_process.hProcess,
+					       GetCurrentProcessId(),
+					       &time_after_child, NULL));
+
+	cl_assert(mingw_process_started_after(GetCurrentProcess(), NULL,
+					     &parent_creation_time));
+	cl_assert(mingw_process_is_child_of(child_process.hProcess,
+					       GetCurrentProcessId(),
+					       &parent_creation_time,
+					       &child_creation_time));
+	cl_assert(CompareFileTime(&child_creation_time,
+					  &parent_creation_time) >= 0);
+	cl_assert(!mingw_process_is_child_of(child_process.hProcess, 0,
+					       &parent_creation_time, NULL));
+#else
+	cl_skip();
+#endif
+}
