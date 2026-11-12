@@ -1618,6 +1618,8 @@ void http_init(struct remote *remote, const char *url, int proactive_auth)
 
 	http_auth_methods = http_auth_any;
 
+	http_auth_methods = http_auth_any;
+
 	curl_default = get_curl_handle();
 }
 
@@ -2668,6 +2670,13 @@ static int http_request_recoverable(const char *url,
 		}
 		if (ret == HTTP_REAUTH)
 			http_reauth_prepare(1);
+
+		/*
+		 * Re-enable NTLM auth if the helper allows it and we would
+		 * otherwise suppress authentication via NTLM.
+		 */
+		if (http_auth.ntlm_suppressed && http_auth.ntlm_allow)
+			http_auth_methods |= CURLAUTH_NTLM;
 
 		/*
 		 * Re-enable NTLM auth if the helper allows it and we would

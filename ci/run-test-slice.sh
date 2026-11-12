@@ -13,4 +13,7 @@ handle_failed_tests
 # Run the git subtree tests only if main tests succeeded
 test 0 != "$1" || make -C contrib/subtree test
 
+# Run the git subtree tests only if main tests succeeded
+test 0 != "$1" || make -C contrib/subtree test
+
 check_unignored_build_artifacts
