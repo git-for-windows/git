@@ -1519,7 +1519,7 @@ static inline void time_t_to_filetime(time_t t, FILETIME *ft)
 int mingw_utime (const char *file_name, const struct utimbuf *times)
 {
 	FILETIME mft, aft;
-	int rc;
+	int rc, restore_attrs;
 	DWORD attrs;
 	wchar_t wfilename[MAX_LONG_PATH];
 	HANDLE osfilehandle;
@@ -1527,23 +1527,29 @@ int mingw_utime (const char *file_name, const struct utimbuf *times)
 	if (xutftowcs_long_path(wfilename, file_name) < 0)
 		return -1;
 
-	/* must have write permission */
+	/*
+	 * FILE_WRITE_ATTRIBUTES is usually granted on read-only files;
+	 * clear the read-only attribute only if the open is refused.
+	 */
 	attrs = GetFileAttributesW(wfilename);
-	if (attrs != INVALID_FILE_ATTRIBUTES &&
-	    (attrs & FILE_ATTRIBUTE_READONLY)) {
-		/* ignore errors here; open() will report them */
+	for (restore_attrs = 0; ; restore_attrs = 1) {
+		osfilehandle = CreateFileW(wfilename,
+					   FILE_WRITE_ATTRIBUTES,
+					   FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+					   NULL,
+					   OPEN_EXISTING,
+					   (attrs != INVALID_FILE_ATTRIBUTES &&
+						(attrs & FILE_ATTRIBUTE_DIRECTORY)) ?
+						FILE_FLAG_BACKUP_SEMANTICS : 0,
+					   NULL);
+		if (osfilehandle != INVALID_HANDLE_VALUE || restore_attrs ||
+		    GetLastError() != ERROR_ACCESS_DENIED ||
+		    attrs == INVALID_FILE_ATTRIBUTES ||
+		    !(attrs & FILE_ATTRIBUTE_READONLY))
+			break;
+		/* ignore errors here; CreateFileW() will report them */
 		SetFileAttributesW(wfilename, attrs & ~FILE_ATTRIBUTE_READONLY);
 	}
-
-	osfilehandle = CreateFileW(wfilename,
-				   FILE_WRITE_ATTRIBUTES,
-				   FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-				   NULL,
-				   OPEN_EXISTING,
-				   (attrs != INVALID_FILE_ATTRIBUTES &&
-					(attrs & FILE_ATTRIBUTE_DIRECTORY)) ?
-					FILE_FLAG_BACKUP_SEMANTICS : 0,
-				   NULL);
 	if (osfilehandle == INVALID_HANDLE_VALUE) {
 		errno = err_win_to_posix(GetLastError());
 		rc = -1;
@@ -1568,8 +1574,7 @@ int mingw_utime (const char *file_name, const struct utimbuf *times)
 		CloseHandle(osfilehandle);
 
 revert_attrs:
-	if (attrs != INVALID_FILE_ATTRIBUTES &&
-	    (attrs & FILE_ATTRIBUTE_READONLY)) {
+	if (restore_attrs) {
 		/* ignore errors again */
 		SetFileAttributesW(wfilename, attrs);
 	}
