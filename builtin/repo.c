@@ -1182,6 +1182,10 @@ static int count_objects(const char *path, struct oid_array *oids,
 		summary.disk_size += disk;
 		summary.inflated_size += inflated;
 
+		summary.nr++;
+		summary.disk_size += disk;
+		summary.inflated_size += inflated;
+
 		switch (type) {
 		case OBJ_TAG:
 			stats->type_counts.tags++;
@@ -1229,6 +1233,22 @@ static int count_objects(const char *path, struct oid_array *oids,
 			break;
 		default:
 			BUG("invalid object type");
+		}
+	}
+
+	if (data->top_nr) {
+		struct top_paths *top = NULL;
+
+		if (type == OBJ_TREE)
+			top = &stats->top_trees;
+		else if (type == OBJ_BLOB)
+			top = &stats->top_blobs;
+
+		if (top) {
+			maybe_insert_into_top_paths(&top->by_count, &summary);
+			maybe_insert_into_top_paths(&top->by_disk, &summary);
+			maybe_insert_into_top_paths(&top->by_inflated,
+						    &summary);
 		}
 	}
 
