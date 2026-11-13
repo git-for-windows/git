@@ -38,8 +38,12 @@ enum pc_status parallel_checkout_status(void)
 	return parallel_checkout.status;
 }
 
-static const int DEFAULT_THRESHOLD_FOR_PARALLELISM = 100;
-static const int DEFAULT_NUM_WORKERS = 1;
+#ifndef PARALLEL_CHECKOUT_DEFAULT_THRESHOLD
+#define PARALLEL_CHECKOUT_DEFAULT_THRESHOLD 100
+#endif
+#ifndef PARALLEL_CHECKOUT_DEFAULT_WORKERS
+#define PARALLEL_CHECKOUT_DEFAULT_WORKERS 1
+#endif
 
 void get_parallel_checkout_configs(int *num_workers, int *threshold)
 {
@@ -58,12 +62,13 @@ void get_parallel_checkout_configs(int *num_workers, int *threshold)
 	}
 
 	if (repo_config_get_int(the_repository, "checkout.workers", num_workers))
-		*num_workers = DEFAULT_NUM_WORKERS;
+		*num_workers = PARALLEL_CHECKOUT_DEFAULT_WORKERS < online_cpus() ?
+			       PARALLEL_CHECKOUT_DEFAULT_WORKERS : online_cpus();
 	else if (*num_workers < 1)
 		*num_workers = online_cpus();
 
 	if (repo_config_get_int(the_repository, "checkout.thresholdForParallelism", threshold))
-		*threshold = DEFAULT_THRESHOLD_FOR_PARALLELISM;
+		*threshold = PARALLEL_CHECKOUT_DEFAULT_THRESHOLD;
 }
 
 void init_parallel_checkout(void)
