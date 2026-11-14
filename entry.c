@@ -15,6 +15,8 @@
 #include "fsmonitor.h"
 #include "entry.h"
 #include "parallel-checkout.h"
+#include "trace2.h"
+#include "wrapper.h"
 
 static void create_directories(const char *path, int path_len,
 			       const struct checkout *state)
@@ -126,6 +128,105 @@ static int open_output_fd(char *path, const struct cache_entry *ce, int to_tempf
 	} else {
 		return create_file(path, !symlink ? ce->ce_mode : 0666);
 	}
+}
+
+static int conversion_attrs_equal(const struct conv_attrs *a,
+				  const struct conv_attrs *b)
+{
+	return a->drv == b->drv &&
+		a->crlf_action == b->crlf_action &&
+		a->ident == b->ident &&
+		(!a->working_tree_encoding == !b->working_tree_encoding) &&
+		(!a->working_tree_encoding ||
+		 !strcmp(a->working_tree_encoding, b->working_tree_encoding));
+}
+
+static struct cache_entry *copy_source_entry(const struct cache_entry *ce,
+					     const struct conv_attrs *ca,
+					     const struct checkout *state)
+{
+	struct index_state *istate;
+	struct cache_entry *source;
+	struct conv_attrs source_ca;
+	int pos;
+
+	if (!state->copy_source || !ca || !S_ISREG(ce->ce_mode))
+		return NULL;
+
+	istate = state->copy_source->istate;
+	pos = index_name_pos(istate, ce->name, ce_namelen(ce));
+	if (pos < 0)
+		return NULL;
+	source = istate->cache[pos];
+	if (!S_ISREG(source->ce_mode) || ce_skip_worktree(source) ||
+	    !oideq(&source->oid, &ce->oid))
+		return NULL;
+	convert_attrs(istate, &source_ca, ce->name);
+	if (!conversion_attrs_equal(ca, &source_ca))
+		return NULL;
+
+	return source;
+}
+
+static int source_is_uptodate(const struct checkout_copy_source *source,
+			      const struct cache_entry *ce, struct stat *st)
+{
+	uint64_t mtime;
+
+	if (match_stat_data(&ce->ce_stat_data, st))
+		return 0;
+
+	mtime = (uint64_t)st->st_mtime * 1000000000 + ST_MTIME_NSEC(*st);
+	return mtime < source->refreshed_at;
+}
+
+static int try_copy_on_write(const struct cache_entry *ce,
+			     const struct cache_entry *source_ce, char *path,
+			     const struct checkout *state,
+			     int *fstat_done, struct stat *statbuf)
+{
+	struct strbuf source = STRBUF_INIT;
+	struct stat st, st_after;
+	int src_fd = -1, dst_fd = -1;
+	int ret = 0;
+
+	strbuf_addf(&source, "%s/%s", state->copy_source->worktree, ce->name);
+	src_fd = open_nofollow(source.buf, O_RDONLY);
+	if (src_fd < 0 || fstat(src_fd, &st) || !S_ISREG(st.st_mode) ||
+	    !source_is_uptodate(state->copy_source, source_ce, &st))
+		goto done;
+
+	dst_fd = open_output_fd(path, ce, 0);
+	if (dst_fd < 0)
+		goto done;
+	if (file_copy_on_write(dst_fd, src_fd, st.st_size) ||
+	    fstat(src_fd, &st_after) ||
+	    !source_is_uptodate(state->copy_source, source_ce, &st_after)) {
+		close(dst_fd);
+		dst_fd = -1;
+		unlink(path);
+		goto done;
+	}
+	if (close(dst_fd)) {
+		dst_fd = -1;
+		unlink(path);
+		goto done;
+	}
+	dst_fd = -1;
+
+	if (state->refresh_cache)
+		*fstat_done = !lstat(path, statbuf);
+	trace2_data_string("checkout", the_repository,
+			   "copy_on_write", ce->name);
+	ret = 1;
+
+done:
+	if (dst_fd >= 0)
+		close(dst_fd);
+	if (src_fd >= 0)
+		close(src_fd);
+	strbuf_release(&source);
+	return ret;
 }
 
 int fstat_checkout_output(int fd, const struct checkout *state, struct stat *st)
@@ -294,6 +395,7 @@ void update_ce_after_write(const struct checkout *state, struct cache_entry *ce,
 
 /* Note: ca is used (and required) iff the entry refers to a regular file. */
 static int write_entry(struct cache_entry *ce, char *path, struct conv_attrs *ca,
+		       const struct cache_entry *source_ce,
 		       const struct checkout *state, int to_tempfile,
 		       int *nr_checkouts)
 {
@@ -313,7 +415,14 @@ static int write_entry(struct cache_entry *ce, char *path, struct conv_attrs *ca
 	clone_checkout_metadata(&meta, &state->meta, &ce->oid);
 
 	if (ce_mode_s_ifmt == S_IFREG) {
-		struct stream_filter *filter = get_stream_filter_ca(ca, &ce->oid);
+		struct stream_filter *filter;
+
+		if (source_ce &&
+		    try_copy_on_write(ce, source_ce, path, state,
+				      &fstat_done, &st))
+			goto finish;
+
+		filter = get_stream_filter_ca(ca, &ce->oid);
 		if (filter &&
 		    !streaming_write_entry(ce, path, filter,
 					   state, to_tempfile,
@@ -502,6 +611,7 @@ int checkout_entry_ca(struct cache_entry *ce, struct conv_attrs *ca,
 	static struct strbuf path = STRBUF_INIT;
 	struct stat st;
 	struct conv_attrs ca_buf;
+	struct cache_entry *source_ce = NULL;
 
 	if (ce->ce_flags & CE_WT_REMOVE) {
 		if (topath)
@@ -519,7 +629,8 @@ int checkout_entry_ca(struct cache_entry *ce, struct conv_attrs *ca,
 			convert_attrs(state->istate, &ca_buf, ce->name);
 			ca = &ca_buf;
 		}
-		return write_entry(ce, topath, ca, state, 1, nr_checkouts);
+		return write_entry(ce, topath, ca, NULL, state, 1,
+				   nr_checkouts);
 	}
 
 	strbuf_reset(&path);
@@ -602,10 +713,12 @@ int checkout_entry_ca(struct cache_entry *ce, struct conv_attrs *ca,
 		ca = &ca_buf;
 	}
 
-	if (!enqueue_checkout(ce, ca, nr_checkouts))
+	source_ce = copy_source_entry(ce, ca, state);
+	if (!source_ce && !enqueue_checkout(ce, ca, nr_checkouts))
 		return 0;
 
-	return write_entry(ce, path.buf, ca, state, 0, nr_checkouts);
+	return write_entry(ce, path.buf, ca, source_ce, state, 0,
+			   nr_checkouts);
 }
 
 void unlink_entry(const struct cache_entry *ce, const char *super_prefix)

@@ -223,6 +223,14 @@ static inline int noop_core_config(const char *var UNUSED,
 #define platform_core_config noop_core_config
 #endif
 
+#ifndef copy_on_write_supported
+#define copy_on_write_supported 0
+#endif
+
+#ifndef file_copy_on_write
+#define file_copy_on_write(dst_fd, src_fd, size) (errno = ENOSYS, -1)
+#endif
+
 #ifndef has_dos_drive_prefix
 static inline int git_has_dos_drive_prefix(const char *path UNUSED)
 {
