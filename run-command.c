@@ -291,7 +291,16 @@ static const char **prepare_shell_cmd(struct strvec *out, const char **argv)
 		BUG("shell command is empty");
 
 	if (strcspn(argv[0], "|&;<>()$`\\\"' \t\n*?[#~=%") != strlen(argv[0])) {
+#ifndef GIT_WINDOWS_NATIVE
 		strvec_push_nodup(out, git_shell_path());
+#else
+		/*
+		 * Leave it to the spawn to find `sh`, as `git_shell_path()`
+		 * does, but keep `argv[0]` as "sh": a BusyBox `sh` applet
+		 * found in its place runs only if it's called by that name.
+		 */
+		strvec_push(out, "sh");
+#endif
 		strvec_push(out, "-c");
 
 		/*
