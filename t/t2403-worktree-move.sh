@@ -277,7 +277,8 @@ test_expect_success MINGW 'worktree remove does not traverse mount points' '
 	git worktree add --detach wt-junction &&
 	cmd //c "mklink /j wt-junction\\mnt target" &&
 	git worktree remove --force wt-junction &&
-	test_path_is_file target/dont-remove-me
+	test_path_is_file target/dont-remove-me &&
+	test_path_is_missing wt-junction
 '
 
 test_done
