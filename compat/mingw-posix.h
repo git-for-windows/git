@@ -374,6 +374,26 @@ static inline void filetime_to_timespec(const FILETIME *ft, struct timespec *ts)
 	ts->tv_nsec = (hnsec % 10000000) * 100;
 }
 
+/*
+ * st_ctim: ChangeTime if it is later than both CreationTime and
+ * LastWriteTime, CreationTime otherwise. Always CreationTime for reparse
+ * points, such as cloud file placeholders, whose ChangeTime moves when
+ * they are pinned, unpinned, hydrated or dehydrated.
+ */
+static inline void filetimes_to_ctim(const LARGE_INTEGER *change,
+				     const LARGE_INTEGER *creation,
+				     const LARGE_INTEGER *last_write,
+				     DWORD attributes, struct timespec *ts)
+{
+	const LARGE_INTEGER *t = creation;
+
+	if (!(attributes & FILE_ATTRIBUTE_REPARSE_POINT) &&
+	    change->QuadPart > creation->QuadPart &&
+	    change->QuadPart > last_write->QuadPart)
+		t = change;
+	filetime_to_timespec((const FILETIME *)t, ts);
+}
+
 struct mingw_stat {
     _dev_t st_dev;
     _ino_t st_ino;
