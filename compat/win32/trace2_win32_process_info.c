@@ -6,30 +6,33 @@
 #include "../../strvec.h"
 #include "../../trace2.h"
 #include "lazyload.h"
+#include "trace2_win32_process_info.h"
 #include <psapi.h>
 #include <tlhelp32.h>
 
 /*
  * An arbitrarily chosen value to limit the size of the ancestor
- * array built in git_processes().
+ * array built in trace2_win32_get_ancestry().
  */
 #define NR_PIDS_LIMIT 10
 
-/*
- * Find the process data for the given PID in the given snapshot
- * and update the PROCESSENTRY32 data.
- */
-static int find_pid(DWORD pid, HANDLE hSnapshot, PROCESSENTRY32 *pe32)
+static void snapshot_processes(struct hashmap *processes, HANDLE hSnapshot)
 {
-	pe32->dwSize = sizeof(PROCESSENTRY32);
+	PROCESSENTRY32 pe32;
 
-	if (Process32First(hSnapshot, pe32)) {
+	pe32.dwSize = sizeof(pe32);
+
+	if (Process32First(hSnapshot, &pe32)) {
 		do {
-			if (pe32->th32ProcessID == pid)
-				return 1;
-		} while (Process32Next(hSnapshot, pe32));
+			struct trace2_win32_process_entry *entry;
+
+			FLEX_ALLOC_STR(entry, name, pe32.szExeFile);
+			/* The 32-bit PID is an exact key, not a lossy hash. */
+			hashmap_entry_init(&entry->ent, pe32.th32ProcessID);
+			entry->parent_pid = pe32.th32ParentProcessID;
+			hashmap_add(processes, &entry->ent);
+		} while (Process32Next(hSnapshot, &pe32));
 	}
-	return 0;
 }
 
 /*
@@ -41,8 +44,8 @@ static int find_pid(DWORD pid, HANDLE hSnapshot, PROCESSENTRY32 *pe32)
  *       and that seems rather expensive (on top of the cost of
  *       getting the snapshot).
  *
- * Note: we compute the set of parent processes by walking the PPID
- *       link in each visited PROCESSENTRY32 record.  This search
+ * Note: we compute the set of parent processes by walking the parent PID
+ *       link in each cached process entry.  This search
  *       stops when an ancestor process is not found in the snapshot
  *       (because it exited before the current or intermediate parent
  *       process exited).
@@ -69,18 +72,19 @@ static int find_pid(DWORD pid, HANDLE hSnapshot, PROCESSENTRY32 *pe32)
  * simple and avoid the alloc/realloc overhead.  It is OK if we
  * truncate the search and return a partial answer.
  */
-static void get_processes(struct strvec *names, HANDLE hSnapshot)
+void trace2_win32_get_ancestry(struct strvec *names,
+			     const struct hashmap *processes, DWORD pid)
 {
-	PROCESSENTRY32 pe32;
-	DWORD pid;
+	struct trace2_win32_process_entry *entry;
 	DWORD pid_list[NR_PIDS_LIMIT];
 	int k, nr_pids = 0;
 
-	pid = GetCurrentProcessId();
-	while (find_pid(pid, hSnapshot, &pe32)) {
+	while ((entry = hashmap_get_entry_from_hash(processes, pid, NULL,
+					struct trace2_win32_process_entry,
+					ent))) {
 		/* Only report parents. Omit self from the output. */
 		if (nr_pids)
-			strvec_push(names, pe32.szExeFile);
+			strvec_push(names, entry->name);
 
 		/* Check for cycle in snapshot. (Yes, it happened.) */
 		for (k = 0; k < nr_pids; k++)
@@ -96,7 +100,7 @@ static void get_processes(struct strvec *names, HANDLE hSnapshot)
 
 		pid_list[nr_pids++] = pid;
 
-		pid = pe32.th32ParentProcessID;
+		pid = entry->parent_pid;
 	}
 }
 
@@ -108,8 +112,15 @@ static void get_ancestry(struct strvec *names)
 	HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 
 	if (hSnapshot != INVALID_HANDLE_VALUE) {
-		get_processes(names, hSnapshot);
+		struct hashmap processes;
+
+		hashmap_init(&processes, NULL, NULL, 0);
+		snapshot_processes(&processes, hSnapshot);
 		CloseHandle(hSnapshot);
+		trace2_win32_get_ancestry(names, &processes,
+					 GetCurrentProcessId());
+		hashmap_clear_and_free(&processes,
+				      struct trace2_win32_process_entry, ent);
 	}
 }
 

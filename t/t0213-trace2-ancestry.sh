@@ -153,6 +153,21 @@ test_expect_success TRACE2_ANCESTRY 'event: git alias chain, 2 levels' '
 	test_cmp expect actual
 '
 
+test_expect_success MINGW,TRACE2_ANCESTRY 'event: ancestry arrays match' '
+	test_when_finished "rm -f trace.event actual expect" &&
+	test-tool trace2 400ancestry event "$(pwd)/trace.event" \
+		git version &&
+	sed -n "s/.*\"ancestry\":\(\[.*\]\)}/\1/p" \
+		trace.event >actual &&
+	sed -n "s/.*\"key\":\"windows\/ancestry\".*\"value\":\(\[.*\]\)}/\1/p" \
+		trace.event >expect &&
+	test_line_count = 1 actual &&
+	test_cmp expect actual &&
+	filter_ancestry_event <trace.event >actual &&
+	printf "%s\n" "$SH_TT" >expect &&
+	test_cmp expect actual
+'
+
 # Use 004child to add a test-tool layer, creating a three-level chain:
 #
 #   test-tool (400ancestry)
