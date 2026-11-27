@@ -21,6 +21,26 @@ PATH='@BUILD_DIR@/bin-wrappers:'"$PATH"
 
 export MERGE_TOOLS_DIR GIT_EXEC_PATH GITPERLLIB PATH GIT_TEXTDOMAINDIR
 
+if test "$GIT_TEST_WSL" = 1
+then
+	export Path="$PATH"
+	if test -n "$TEST_OUTPUT_DIRECTORY"
+	then
+		safe=$(wslpath -m "$TEST_OUTPUT_DIRECTORY") || exit
+		safe=$(printf '%s' "$safe" | sed "s/'/'\\\\''/g") || exit
+		params="${GIT_CONFIG_PARAMETERS:+$GIT_CONFIG_PARAMETERS }"
+		export GIT_CONFIG_PARAMETERS="$params'safe.directory'='$safe/*'"
+	fi
+	WSLENV="$WSLENV:HOME/p:GITPERLLIB/pl:LANG:LC_ALL:TZ:TERM"
+	WSLENV="$WSLENV:EDITOR:PAGER:COLUMNS:$(env -0 | sed -zE '
+		/^(TEST|GIT)_/!d
+		s/=.*//
+		s/^GIT_(EXEC_PATH|TEMPLATE_DIR|TEXTDOMAINDIR)$/&\/p/
+		s/^GIT_CEILING_DIRECTORIES$/&\/pl/
+	' | tr '\0' :)"
+	export WSLENV
+fi
+
 case "$GIT_DEBUGGER" in
 '')
 	exec "@PROG@" "$@"
