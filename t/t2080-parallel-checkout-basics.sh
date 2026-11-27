@@ -356,4 +356,32 @@ test_expect_success MINGW 'checkout caps workers at the poll limit' '
 	verify_checkout many-workers
 '
 
+test_expect_success 'default workers and threshold' '
+	git init default &&
+	(
+		cd default &&
+		for i in $(test_seq 500)
+		do
+			echo $i >file$i || return 1
+		done &&
+		git add . &&
+		git commit -m files &&
+
+		workers=0 &&
+		if test_have_prereq MINGW && test $(test-tool online-cpus) -gt 1
+		then
+			workers=$(test-tool online-cpus) &&
+			if test $workers -gt 4
+			then
+				workers=4
+			fi
+		fi &&
+
+		rm file* &&
+		test_checkout_workers 0 git checkout -- ":!file1" &&
+		rm file* &&
+		test_checkout_workers $workers git checkout -- .
+	)
+'
+
 test_done
